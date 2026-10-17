@@ -25,7 +25,10 @@ RUN npm run build && npm prune --omit=dev
 
 # ---------------------------------------------------------------- runtime
 FROM ${NODE_IMAGE} AS runtime
+# Commit built (CI: build-arg VERSION), shown in the interface and given by /api/health
+ARG VERSION=dev
 ENV NODE_ENV=production \
+    APP_VERSION=${VERSION} \
     TZ=Europe/Paris
 
 RUN apt-get update \

@@ -84,6 +84,17 @@ h1 {
   margin-left: auto;
 }
 
+/* Version of colibri-rent-book running, at the right of the bar (after the choice of building when there is one) */
+.version {
+  margin-left: auto;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.choix-immeuble + .version {
+  margin-left: 0.8rem;
+}
+
 .barre nav a.router-link-active {
   font-weight: 600;
 }

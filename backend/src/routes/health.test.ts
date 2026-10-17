@@ -23,7 +23,8 @@ describe('GET /api/health', { skip: skipWithoutDatabase }, () => {
   test('answers ok', async () => {
     const response = await app.inject({ method: 'GET', url: '/api/health' })
     assert.equal(response.statusCode, 200)
-    assert.deepEqual(response.json(), { status: 'ok' })
+    assert.equal(response.json().status, 'ok')
+    assert.match(response.json().version, /^(dev|[0-9a-f]{7})$/)
   })
 
   test('reaches the database', async () => {

@@ -519,6 +519,7 @@ export const api = {
     return answer<FactureDetail>(response)
   },
 
+  sante: () => request<{ status: string, version: string }>('GET', '/health'),
   fournisseurs: () => request<Fournisseur[]>('GET', '/fournisseurs'),
   fournisseur: (id: number) => request<Fournisseur>('GET', `/fournisseurs/${id}`),
   modifierFournisseur: (id: number, modif: { confidentiel: boolean }) => request<Fournisseur>('PATCH', `/fournisseurs/${id}`, modif),

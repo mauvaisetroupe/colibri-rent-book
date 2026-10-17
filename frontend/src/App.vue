@@ -1,9 +1,17 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
 
+import { api } from './api'
 import { useImmeuble } from './immeuble'
 
 const { immeubles, immeubleId } = useImmeuble()
+
+// The commit of colibri-rent-book running (shown at the right of the bar, linked to GitHub); « dev » in development
+const version = ref<string | null>(null)
+onMounted(async () => {
+  version.value = (await api.sante().catch(() => null))?.version ?? null
+})
 </script>
 
 <template>
@@ -39,7 +47,11 @@ const { immeubles, immeubleId } = useImmeuble()
     <select v-if="immeubles.length > 1" v-model="immeubleId" class="choix-immeuble" aria-label="Immeuble">
       <option v-for="i in immeubles" :key="i.id" :value="i.id">{{ i.nom }}</option>
     </select>
-    <span v-else-if="immeubles[0]" class="choix-immeuble discret">{{ immeubles[0].nom }}</span>
+    <a
+      v-if="version && version !== 'dev'" class="version discret" title="Version de colibri-rent-book en service"
+      :href="`https://github.com/mauvaisetroupe/colibri-rent-book/commit/${version}`" target="_blank"
+    >version {{ version }}</a>
+    <span v-else-if="version" class="version discret">développement</span>
   </header>
   <main>
     <RouterView />
