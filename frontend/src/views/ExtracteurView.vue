@@ -262,6 +262,9 @@ async function tester() {
 
 const reussies = computed(() => [...(comparaisons.value?.values() ?? [])].filter((c) => c.differences.length === 0).length)
 const enEchec = computed(() => [...(comparaisons.value?.values() ?? [])].filter((c) => c.differences.length > 0))
+// Identical, but completed by hand (total typed, line added): shown, not failed
+const avecRemarques = computed(() =>
+  [...(comparaisons.value?.values() ?? [])].filter((c) => c.differences.length === 0 && c.remarques.length > 0))
 
 /** ✓ or ✗ in front of an invoice of the selector, once tested. */
 function marque(f: FactureAvecPdf) {
@@ -348,6 +351,11 @@ async function enregistrer() {
       <li v-for="c in enEchec" :key="c.facture.id">
         <a href="#" @click.prevent="exempleFacture(c.facture)">✗ {{ c.facture.numero }}</a>
         ({{ c.facture.statut === 'validee' ? 'validée' : 'brouillon' }}) : {{ c.differences.join(' ; ') }}
+      </li>
+    </ul>
+    <ul v-if="avecRemarques.length" class="echecs remarques">
+      <li v-for="c in avecRemarques" :key="c.facture.id">
+        <a href="#" @click.prevent="exempleFacture(c.facture)">✓ {{ c.facture.numero }}</a> : {{ c.remarques.join(' ; ') }}
       </li>
     </ul>
     <div class="champs reglages">
@@ -452,6 +460,10 @@ async function enregistrer() {
 </template>
 
 <style scoped>
+.echecs.remarques {
+  color: var(--discret);
+}
+
 .echecs {
   margin: 0.3rem 0 0.6rem;
   padding-left: 1.2rem;
