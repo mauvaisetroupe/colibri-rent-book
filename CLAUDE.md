@@ -13,8 +13,8 @@ première : `colibri`, privé), qui fixe la version de l'image et lance les test
   front), une classe TypeScript par fournisseur qui étend `InvoiceExtractor` (module `'extractor'`), saisie dans
   l'éditeur (écran « Fournisseurs »), enregistrée en base par version et jamais modifiée ; le serveur n'exécute jamais
   ce code
-- Justificatifs PDF : pdfmake (police Roboto embarquée), factures jointes en annexe par pdf-lib, sauf celles d'un
-  fournisseur confidentiel (ADR 0014) ; pas de navigateur côté serveur
+- Justificatifs et procès-verbaux PDF : pdfmake (police Roboto embarquée, réglée dans `pdfmake.ts`), factures jointes
+  en annexe par pdf-lib, sauf celles d'un fournisseur confidentiel (ADR 0014) ; pas de navigateur côté serveur
 - Image : `Dockerfile`, publiée par la CI sur GHCR à chaque push sur `main` (étiquette = commit court, et `latest`)
 - `backend/` et `frontend/` en paquets npm indépendants ; `schema.sql` complet + `migrations/NNN_*.sql` appliquées à
   la main ; ADR dans `docs/adr/` ; Conventional Commits ; pas de Prettier (pas de point-virgule, guillemets simples)
@@ -25,8 +25,9 @@ première : `colibri`, privé), qui fixe la version de l'image et lance les test
 ## Ce qui existe
 
 - `backend/src/` : `app.ts` (routes), `routes/` (factures, contrôle, extracteurs, fournisseurs, immeubles, séjours,
-  décompte, régularisations, paiements, fiscal, santé), `statements.ts` (lectures SQL du décompte), `justificatif.ts`
-  (données) et `justificatifPdf.ts` (PDF), `mails.ts`, `fiscal.ts`, `periods.ts` (**seule** conversion `daterange` ↔
+  décompte, régularisations, paiements, fiscal, travaux (ADR 0015), société et assemblées (ADR 0016), santé),
+  `statements.ts` (lectures SQL du décompte), `justificatif.ts` (données) et `justificatifPdf.ts` (PDF), `mails.ts`,
+  `fiscal.ts`, `assemblees.ts` (quorum, votes, modèle de l'assemblée annuelle) et `pvPdf.ts` (procès-verbal), `periods.ts` (**seule** conversion `daterange` ↔
   dates incluses), `invoices/checks.ts` (contrôles du § 6, sans dépendance à Node), `pdfStorage.ts` (PDF par empreinte).
   Le moteur de répartition est en SQL (`repartition`, `decompte`, `synthese`) : ne pas le réimplémenter en TypeScript.
 - `backend/seed/extracteurs.sql` : extracteurs livrés (EDF, ENGIE), généré par `npm run extracteurs:sql` dans
@@ -43,6 +44,9 @@ première : `colibri`, privé), qui fixe la version de l'image et lance les test
   ou big.js, arrondi à l'affichage seulement).
 - Périodes : `daterange` semi-ouvert en base ; l'API et l'interface parlent en dates **incluses**.
 - Une facture n'est jamais modifiée silencieusement : l'utilisateur valide les lignes (`a_verifier` → `validee`).
+- Une assemblée close est au registre : la base refuse toute modification ou suppression (seul le PV signé se joint) ;
+  son procès-verbal se compose depuis l'instantané figé à la clôture (ADR 0016).
+- Aucune donnée réelle dans ce dépôt public : les noms des associés, la société, les travaux se saisissent à l'écran.
 - Les contrôles de facture du § 6 de la SPEC sont obligatoires (le total seul ne suffit pas).
 - **Tout est local** : aucun appel à une API de LLM ni à un service externe payant.
 - Les versions d'extracteurs enregistrées tournent avec la classe `InvoiceExtractor` du moment : y ajouter des aides,

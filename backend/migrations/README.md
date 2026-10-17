@@ -31,3 +31,5 @@ après une mise à jour qui les change ; le fichier est rejouable.
 | `008_affectation_ligne.sql` | 0013 | `recuperable` d'une ligne de facture remplacé par `affectation` (récupérable, propriétaire, hors immeuble) |
 | `009_extracteur.sql` | 0013 | Extracteurs de factures versionnés et figés, `facture.extracteur_id`, total d'un brouillon facultatif |
 | `010_fournisseur_confidentiel.sql` | 0014 | `fournisseur.confidentiel` : factures jamais jointes au justificatif |
+| `011_travaux.sql` | 0015 | Factures de travaux du propriétaire (nature, date de paiement, PDF), pour la synthèse fiscale |
+| `012_assemblees.sql` | 0016 | Société, associés et parts, assemblées générales (présences, résolutions), registre figé à la clôture |

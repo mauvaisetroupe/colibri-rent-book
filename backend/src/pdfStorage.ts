@@ -4,8 +4,8 @@ import { join } from 'node:path'
 
 import type { Pool } from 'pg'
 
-// Invoice PDFs archived on disk (STORAGE_DIR), named by the SHA-256 of their content: the same PDF is stored once.
-// facture.fichier_pdf holds the file name only.
+// PDFs archived on disk (STORAGE_DIR), named by the SHA-256 of their content: the same PDF is stored once.
+// facture.fichier_pdf, travaux.fichier_pdf and assemblee.pv_signe hold the file name only.
 
 export const isPdf = (content: Buffer) => content.subarray(0, 5).toString('latin1') === '%PDF-'
 
@@ -21,9 +21,13 @@ export async function storePdf(storageDir: string, content: Buffer) {
   return { fileName, path }
 }
 
-/** Deletes an archived PDF that no invoice refers to any more. */
+/** Deletes an archived PDF that no invoice, works nor signed minutes refer to any more. */
 export async function removeIfUnused(db: Pool, storageDir: string, fileName: string) {
-  const { rowCount } = await db.query('SELECT 1 FROM facture WHERE fichier_pdf = $1', [fileName])
+  const { rowCount } = await db.query(
+    `SELECT 1 FROM facture WHERE fichier_pdf = $1 UNION ALL SELECT 1 FROM travaux WHERE fichier_pdf = $1
+     UNION ALL SELECT 1 FROM assemblee WHERE pv_signe = $1`,
+    [fileName],
+  )
   if (!rowCount) {
     await rm(join(storageDir, fileName), { force: true })
   }

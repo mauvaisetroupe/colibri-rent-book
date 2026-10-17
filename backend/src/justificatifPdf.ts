@@ -1,30 +1,14 @@
-import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
-
 import Big from 'big.js'
 import { PDFDocument } from 'pdf-lib'
-import pdfmake from 'pdfmake'
 import type { Content, TDocumentDefinitions } from 'pdfmake/interfaces.js'
 
 import { euros, frenchDate } from './format.js'
 import type { Justificatif } from './justificatif.js'
+import pdfmake from './pdfmake.js'
 
 // PDF of the supporting document (SPEC § 8, ADR 0007, 0014): the statement of the tenant composed with pdfmake, a page
 // « Annexes » listing the invoices taken into account, then the PDFs of the invoices joined, put together with
-// pdf-lib. No browser. The font (Roboto) comes with pdfmake: the same rendering everywhere.
-
-const polices = join(dirname(createRequire(import.meta.url).resolve('pdfmake/package.json')), 'fonts', 'Roboto')
-pdfmake.setFonts({
-  Roboto: {
-    normal: join(polices, 'Roboto-Regular.ttf'),
-    bold: join(polices, 'Roboto-Medium.ttf'),
-    italics: join(polices, 'Roboto-Italic.ttf'),
-    bolditalics: join(polices, 'Roboto-MediumItalic.ttf'),
-  },
-})
-// The fonts only: no other file, no download
-pdfmake.setUrlAccessPolicy(() => false)
-pdfmake.setLocalAccessPolicy((path: string) => path.startsWith(polices))
+// pdf-lib. No browser.
 
 const ENERGIES: Record<string, string> = {
   gaz: 'Gaz', electricite: 'Électricité', eau: 'Eau', ordures_menageres: 'Ordures ménagères',

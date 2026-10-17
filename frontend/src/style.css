@@ -77,6 +77,7 @@ h1 {
 }
 
 .barre nav a {
+  white-space: nowrap;
   text-decoration: none;
 }
 

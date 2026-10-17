@@ -311,11 +311,33 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
   </details>
 
   <details>
+    <summary><strong>Travaux</strong> (tenue des comptes) : factures de travaux du propriétaire</summary>
+    <p>Écran Travaux : « + Ajouter des travaux » (fournisseur, description, nature, logement ou parties communes, date
+      de la facture, date du paiement, montant), puis « joindre » le PDF. Les travaux ne sont jamais répartis entre les
+      locataires : ils servent à la déclaration. Entretien, réparation et amélioration sont déductibles (2044, ligne
+      224) l'année de leur paiement ; construction et agrandissement non. La synthèse fiscale les reprend.</p>
+  </details>
+
+  <details>
     <summary><strong>7. Synthèse fiscale</strong> : pour la déclaration de revenus fonciers</summary>
     <p>Pour une année civile : charges de la vacance, charges restées impayées par les locataires partis dans l'année
       (sur tout leur séjour, versements reçus au 31 décembre), dépôts de garantie conservés pour charges. Au départ d'un
       locataire, saisir dans son séjour la part du dépôt conservée pour charges. Méthode à faire valider par
       l'expert-comptable.</p>
+  </details>
+
+  <details>
+    <summary><strong>SCI</strong> : société, associés, assemblées générales</summary>
+    <ol>
+      <li>« Société » : la dénomination, le capital, le siège, le RCS, et les associés avec leurs parts et
+        le gérant ; repris en tête des procès-verbaux.</li>
+      <li>« Assemblées » : « + Nouvelle assemblée » (annuelle : ordre du jour et résolutions habituelles proposés,
+        approbation des comptes, répartition du résultat au prorata des parts, quitus, pouvoirs). Dans le brouillon :
+        présences, texte des résolutions (compléter le montant du résultat), votes ; « Projet de procès-verbal »
+        pour le relire.</li>
+      <li><strong>Clore l'assemblée</strong> : elle reçoit le numéro suivant du registre et son procès-verbal est figé
+        (plus de modification possible). Imprimer le procès-verbal, le faire signer, puis « Joindre le PV signé ».</li>
+    </ol>
   </details>
 
   <details>

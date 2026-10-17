@@ -2,7 +2,7 @@
 import { onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
-import { api, ENERGIES, type SyntheseFiscale } from '../api'
+import { api, ENERGIES, NATURES_TRAVAUX, type SyntheseFiscale } from '../api'
 import { dateFr, euros } from '../format'
 import { useImmeuble } from '../immeuble'
 
@@ -118,6 +118,32 @@ const annees = [courante, courante - 1, courante - 2, courante - 3, courante - 4
       </tbody>
     </table>
     <p v-else class="discret">Aucun départ cette année.</p>
+
+    <h2>Travaux payés en {{ synthese.annee }}</h2>
+    <p class="discret">
+      Dépenses de réparation, d'entretien et d'amélioration (2044, ligne 224), par date de paiement (écran Travaux).
+      Construction et agrandissement ne sont pas déductibles.
+    </p>
+    <table v-if="synthese.travaux.length" class="liste">
+      <thead><tr><th>Payée le</th><th>Fournisseur</th><th>Description</th><th>Nature</th><th class="nombre">Montant</th></tr></thead>
+      <tbody>
+        <tr v-for="t in synthese.travaux" :key="t.id" class="sans-clic">
+          <td>{{ dateFr(t.date_paiement) }}</td>
+          <td>{{ t.fournisseur }}</td>
+          <td>{{ t.description }}{{ t.lot ? ` (${t.lot})` : '' }}</td>
+          <td :class="t.deductible ? '' : 'discret'">{{ NATURES_TRAVAUX[t.nature] }}{{ t.deductible ? '' : ' (non déductible)' }}</td>
+          <td class="nombre">{{ euros(t.montant_ttc) }}</td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr><td colspan="4"><strong>Travaux déductibles (2044, ligne 224)</strong></td><td class="nombre"><strong>{{ euros(synthese.total_travaux_deductibles) }}</strong></td></tr>
+      </tfoot>
+    </table>
+    <p v-else class="discret">Aucuns travaux payés cette année.</p>
+    <p v-if="synthese.travaux_non_payes.length" class="discret">
+      Non payés à ce jour (comptent l'année de leur paiement) :
+      {{ synthese.travaux_non_payes.map((t) => `${t.description} ${euros(t.montant_ttc)}`).join(' ; ') }}
+    </p>
 
     <h2>Pour information</h2>
     <h3>Lignes à la charge du propriétaire, factures de {{ synthese.annee }}</h3>

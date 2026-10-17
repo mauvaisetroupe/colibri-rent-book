@@ -3,6 +3,7 @@ import Fastify, { type FastifyServerOptions } from 'fastify'
 import type { Pool } from 'pg'
 
 
+import assembleeRoutes from './routes/assemblees.js'
 import controleRoutes from './routes/controle.js'
 import decompteRoutes from './routes/decompte.js'
 import extracteurRoutes from './routes/extracteurs.js'
@@ -14,6 +15,7 @@ import immeubleRoutes from './routes/immeubles.js'
 import paiementRoutes from './routes/paiements.js'
 import regularisationRoutes from './routes/regularisations.js'
 import sejourRoutes from './routes/sejours.js'
+import travauxRoutes from './routes/travaux.js'
 
 export type AppOptions = {
   db: Pool
@@ -38,6 +40,8 @@ export async function buildApp({ db, storageDir, frontendDir }: AppOptions, opti
   await app.register(regularisationRoutes, { prefix: '/api', db, storageDir })
   await app.register(paiementRoutes, { prefix: '/api', db })
   await app.register(fiscalRoutes, { prefix: '/api', db })
+  await app.register(travauxRoutes, { prefix: '/api', db, storageDir })
+  await app.register(assembleeRoutes, { prefix: '/api', db, storageDir })
 
   if (frontendDir) {
     // Hashed assets kept a year by the browser; index.html never, so that a deployment shows at once

@@ -32,6 +32,13 @@ export default createRouter({
     },
     { path: '/sejours', name: 'sejours', component: SejoursView },
     { path: '/paiements', name: 'paiements', component: PaiementsView },
+    { path: '/travaux', name: 'travaux', component: () => import('./views/TravauxView.vue') },
+    { path: '/societe', name: 'societe', component: () => import('./views/SocieteView.vue') },
+    { path: '/assemblees', name: 'assemblees', component: () => import('./views/AssembleesView.vue') },
+    {
+      path: '/assemblees/:id(\\d+)', name: 'assemblee', component: () => import('./views/AssembleeView.vue'),
+      props: (route) => ({ id: Number(route.params.id) }),
+    },
     { path: '/fiscal', name: 'fiscal', component: FiscalView },
     { path: '/provisions', name: 'provisions', component: ProvisionsView },
     { path: '/immeuble', name: 'immeuble', component: ImmeubleView },

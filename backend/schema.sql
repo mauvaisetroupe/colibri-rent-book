@@ -241,6 +241,116 @@ SELECT CASE WHEN regularisation_etat(p_id) = 'soldee'
 $$;
 
 -- ---------------------------------------------------------------- compteurs d'eau (phase ultérieure)
+-- ADR 0015 : travaux payés par le propriétaire, pour la déclaration seulement (jamais répartis) ; déductibles
+-- (2044, ligne 224) selon leur nature : entretien et amélioration oui, construction et agrandissement non.
+CREATE TYPE nature_travaux AS ENUM ('entretien', 'amelioration', 'construction');
+
+CREATE TABLE travaux (
+  id             serial PRIMARY KEY,
+  immeuble_id    int  NOT NULL REFERENCES immeuble(id),
+  lot_id         int  REFERENCES lot(id),                -- vide : travaux de l'immeuble ou des parties communes
+  fournisseur    text NOT NULL,
+  description    text NOT NULL,
+  nature         nature_travaux NOT NULL,
+  date_facture   date NOT NULL,
+  date_paiement  date,                                   -- année fiscale ; vide tant que la facture n'est pas payée
+  montant_ttc    numeric(12,2) NOT NULL,
+  fichier_pdf    text,                                   -- PDF archivé, même stockage que les factures
+  note           text
+);
+CREATE INDEX ON travaux (immeuble_id, date_paiement);
+
+-- ADR 0016 : la société (SCI), ses associés et leurs parts, ses assemblées générales et leurs procès-verbaux ;
+-- une assemblée close est numérotée dans le registre et figée.
+CREATE TABLE societe (
+  id            int PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  denomination  text NOT NULL,
+  forme         text NOT NULL DEFAULT 'SCI',
+  capital       numeric(14,2),
+  siege         text,
+  rcs           text
+);
+
+CREATE TABLE associe (
+  id       serial PRIMARY KEY,
+  nom      text NOT NULL,
+  parts    int  NOT NULL CHECK (parts > 0),
+  gerant   boolean NOT NULL DEFAULT false,
+  adresse  text,
+  note     text
+);
+
+CREATE TYPE type_assemblee AS ENUM ('ordinaire', 'extraordinaire');
+CREATE TYPE statut_assemblee AS ENUM ('brouillon', 'close');
+CREATE TYPE presence_associe AS ENUM ('present', 'represente', 'absent');
+
+CREATE TABLE assemblee (
+  id             serial PRIMARY KEY,
+  numero         int UNIQUE,
+  type           type_assemblee NOT NULL,
+  date           date NOT NULL,
+  heure          text,
+  lieu           text,
+  ordre_du_jour  text NOT NULL DEFAULT '',
+  president      text,
+  observations   text,
+  statut         statut_assemblee NOT NULL DEFAULT 'brouillon',
+  close_le       timestamptz,
+  instantane     jsonb,
+  pv_signe       text,
+  CONSTRAINT assemblee_close CHECK (statut = 'brouillon' OR (numero IS NOT NULL AND instantane IS NOT NULL))
+);
+
+CREATE TABLE presence (
+  assemblee_id    int NOT NULL REFERENCES assemblee(id) ON DELETE CASCADE,
+  associe_id      int NOT NULL REFERENCES associe(id),
+  presence        presence_associe NOT NULL DEFAULT 'present',
+  represente_par  text,
+  PRIMARY KEY (assemblee_id, associe_id)
+);
+
+CREATE TABLE resolution (
+  id            serial PRIMARY KEY,
+  assemblee_id  int NOT NULL REFERENCES assemblee(id) ON DELETE CASCADE,
+  ordre         int NOT NULL,
+  titre         text NOT NULL,
+  texte         text NOT NULL DEFAULT '',
+  pour          int  NOT NULL DEFAULT 0 CHECK (pour >= 0),
+  contre        int  NOT NULL DEFAULT 0 CHECK (contre >= 0),
+  abstention    int  NOT NULL DEFAULT 0 CHECK (abstention >= 0)
+);
+
+-- A closed meeting: only its signed minutes may still be attached or replaced
+CREATE FUNCTION assemblee_close_figee() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Assemblée close : elle n''est jamais supprimée (registre, ADR 0016)';
+  END IF;
+  IF (to_jsonb(NEW) - 'pv_signe') <> (to_jsonb(OLD) - 'pv_signe') THEN
+    RAISE EXCEPTION 'Assemblée close : elle n''est plus modifiée (registre, ADR 0016)';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER assemblee_close_figee BEFORE UPDATE OR DELETE ON assemblee
+  FOR EACH ROW WHEN (OLD.statut = 'close') EXECUTE FUNCTION assemblee_close_figee();
+
+-- Presences and resolutions of a closed meeting are frozen with it
+CREATE FUNCTION assemblee_detail_fige() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM assemblee WHERE id = coalesce(NEW.assemblee_id, OLD.assemblee_id) AND statut = 'close') THEN
+    RAISE EXCEPTION 'Assemblée close : ses présences et résolutions ne changent plus (registre, ADR 0016)';
+  END IF;
+  RETURN coalesce(NEW, OLD);
+END $$;
+
+CREATE TRIGGER presence_figee BEFORE INSERT OR UPDATE OR DELETE ON presence
+  FOR EACH ROW EXECUTE FUNCTION assemblee_detail_fige();
+CREATE TRIGGER resolution_figee BEFORE INSERT OR UPDATE OR DELETE ON resolution
+  FOR EACH ROW EXECUTE FUNCTION assemblee_detail_fige();
+
 CREATE TABLE compteur (
   id          serial PRIMARY KEY,
   immeuble_id int NOT NULL REFERENCES immeuble(id),

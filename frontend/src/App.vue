@@ -23,6 +23,7 @@ onMounted(async () => {
         <span class="groupe-titre">Tenue des comptes</span>
         <RouterLink to="/factures">Factures</RouterLink>
         <RouterLink to="/paiements">Paiements</RouterLink>
+        <RouterLink to="/travaux">Travaux</RouterLink>
       </div>
       <div class="groupe">
         <span class="groupe-titre">Bilan de l'exercice</span>
@@ -38,6 +39,11 @@ onMounted(async () => {
         <span class="groupe-titre">Gestion des immeubles</span>
         <RouterLink to="/immeuble">Immeuble</RouterLink>
         <RouterLink to="/sejours">Locataires</RouterLink>
+      </div>
+      <div class="groupe">
+        <span class="groupe-titre">SCI</span>
+        <RouterLink to="/societe">Société</RouterLink>
+        <RouterLink to="/assemblees">Assemblées</RouterLink>
       </div>
       <div class="groupe">
         <span class="groupe-titre">Administration</span>

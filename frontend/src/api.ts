@@ -267,7 +267,76 @@ export type SyntheseFiscale = {
   total_deductible: string
   non_recuperables: { facture_id: number, fournisseur: string, numero: string, date_facture: string, libelle: string, montant: string }[]
   abandons_en_cours: { regularisation_id: number, locataire: string, lot: string, debut: string, fin: string, reste: string }[]
+  travaux: Travaux[]
+  total_travaux_deductibles: string
+  travaux_non_payes: Travaux[]
 }
+
+// Works paid by the owner (ADR 0015): deductible according to their nature, in the tax year of their payment
+export type NatureTravaux = 'entretien' | 'amelioration' | 'construction'
+export const NATURES_TRAVAUX: Record<NatureTravaux, string> = {
+  entretien: 'Entretien, réparation',
+  amelioration: 'Amélioration',
+  construction: 'Construction, agrandissement',
+}
+
+export type Travaux = {
+  id: number
+  immeuble_id: number
+  lot_id: number | null
+  lot: string | null
+  fournisseur: string
+  description: string
+  nature: NatureTravaux
+  date_facture: string
+  date_paiement: string | null
+  montant_ttc: string
+  pdf: boolean
+  note: string | null
+  deductible: boolean
+}
+
+// The company, its partners, its general meetings (ADR 0016)
+export type Societe = { denomination: string, forme: string, capital: string | null, siege: string | null, rcs: string | null }
+export type Associe = { id: number, nom: string, parts: number, gerant: boolean, adresse: string | null, note: string | null }
+export type TypeAssemblee = 'ordinaire' | 'extraordinaire'
+export type PresenceAssocie = 'present' | 'represente' | 'absent'
+export const PRESENCES: Record<PresenceAssocie, string> = { present: 'Présent', represente: 'Représenté', absent: 'Absent' }
+
+export type Resolution = {
+  ordre: number
+  titre: string
+  texte: string
+  pour: number
+  contre: number
+  abstention: number
+  adoptee: boolean
+  unanimite: boolean
+}
+
+export type Assemblee = {
+  id: number
+  numero: number | null
+  type: TypeAssemblee
+  date: string
+  heure: string | null
+  lieu: string | null
+  ordre_du_jour: string
+  president: string | null
+  observations: string | null
+  statut: 'brouillon' | 'close'
+  close_le: string | null
+  pv_signe: boolean
+  parts_total: number
+  parts_presentes: number
+  presences: { associe_id: number, nom: string, parts: number, gerant: boolean, presence: PresenceAssocie, represente_par: string | null }[]
+  resolutions: Resolution[]
+}
+
+export type AssembleeResumee = Pick<Assemblee, 'id' | 'numero' | 'type' | 'date' | 'statut' | 'pv_signe'> & { nb_resolutions: number }
+
+export type TravauxSaisie = Pick<Travaux, 'immeuble_id' | 'lot_id' | 'fournisseur' | 'description' | 'nature'
+  | 'date_facture' | 'date_paiement' | 'montant_ttc' | 'note'>
 
 export type DetailFiltre = { sejour?: number | 'proprietaire', energie?: Energie, groupe?: 'consommation' | 'autres' }
 
@@ -478,6 +547,37 @@ export const api = {
   creerPaiement: (p: PaiementSaisi) => request<Paiement>('POST', '/paiements', p),
   modifierPaiement: (id: number, p: PaiementSaisi) => request<Paiement>('PUT', `/paiements/${id}`, p),
   supprimerPaiement: (id: number) => request<void>('DELETE', `/paiements/${id}`),
+
+  travaux: (immeuble: number) => request<Travaux[]>('GET', `/travaux?immeuble=${immeuble}`),
+  creerTravaux: (t: TravauxSaisie) => request<Travaux>('POST', '/travaux', t),
+  modifierTravaux: (id: number, t: TravauxSaisie) => request<Travaux>('PUT', `/travaux/${id}`, t),
+  supprimerTravaux: (id: number) => request<void>('DELETE', `/travaux/${id}`),
+  travauxPdfUrl: (id: number) => `/api/travaux/${id}/pdf`,
+  async joindrePdfTravaux(id: number, file: File) {
+    const form = new FormData()
+    form.append('file', file)
+    return answer<Travaux>(await fetch(`/api/travaux/${id}/pdf`, { method: 'POST', body: form }))
+  },
+
+  societe: () => request<{ societe: Societe | null, associes: Associe[] }>('GET', '/societe'),
+  modifierSociete: (s: Societe) => request<{ societe: Societe | null, associes: Associe[] }>('PUT', '/societe', s),
+  creerAssocie: (a: Omit<Associe, 'id'>) => request<Associe>('POST', '/associes', a),
+  modifierAssocie: (a: Associe) => request<Associe>('PUT', `/associes/${a.id}`, a),
+  supprimerAssocie: (id: number) => request<void>('DELETE', `/associes/${id}`),
+  assemblees: () => request<AssembleeResumee[]>('GET', '/assemblees'),
+  assemblee: (id: number) => request<Assemblee>('GET', `/assemblees/${id}`),
+  creerAssemblee: (a: { type: TypeAssemblee, date: string, lieu: string | null, modele: 'annuelle' | 'vide' }) =>
+    request<Assemblee>('POST', '/assemblees', a),
+  modifierAssemblee: (a: Assemblee) => request<Assemblee>('PUT', `/assemblees/${a.id}`, a),
+  supprimerAssemblee: (id: number) => request<void>('DELETE', `/assemblees/${id}`),
+  clore: (id: number) => request<Assemblee>('POST', `/assemblees/${id}/cloture`),
+  pvUrl: (id: number) => `/api/assemblees/${id}/pv`,
+  pvSigneUrl: (id: number) => `/api/assemblees/${id}/pv-signe`,
+  async joindrePvSigne(id: number, file: File) {
+    const form = new FormData()
+    form.append('file', file)
+    return answer<Assemblee>(await fetch(`/api/assemblees/${id}/pv-signe`, { method: 'POST', body: form }))
+  },
 
   fiscal: (immeuble: number, annee: number) => request<SyntheseFiscale>('GET', `/fiscal?immeuble=${immeuble}&annee=${annee}`),
 

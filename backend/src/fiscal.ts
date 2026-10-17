@@ -39,6 +39,16 @@ export type SyntheseFiscale = {
   total_deductible: string
   non_recuperables: { facture_id: number, fournisseur: string, numero: string, date_facture: string, libelle: string, montant: string }[]
   abandons_en_cours: { regularisation_id: number, locataire: string, lot: string, debut: string, fin: string, reste: string }[]
+  // Works paid during the year (ADR 0015): the deductible ones for the 2044, line 224
+  travaux: Travaux[]
+  total_travaux_deductibles: string
+  // Works invoiced but not paid yet: not in the year until paid
+  travaux_non_payes: Travaux[]
+}
+
+export type Travaux = {
+  id: number, fournisseur: string, description: string, nature: string, lot: string | null, date_facture: string,
+  date_paiement: string | null, montant_ttc: string, deductible: boolean
 }
 
 const sum = (values: string[]) => values.reduce((s, v) => s.plus(v), new Big(0))
@@ -113,6 +123,16 @@ export async function syntheseFiscale(db: Pool, immeuble: number, annee: number)
     [immeuble, fin],
   )
 
+  const { rows: travaux } = await db.query<Travaux>(
+    `SELECT t.id, t.fournisseur, t.description, t.nature, lt.code AS lot, t.date_facture::text, t.date_paiement::text,
+            t.montant_ttc::text, t.nature <> 'construction' AS deductible
+     FROM travaux t LEFT JOIN lot lt ON lt.id = t.lot_id
+     WHERE t.immeuble_id = $1 AND (t.date_paiement BETWEEN $2::date AND $3::date
+       OR (t.date_paiement IS NULL AND t.date_facture <= $3::date))
+     ORDER BY coalesce(t.date_paiement, t.date_facture), t.id`,
+    [immeuble, debut, fin],
+  )
+
   const totalVacance = sum(vacance.map((v) => v.montant))
   const totalDeductibleDeparts = sum(departs.map((d) => d.deductible))
   return {
@@ -126,5 +146,8 @@ export async function syntheseFiscale(db: Pool, immeuble: number, annee: number)
     total_deductible: totalVacance.plus(totalDeductibleDeparts).toString(),
     non_recuperables: nonRecuperables,
     abandons_en_cours: abandons,
+    travaux: travaux.filter((t) => t.date_paiement),
+    total_travaux_deductibles: sum(travaux.filter((t) => t.date_paiement && t.deductible).map((t) => t.montant_ttc)).toString(),
+    travaux_non_payes: travaux.filter((t) => !t.date_paiement),
   }
 }

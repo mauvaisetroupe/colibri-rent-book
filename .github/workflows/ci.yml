@@ -48,6 +48,8 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: backend/package-lock.json
+      # The tests of the minutes read the text of the PDF (pdftotext)
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: npm ci --no-audit
       - run: npx tsc --noEmit
       - run: npm test

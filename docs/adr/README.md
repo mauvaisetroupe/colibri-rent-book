@@ -21,5 +21,7 @@ seed cités ici sont dans ce dépôt-là, qui lance aussi les tests sur ces donn
 | 0010 | [État calculé des régularisations, décision du propriétaire](0010-etat-calcule-des-regularisations.md) | Accepté |
 | 0013 | [Extracteurs de factures éditables, versionnés, sur pdf.js](0013-extracteurs-de-factures-editables.md) | Accepté |
 | 0014 | [Justificatif sans Chromium, factures en annexe, fournisseurs confidentiels](0014-justificatif-sans-chromium-factures-en-annexe.md) | Accepté |
+| 0015 | [Factures de travaux du propriétaire](0015-travaux-du-proprietaire.md) | Accepté |
+| 0016 | [Assemblées générales de la SCI, procès-verbaux](0016-assemblees-generales-de-la-sci.md) | Accepté |
 
-La prochaine décision du logiciel prend le numéro 0015.
+La prochaine décision du logiciel prend le numéro 0017.
