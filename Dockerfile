@@ -38,6 +38,8 @@ COPY --from=backend /build/backend/dist ./dist
 COPY backend/package.json ./
 COPY backend/schema.sql ./
 COPY backend/migrations ./migrations
+# What a version brings to the database: migrations, applied by hand, and the extractors shipped (replayable)
+COPY backend/seed ./seed
 
 COPY --from=frontend /build/frontend/dist /app/frontend
 
