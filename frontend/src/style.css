@@ -1,0 +1,945 @@
+:root {
+  --fond: #ffffff;
+  --surface: #f6f7f9;
+  --bord: #d8dce2;
+  --texte: #1f2328;
+  --discret: #656d76;
+  --accent: #1f6feb;
+  --ok: #1a7f37;
+  --ko: #cf222e;
+  --fond-erreur: #ffebe9;
+  --fond-avertissement: #fff8c5;
+  --fond-ok: #dafbe1;
+
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--texte);
+  background: var(--fond);
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  padding: 1rem 1.5rem 3rem;
+}
+
+a {
+  color: var(--accent);
+}
+
+h1 {
+  font-size: 1.4rem;
+  margin: 0.5rem 0;
+}
+
+.barre {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  padding: 0.6rem 1.5rem;
+  border-bottom: 1px solid var(--bord);
+  background: var(--surface);
+}
+
+.barre .marque {
+  font-weight: 700;
+  font-size: 1.1rem;
+  text-decoration: none;
+  color: var(--texte);
+}
+
+.barre nav {
+  display: flex;
+  align-items: flex-end;
+  gap: 1.6rem;
+}
+
+.barre .groupe {
+  display: flex;
+  gap: 0.9rem;
+  padding-left: 1.2rem;
+  border-left: 1px solid var(--bord);
+  position: relative;
+  padding-top: 0.9rem;
+}
+
+.barre .groupe-titre {
+  position: absolute;
+  top: -0.2rem;
+  left: 1.2rem;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--discret);
+  white-space: nowrap;
+}
+
+.barre nav a {
+  text-decoration: none;
+}
+
+.choix-immeuble {
+  margin-left: auto;
+}
+
+.barre nav a.router-link-active {
+  font-weight: 600;
+}
+
+.discret {
+  color: var(--discret);
+}
+
+.nombre {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ok {
+  color: var(--ok);
+}
+
+.ko {
+  color: var(--ko);
+}
+
+button,
+.bouton {
+  font: inherit;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--bord);
+  border-radius: 6px;
+  background: var(--fond);
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.principal {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+button.danger {
+  color: var(--ko);
+}
+
+input,
+select {
+  font: inherit;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--bord);
+  border-radius: 4px;
+}
+
+.message {
+  padding: 0.5rem 0.8rem;
+  border-radius: 6px;
+}
+
+.message.info {
+  background: var(--fond-ok);
+}
+
+.message.erreur {
+  background: var(--fond-erreur);
+}
+
+.message.avertissement {
+  background: var(--fond-avertissement);
+}
+
+.pastille {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
+.pastille.a_verifier {
+  background: var(--fond-avertissement);
+}
+
+.pastille.validee {
+  background: var(--fond-ok);
+}
+
+/* ---------------------------------------------------------------- list */
+
+.entete-page {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 2rem;
+}
+
+.actions-page {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.depot {
+  border: 2px dashed var(--bord);
+  border-radius: 8px;
+  padding: 1rem;
+  text-align: center;
+  margin: 1rem 0;
+}
+
+.depot.survol {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.resultats {
+  list-style: none;
+  padding: 0;
+}
+
+.resultats li {
+  padding: 0.3rem 0.6rem;
+  border-left: 4px solid var(--bord);
+  margin-bottom: 0.25rem;
+}
+
+.resultats li.importee {
+  border-color: var(--ok);
+}
+
+.resultats li.doublon {
+  border-color: #bf8700;
+}
+
+.resultats li.erreur {
+  border-color: var(--ko);
+}
+
+.resultats a {
+  margin-left: 0.5rem;
+}
+
+.filtres {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 1rem 0 0.5rem;
+}
+
+.liste {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.liste th,
+.liste td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--bord);
+  text-align: left;
+}
+
+.liste th.nombre,
+.liste td.nombre {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.liste tbody tr {
+  cursor: pointer;
+}
+
+.liste tbody tr:hover {
+  background: var(--surface);
+}
+
+/* ---------------------------------------------------------------- invoice editing */
+
+.champs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.champs label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--discret);
+}
+
+.champs label.note {
+  flex: 1 1 20rem;
+}
+
+.bandeau {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  margin: 0.8rem 0;
+  padding: 0.5rem 0.8rem;
+  border-radius: 6px;
+  background: var(--surface);
+  border-left: 4px solid var(--bord);
+}
+
+.bandeau.ok {
+  border-left-color: var(--ok);
+}
+
+.bandeau.ko {
+  border-left-color: var(--ko);
+}
+
+.edition {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.edition .gauche {
+  flex: 1 1 60%;
+  min-width: 0;
+}
+
+.colonne-pdf {
+  flex: 1 1 40%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.colonne-pdf .outils {
+  margin: 0;
+}
+
+.apercu-vide {
+  margin: 0;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.apercu {
+  height: calc(100vh - 14rem);
+  min-height: 500px;
+  border: 1px solid var(--bord);
+  border-radius: 6px;
+}
+
+.outils,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.5rem 0;
+}
+
+.grille {
+  height: 460px;
+  border: 1px solid var(--bord);
+}
+
+.grille .ligne-erreur {
+  background: var(--fond-erreur);
+}
+
+.grille .ligne-avertissement {
+  background: var(--fond-avertissement);
+}
+
+.constats {
+  list-style: none;
+  padding: 0;
+  margin: 0.6rem 0;
+}
+
+.constats li {
+  padding: 0.2rem 0.6rem;
+  border-left: 4px solid;
+  margin-bottom: 0.2rem;
+}
+
+.constats li.erreur {
+  border-color: var(--ko);
+  background: var(--fond-erreur);
+}
+
+.constats li.avertissement {
+  border-color: #bf8700;
+  background: var(--fond-avertissement);
+}
+
+/* ---------------------------------------------------------------- shared */
+
+h2 {
+  font-size: 1.1rem;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.liste tbody tr.sans-clic {
+  cursor: default;
+}
+
+.liste tbody tr.en-edition {
+  background: var(--fond-avertissement);
+}
+
+.liste tfoot th {
+  border-top: 2px solid var(--bord);
+}
+
+.liste input {
+  padding: 0.15rem 0.3rem;
+}
+
+.boutons {
+  white-space: nowrap;
+}
+
+.boutons button + button {
+  margin-left: 0.3rem;
+}
+
+button.lien {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline dotted;
+  font-variant-numeric: tabular-nums;
+}
+
+a.bouton {
+  text-decoration: none;
+  color: var(--texte);
+}
+
+.formulaire {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.8rem;
+  padding: 0.8rem;
+  margin: 0.8rem 0;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.formulaire label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--discret);
+}
+
+.champs .aligne {
+  align-self: flex-end;
+}
+
+.choix-exercice button.actif {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.defilement {
+  overflow-x: auto;
+}
+
+.decompte th,
+.decompte td {
+  white-space: nowrap;
+}
+
+.synthese {
+  width: auto;
+}
+
+.detail {
+  margin-top: 1.5rem;
+  padding: 0.8rem;
+  border: 1px solid var(--bord);
+  border-radius: 6px;
+}
+
+.detail h2 {
+  margin-top: 0;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ---------------------------------------------------------------- timeline */
+
+.frise {
+  margin: 0.8rem 0;
+}
+
+.frise-axe {
+  position: relative;
+  height: 1.2rem;
+  margin-left: 11rem;
+  font-size: 0.75rem;
+  color: var(--discret);
+}
+
+.frise-graduation {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.frise-piste {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.3rem;
+}
+
+.frise-libelle {
+  flex: 0 0 11rem;
+  font-size: 0.85rem;
+}
+
+.frise-rail {
+  position: relative;
+  flex: 1;
+  height: 1.6rem;
+  background: var(--surface);
+  border-radius: 4px;
+}
+
+.frise-repere {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed var(--bord);
+}
+
+.frise-segment {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.75rem;
+  line-height: 1.4rem;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  box-sizing: border-box;
+  color: #ffffff;
+}
+
+.frise-segment.termine {
+  background: #6e7781;
+}
+
+.frise-segment.en-cours {
+  background: var(--accent);
+}
+
+.frise-segment.couvert {
+  background: var(--ok);
+}
+
+.frise-segment.trou {
+  background: var(--ko);
+}
+
+/* ---------------------------------------------------------------- regularisations */
+
+a.bouton.principal {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.redaction .champs {
+  margin: 0.6rem 0;
+}
+
+.corps-mail {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  line-height: 1.45;
+  padding: 0.6rem;
+  border: 1px solid var(--bord);
+  border-radius: 6px;
+}
+
+.liste tbody tr.discret td {
+  color: var(--discret);
+}
+
+/* ---------------------------------------------------------------- home */
+
+.cycle {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-width: 60rem;
+  margin: 1rem 0 0.4rem;
+}
+
+.cycle .phase {
+  margin-top: 0.6rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--discret);
+}
+
+.etape {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.8rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--bord);
+  border-left-width: 4px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--texte);
+}
+
+.etape:hover {
+  background: var(--surface);
+}
+
+.etape.ok {
+  border-left-color: var(--ok);
+}
+
+.etape.attention {
+  border-left-color: #bf8700;
+}
+
+.etape.a-faire {
+  border-left-color: var(--ko);
+}
+
+.etape .numero {
+  font-weight: 700;
+  color: var(--discret);
+  width: 1.2rem;
+}
+
+.pastille-etape {
+  flex: 0 0 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.etape.ok .pastille-etape {
+  background: var(--ok);
+}
+
+.etape.attention .pastille-etape {
+  background: #bf8700;
+}
+
+.etape.a-faire .pastille-etape {
+  background: var(--ko);
+}
+
+.etape .contenu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.details-etape {
+  margin: 0.2rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--discret);
+}
+
+.legende .attention {
+  color: #bf8700;
+}
+
+details {
+  max-width: 60rem;
+  border-bottom: 1px solid var(--bord);
+  padding: 0.5rem 0;
+}
+
+details summary {
+  cursor: pointer;
+}
+
+details p,
+details ol {
+  line-height: 1.5;
+}
+
+/* ---------------------------------------------------------------- payments, tax summary */
+
+.paiements-annee td {
+  white-space: nowrap;
+}
+
+/* Months of the payments check (Contrôles): paid, paid in part, nothing received, received (amount called unknown) */
+.case-mois {
+  font-size: 0.85rem;
+}
+
+.case-mois.paye {
+  color: var(--ok);
+}
+
+.case-mois.partiel {
+  background: var(--fond-avertissement);
+  color: #7d4e00;
+}
+
+.case-mois.impaye {
+  background: var(--fond-erreur);
+  color: var(--ko);
+  font-weight: 700;
+}
+
+.case-mois.absent {
+  background: var(--surface);
+}
+
+.case-mois .sur {
+  font-size: 0.75rem;
+}
+
+.legende .case-mois {
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+/* A group of checks (Contrôles): title, one line of result, then the detail */
+.bloc {
+  margin: 1rem 0 1.5rem;
+  padding: 0.4rem 1rem 1rem;
+  border: 1px solid var(--bord);
+  border-radius: 8px;
+}
+
+.bloc > h2 {
+  margin: 0.4rem 0;
+}
+
+.bloc h3 {
+  margin: 1rem 0 0.4rem;
+  font-size: 1rem;
+}
+
+.bilan {
+  font-weight: 600;
+}
+
+.message.avertissement-fiscal {
+  background: var(--fond-avertissement);
+  max-width: 60rem;
+}
+
+.avertissement-ligne {
+  background: var(--fond-avertissement);
+  font-size: 0.85rem;
+}
+
+h3 {
+  font-size: 1rem;
+  margin: 1.2rem 0 0.4rem;
+}
+
+/* ---------------------------------------------------------------- payments */
+
+table.paiements td.note {
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+table.paiements tfoot td {
+  border-top: 2px solid var(--bord);
+}
+
+/* ---------------------------------------------------------------- regularisations: payments under the open row */
+
+.sans-retour {
+  white-space: nowrap;
+}
+
+tr.ouverte > td {
+  background: var(--surface);
+}
+
+tr.versements > td {
+  padding: 0.2rem 0 0.8rem;
+  background: var(--surface);
+}
+
+tr.versements table {
+  width: auto;
+  min-width: 36rem;
+  margin: 0;
+  background: var(--fond);
+}
+
+tr.versements tfoot td {
+  border-top: 1px solid var(--bord);
+}
+
+/* ---------------------------------------------------------------- modal forms (<dialog class="fenetre">) */
+
+dialog.fenetre {
+  width: min(46rem, 94vw);
+  padding: 1.2rem 1.4rem;
+  border: 1px solid var(--bord);
+  border-radius: 10px;
+  color: var(--texte);
+  background: var(--fond);
+}
+
+/* A form with a table inside (tenant and its amounts called) */
+dialog.fenetre.large {
+  width: min(62rem, 96vw);
+}
+
+dialog.fenetre table.echeances td.note {
+  width: 100%;
+}
+
+dialog.fenetre table.echeances td.note input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+dialog.fenetre::backdrop {
+  background: rgb(0 0 0 / 35%);
+}
+
+dialog.fenetre h2 {
+  margin-top: 0;
+}
+
+dialog.fenetre form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+dialog.fenetre .rangee {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.8rem;
+}
+
+dialog.fenetre label,
+dialog.fenetre .champ {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--discret);
+}
+
+dialog.fenetre .rangee label.large {
+  flex: 1 1 16rem;
+}
+
+dialog.fenetre fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px solid var(--bord);
+  border-radius: 6px;
+}
+
+dialog.fenetre fieldset p {
+  margin: 0;
+}
+
+dialog.fenetre .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Amounts of one regularisation (its record) */
+table.montants-regularisation {
+  width: auto;
+  min-width: 24rem;
+}
+
+/* A regularisation whose statement changed since it was frozen */
+.a-rectifier {
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: var(--fond-avertissement);
+  color: #7d4e00;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Record pages: actions on the title line, blocks side by side on a wide screen */
+.actions-titre {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.grille-blocs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(26rem, 1fr));
+  gap: 0 1.5rem;
+}
+
+.grille-blocs > .bloc {
+  margin-bottom: 0;
+}
+
+button.actif {
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
+/* Decisions of the owner on a regularisation, each with its meaning */
+.actions-page .decision {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-right: 1rem;
+}
+
+/* State of a regularisation (computed) or decision of the owner */
+.pastille.en_attente {
+  background: var(--fond-avertissement);
+}
+
+.pastille.soldee {
+  background: var(--fond-ok);
+}
+
+.pastille.decision {
+  background: var(--surface);
+  border: 1px solid var(--bord);
+}

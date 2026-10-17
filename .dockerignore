@@ -1,0 +1,12 @@
+# Only what the image needs: sources and lock files. Never secrets.
+.git
+.github
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+backend/storage
+**/*.test.ts
+docs
+**/*.log
+.DS_Store

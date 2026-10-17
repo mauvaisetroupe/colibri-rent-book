@@ -1,0 +1,18 @@
+# macOS / Office
+.DS_Store
+~$*
+
+# Node
+node_modules/
+dist/
+coverage/
+*.log
+
+# Environnement et secrets
+.env
+.env.*
+!.env.example
+!.env.local.example
+
+# PDF archivés par l'application
+storage/

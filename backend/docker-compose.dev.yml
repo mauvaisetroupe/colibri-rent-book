@@ -1,0 +1,65 @@
+# PostgreSQL in Docker for development and tests (the production composition is in the operations repository).
+#
+# Disposable database for the automated tests:
+#   npm run db:up          start it (empty, in memory)
+#   npm run test:local     run the tests against it (they load schema.sql, and TEST_SEED_FILES when given)
+#   npm run db:down        stop everything
+#
+# Development database:
+#   npm run db:local       start it with Adminer (created from schema.sql and the shipped extractors on first start;
+#                          the data of an operation are loaded by its own scripts)
+#   npm run dev            run the API against it (backend/.env.local)
+#   npm run db:local:reset recreate it from scratch (deletes its data)
+
+name: colibri
+
+services:
+  # Tests: in memory, recreated by each test run
+  test-db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: colibri_test
+    ports:
+      - '127.0.0.1:55442:5432'
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'postgres', '-d', 'colibri_test']
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  # Development: persistent volume
+  dev-db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: colibri
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: colibri
+    ports:
+      - '127.0.0.1:55443:5432'
+    volumes:
+      - dev-db-data:/var/lib/postgresql
+      # Run in name order on the first start only (empty volume)
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./seed/extracteurs.sql:/docker-entrypoint-initdb.d/02-seed-extracteurs.sql:ro
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'colibri', '-d', 'colibri']
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  # Web interface for the databases: http://localhost:8090
+  adminer:
+    image: adminer
+    environment:
+      ADMINER_DEFAULT_SERVER: dev-db
+    ports:
+      - '127.0.0.1:8090:8080'
+    depends_on:
+      - dev-db
+
+volumes:
+  dev-db-data:
