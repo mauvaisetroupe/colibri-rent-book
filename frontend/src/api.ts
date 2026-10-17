@@ -5,7 +5,9 @@
 import type { Affectation, Categorie, Energie } from './extraction/contrat'
 
 export type { Affectation, Categorie, Energie }
-export type Statut = 'a_verifier' | 'validee'
+// remplacee: a validated invoice replaced by another one, or corrected (ADR 0017); out of the statements
+export type Statut = 'a_verifier' | 'validee' | 'remplacee'
+export const STATUTS: Record<Statut, string> = { a_verifier: 'Brouillon', validee: 'Validée', remplacee: 'Remplacée' }
 
 export const CATEGORIES: Categorie[] = ['consommation', 'abonnement', 'taxe', 'prestation', 'penalite', 'autre']
 // ADR 0013: recoverable (allocated), borne by the owner (tax summary), about another property (left out)
@@ -416,7 +418,22 @@ export type Facture = {
   statut: Statut
   note: string | null
   pdf: boolean
+  // ADR 0017: replaced by which invoice, when, why; on the draft of a correction, the invoice it will replace
+  remplacee_par: number | null
+  remplacee_le: string | null
+  motif_remplacement: string | null
+  remplace_id: number | null
 }
+
+export type ReferenceFacture = { id: number, fournisseur: string, numero: string, statut: Statut }
+export type LiensFacture = {
+  remplacante: ReferenceFacture | null
+  remplacees: ReferenceFacture[]
+  corrige: ReferenceFacture | null
+  correction: ReferenceFacture | null
+}
+// Sent regularisations whose period touches a replaced invoice: to check (« à rectifier »)
+export type RegularisationTouchee = { id: number, locataire: string, lot: string, debut: string, fin: string, solde: string }
 
 export type FactureResumee = Facture & {
   total_ok: boolean | null
@@ -442,7 +459,8 @@ export type Controle = {
   validable: boolean
 }
 
-export type FactureDetail = { facture: Facture, lignes: Ligne[], controle: Controle }
+export type FactureDetail = { facture: Facture, lignes: Ligne[], liens: LiensFacture, controle: Controle }
+export type FactureRemplacee = FactureDetail & { regularisations: RegularisationTouchee[] }
 
 export type FactureEnTete = Pick<Facture, 'numero' | 'date_facture' | 'montant_ttc' | 'energie' | 'note'>
 
@@ -587,7 +605,10 @@ export const api = {
   factures: (immeuble: number) => request<FactureResumee[]>('GET', `/factures?immeuble=${immeuble}`),
   facture: (id: number) => request<FactureDetail>('GET', `/factures/${id}`),
   enregistrer: (id: number, saisie: FactureSaisie) => request<FactureDetail>('PUT', `/factures/${id}`, saisie),
-  valider: (id: number) => request<FactureDetail>('POST', `/factures/${id}/valider`),
+  valider: (id: number) => request<FactureRemplacee>('POST', `/factures/${id}/valider`),
+  remplacer: (id: number, par: number, motif: string) =>
+    request<FactureRemplacee>('POST', `/factures/${id}/remplacer`, { par, motif }),
+  corriger: (id: number) => request<FactureDetail>('POST', `/factures/${id}/corriger`),
   supprimer: (id: number) => request<void>('DELETE', `/factures/${id}`),
   controler: (saisie: Pick<FactureSaisie, 'montant_ttc' | 'lignes'>) => request<Controle>('POST', '/controle', saisie),
   pdfUrl: (id: number) => `/api/factures/${id}/pdf`,

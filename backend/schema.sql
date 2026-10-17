@@ -14,7 +14,8 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 CREATE TYPE energie AS ENUM ('gaz', 'electricite', 'eau', 'ordures_menageres', 'autre');
 CREATE TYPE categorie_ligne AS ENUM ('consommation', 'abonnement', 'taxe', 'prestation', 'penalite', 'autre');
-CREATE TYPE statut_facture AS ENUM ('a_verifier', 'validee');
+-- remplacee : une facture validée n'est jamais modifiée, elle est remplacée (ADR 0017)
+CREATE TYPE statut_facture AS ENUM ('a_verifier', 'validee', 'remplacee');
 -- ADR 0013 : récupérable (réparti), à la charge du propriétaire (pénalités, taxe foncière hors TEOM : synthèse fiscale),
 -- hors immeuble (concerne un autre bien : ni réparti, ni dans la synthèse fiscale de l'immeuble)
 CREATE TYPE affectation_ligne AS ENUM ('recuperable', 'proprietaire', 'hors_immeuble');
@@ -105,9 +106,18 @@ CREATE TABLE facture (
   statut         statut_facture NOT NULL DEFAULT 'a_verifier',
   note           text,
   extracteur_id  int REFERENCES extracteur(id),   -- version qui a lu la facture (vide : saisie à la main)
-  UNIQUE (fournisseur_id, numero),
-  CONSTRAINT facture_validee_totale CHECK (statut <> 'validee' OR montant_ttc IS NOT NULL)
+  -- ADR 0017 : facture remplacée (par qui, quand, pourquoi) ; brouillon d'une correction : la facture qu'il remplacera
+  remplacee_par      int REFERENCES facture(id),
+  remplacee_le       timestamptz,
+  motif_remplacement text,
+  remplace_id        int REFERENCES facture(id),
+  CONSTRAINT facture_validee_totale CHECK (statut <> 'validee' OR montant_ttc IS NOT NULL),
+  CONSTRAINT facture_remplacee CHECK (
+    (statut = 'remplacee') = (remplacee_par IS NOT NULL AND remplacee_le IS NOT NULL AND motif_remplacement IS NOT NULL)),
+  CONSTRAINT facture_pas_elle_meme CHECK (remplacee_par <> id AND remplace_id <> id)
 );
+-- Numéro unique chez un fournisseur parmi les factures validées : le brouillon d'une correction garde le numéro
+CREATE UNIQUE INDEX facture_numero_validee ON facture (fournisseur_id, numero) WHERE statut = 'validee';
 
 CREATE TABLE ligne_facture (
   id           serial PRIMARY KEY,

@@ -33,3 +33,4 @@ après une mise à jour qui les change ; le fichier est rejouable.
 | `010_fournisseur_confidentiel.sql` | 0014 | `fournisseur.confidentiel` : factures jamais jointes au justificatif |
 | `011_travaux.sql` | 0015 | Factures de travaux du propriétaire (nature, date de paiement, PDF), pour la synthèse fiscale |
 | `012_assemblees.sql` | 0016 | Société, associés et parts, assemblées générales (présences, résolutions), registre figé à la clôture |
+| `013_facture_remplacee.sql` | 0017 | Facture validée remplacée (statut `remplacee`, par qui, quand, motif), brouillon de correction, numéro unique parmi les validées |

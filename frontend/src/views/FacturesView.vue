@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
-import { api, ApiError, ENERGIES, type Energie, type ExtracteurEnregistre, type FactureResumee } from '../api'
+import { api, ApiError, ENERGIES, STATUTS, type Energie, type ExtracteurEnregistre, type FactureResumee } from '../api'
 import type { Candidat } from '../extraction/navigateur'
 import { dateFr, euros, nombreApi } from '../format'
 import { useImmeuble } from '../immeuble'
@@ -61,9 +61,14 @@ const annees = computed(() =>
   [...new Set(factures.value.map((f) => f.date_facture?.slice(0, 4)).filter(Boolean))].sort().reverse(),
 )
 
+// Replaced invoices (ADR 0017) stay in the database, out of the statements: hidden unless asked
+const voirRemplacees = ref(false)
+const remplacees = computed(() => factures.value.filter((f) => f.statut === 'remplacee').length)
+
 const affichees = computed(() =>
   factures.value.filter((f) =>
-    (!energie.value || f.energie === energie.value) && (!annee.value || f.date_facture?.startsWith(annee.value))),
+    (!energie.value || f.energie === energie.value) && (!annee.value || f.date_facture?.startsWith(annee.value))
+    && (voirRemplacees.value || f.statut !== 'remplacee')),
 )
 
 const brouillons = computed(() => factures.value.filter((f) => f.statut === 'a_verifier').length)
@@ -268,6 +273,7 @@ const periode = (f: FactureResumee) => (f.debut && f.fin ? `${dateFr(f.debut)} �
     <span class="discret">
       {{ affichees.length }} facture(s)<template v-if="brouillons"> · {{ brouillons }} brouillon(s) à vérifier</template>
     </span>
+    <label v-if="remplacees" class="discret"><input v-model="voirRemplacees" type="checkbox"> Afficher les factures remplacées ({{ remplacees }})</label>
   </section>
 
   <table class="liste">
@@ -295,7 +301,7 @@ const periode = (f: FactureResumee) => (f.debut && f.fin ? `${dateFr(f.debut)} �
         <td class="nombre">{{ euros(f.montant_ttc) }}</td>
         <td class="nombre">{{ f.nb_lignes }}</td>
         <td :class="f.total_ok ? 'ok' : 'ko'">{{ f.total_ok ? '✓' : f.montant_ttc === null ? '✗ total à saisir' : '✗ écart' }}</td>
-        <td><span class="pastille" :class="f.statut">{{ f.statut === 'validee' ? 'Validée' : 'Brouillon' }}</span></td>
+        <td><span class="pastille" :class="f.statut">{{ STATUTS[f.statut] }}</span></td>
         <td>
           <a v-if="f.pdf" :href="api.pdfUrl(f.id)" target="_blank" title="Ouvrir le PDF" @click.stop>PDF</a>
           <span v-else class="discret" title="Pas de PDF : le joindre depuis la facture">—</span>

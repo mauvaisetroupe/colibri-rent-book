@@ -24,5 +24,4 @@ sur le seed, dont toutes les factures sont validées).
 - Une facture mal lue ne peut pas fausser un montant demandé à un locataire.
 - Le décompte et l'écran de couverture signalent les brouillons dont la période touche l'exercice, pour qu'une facture
   oubliée en brouillon ne disparaisse pas silencieusement du calcul.
-- Point ouvert : modification d'une facture déjà validée (retour en brouillon, ou correction tracée) et effet sur les
-  régularisations déjà envoyées. À décider avant l'écran des régularisations.
+- Modification d'une facture déjà validée : jamais ; elle est remplacée, de façon tracée (ADR 0017).

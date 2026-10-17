@@ -272,6 +272,12 @@ select {
   background: var(--fond-ok);
 }
 
+.pastille.remplacee {
+  background: var(--surface);
+  color: var(--discret);
+  text-decoration: line-through;
+}
+
 /* ---------------------------------------------------------------- list */
 
 .entete-page {

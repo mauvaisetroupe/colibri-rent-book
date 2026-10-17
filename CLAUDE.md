@@ -44,6 +44,7 @@ première : `colibri`, privé), qui fixe la version de l'image et lance les test
   ou big.js, arrondi à l'affichage seulement).
 - Périodes : `daterange` semi-ouvert en base ; l'API et l'interface parlent en dates **incluses**.
 - Une facture n'est jamais modifiée silencieusement : l'utilisateur valide les lignes (`a_verifier` → `validee`).
+  Une facture validée n'est ni modifiée ni supprimée : « Corriger » ou « Remplacer par… » (`remplacee`, ADR 0017).
 - Une assemblée close est au registre : la base refuse toute modification ou suppression (seul le PV signé se joint) ;
   son procès-verbal se compose depuis l'instantané figé à la clôture (ADR 0016).
 - Aucune donnée réelle dans ce dépôt public : les noms des associés, la société, les travaux se saisissent à l'écran.

@@ -12,8 +12,8 @@ import type { InvoiceLine } from '../invoices/types.js'
 import { isPdf, removeIfUnused as removeFile, storePdf } from '../pdfStorage.js'
 import { inclusiveBounds, inclusiveRange } from '../periods.js'
 
-// Invoices: import of a PDF read in the browser (draft), editing, validation (ADR 0003, 0005, 0013). Periods: see
-// periods.ts.
+// Invoices: import of a PDF read in the browser (draft), editing, validation (ADR 0003, 0005, 0013), replacement of
+// a validated invoice (ADR 0017). Periods: see periods.ts.
 
 export type FactureOptions = {
   db: Pool
@@ -29,7 +29,13 @@ const LINE_COLUMNS = `
 
 const FACTURE_COLUMNS = `
   f.id, f.immeuble_id, fo.nom AS fournisseur, f.energie, f.numero, f.date_facture::text,
-  f.montant_ttc::text, f.statut, f.note, f.fichier_pdf IS NOT NULL AS pdf`
+  f.montant_ttc::text, f.statut, f.note, f.fichier_pdf IS NOT NULL AS pdf,
+  f.remplacee_par, f.remplacee_le::text, f.motif_remplacement, f.remplace_id`
+
+// Another invoice, as shown in a link: « EDF n° 123 »
+type Reference = { id: number, fournisseur: string, numero: string, statut: string }
+const REFERENCE = `SELECT f.id, fo.nom AS fournisseur, f.numero, f.statut
+  FROM facture f JOIN fournisseur fo ON fo.id = f.fournisseur_id`
 
 // numeric::text keeps the scale ('148.540', '0.0550'): canonical form for the API
 const canonical = (value: string | null) => (value === null ? null : new Big(value).toString())
@@ -78,7 +84,37 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
       montant_ttc: new Big(l.montant_ttc).toString(),
     }))
     facture.montant_ttc = canonical(facture.montant_ttc)
-    return { facture, lignes, controle: checkInvoice({ montant_ttc: facture.montant_ttc, lignes }) }
+    // The invoices linked by a replacement (ADR 0017): the one replacing it, those it replaced, the one it corrects
+    const reference = async (fid: number | null) =>
+      fid === null ? null : (await db.query<Reference>(`${REFERENCE} WHERE f.id = $1`, [fid])).rows[0] ?? null
+    const liens = {
+      remplacante: await reference(facture.remplacee_par),
+      remplacees: (await db.query<Reference>(`${REFERENCE} WHERE f.remplacee_par = $1 ORDER BY f.id`, [id])).rows,
+      corrige: await reference(facture.remplace_id),
+      correction: (await db.query<Reference>(
+        `${REFERENCE} WHERE f.remplace_id = $1 AND f.statut = 'a_verifier'`, [id])).rows[0] ?? null,
+    }
+    return { facture, lignes, liens, controle: checkInvoice({ montant_ttc: facture.montant_ttc, lignes }) }
+  }
+
+  /** Sent regularisations, not rectified yet, whose period touches recoverable lines of these invoices: to check. */
+  async function regularisationsTouchees(ids: number[]) {
+    const { rows } = await db.query(
+      `SELECT DISTINCT r.id, lo.nom AS locataire, lt.code AS lot, ${inclusiveBounds('r.exercice')}, r.solde::text
+       FROM regularisation r
+       JOIN sejour s ON s.id = r.sejour_id
+       JOIN lot lt ON lt.id = s.lot_id
+       JOIN locataire lo ON lo.id = s.locataire_id
+       WHERE r.date_envoi IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM regularisation n WHERE n.remplace_id = r.id)
+         AND EXISTS (
+           SELECT 1 FROM ligne_facture l JOIN facture f ON f.id = l.facture_id
+           WHERE l.facture_id = ANY($1) AND l.affectation = 'recuperable' AND f.immeuble_id = lt.immeuble_id
+             AND l.periode && r.exercice)
+       ORDER BY debut, locataire`,
+      [ids],
+    )
+    return rows
   }
 
   app.get('/factures', async (request, reply) => {
@@ -188,7 +224,8 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
       await client.query('BEGIN')
       const { rows: [existing] } = await client.query<{ id: number }>(
         `SELECT f.id FROM facture f JOIN fournisseur fo ON fo.id = f.fournisseur_id
-         WHERE fo.nom = $1 AND f.numero = $2`,
+         WHERE fo.nom = $1 AND f.numero = $2 AND f.statut <> 'remplacee'
+         ORDER BY f.statut DESC LIMIT 1`,
         [extracteur.fournisseur, header.numero],
       )
       if (existing) {
@@ -263,7 +300,8 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
       await client.query('INSERT INTO fournisseur (nom) VALUES ($1) ON CONFLICT (nom) DO NOTHING', [fournisseur])
       const { rows: [existing] } = await client.query<{ id: number }>(
         `SELECT f.id FROM facture f JOIN fournisseur fo ON fo.id = f.fournisseur_id
-         WHERE fo.nom = $1 AND f.numero = $2`,
+         WHERE fo.nom = $1 AND f.numero = $2 AND f.statut <> 'remplacee'
+         ORDER BY f.statut DESC LIMIT 1`,
         [fournisseur, header.numero],
       )
       if (existing) {
@@ -330,7 +368,11 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
       }
       if (current.statut !== 'a_verifier') {
         await client.query('ROLLBACK')
-        return reply.code(409).send({ message: 'Facture validée : elle n\'est plus modifiable' })
+        return reply.code(409).send({
+          message: current.statut === 'remplacee'
+            ? 'Facture remplacée : elle n\'est plus modifiable'
+            : 'Facture validée : elle n\'est plus modifiable (« Corriger » ou « Remplacer par… »)',
+        })
       }
       await client.query(
         'UPDATE facture SET numero = $2, date_facture = $3, montant_ttc = $4, energie = $5, note = $6 WHERE id = $1',
@@ -351,7 +393,8 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     return load(id)
   })
 
-  // Validation: the checks run again on the stored lines; any « erreur » refuses it
+  // Validation: the checks run again on the stored lines; any « erreur » refuses it. The draft of a correction
+  // replaces, in the same transaction, the invoice it corrects (ADR 0017).
   app.post('/factures/:id/valider', async (request, reply) => {
     const id = Number((request.params as { id: string }).id)
     const current = await load(id)
@@ -364,8 +407,124 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     if (!current.controle.validable) {
       return reply.code(422).send({ message: 'Contrôles en erreur : validation impossible', controle: current.controle })
     }
-    await db.query('UPDATE facture SET statut = \'validee\' WHERE id = $1 AND statut = \'a_verifier\'', [id])
-    return load(id)
+    const corrige: number | null = current.facture.remplace_id
+    const client = await db.connect()
+    try {
+      await client.query('BEGIN')
+      if (corrige !== null) {
+        // The corrected invoice first: the number is unique among validated invoices
+        const { rowCount } = await client.query(
+          `UPDATE facture SET statut = 'remplacee', remplacee_par = $2, remplacee_le = now(),
+                              motif_remplacement = 'Corrigée' || coalesce(' : ' || $3, '')
+           WHERE id = $1 AND statut = 'validee'`,
+          [corrige, id, current.facture.note],
+        )
+        if (!rowCount) {
+          await client.query('ROLLBACK')
+          return reply.code(409).send({
+            message: 'La facture corrigée n\'est plus validée (déjà remplacée) : supprimer ce brouillon',
+          })
+        }
+      }
+      await client.query('UPDATE facture SET statut = \'validee\' WHERE id = $1 AND statut = \'a_verifier\'', [id])
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      if ((error as { code?: string }).code === '23505') {
+        return reply.code(409).send({ message: 'Une facture validée porte déjà ce numéro chez ce fournisseur' })
+      }
+      throw error
+    } finally {
+      client.release()
+    }
+    return {
+      ...(await load(id))!,
+      regularisations: corrige === null ? [] : await regularisationsTouchees([corrige, id]),
+    }
+  })
+
+  // Replace a validated invoice by another validated one of the same building (rectifying invoice, the real
+  // document of an invoice typed by hand), with the reason; it leaves the statements (ADR 0017)
+  app.post('/factures/:id/remplacer', async (request, reply) => {
+    const id = Number((request.params as { id: string }).id)
+    const body = (request.body ?? {}) as { par?: unknown, motif?: unknown }
+    const par = Number(body.par)
+    const motif = String(body.motif ?? '').trim()
+    if (!Number.isInteger(par) || par === id) {
+      return reply.code(400).send({ message: 'Choisir la facture qui la remplace' })
+    }
+    if (!motif) {
+      return reply.code(400).send({ message: 'Motif du remplacement manquant' })
+    }
+    const client = await db.connect()
+    try {
+      await client.query('BEGIN')
+      const { rows } = await client.query<{ id: number, immeuble_id: number, statut: string }>(
+        'SELECT id, immeuble_id, statut FROM facture WHERE id = ANY($1) ORDER BY id FOR UPDATE',
+        [[id, par]],
+      )
+      const ancienne = rows.find((f) => f.id === id)
+      const nouvelle = rows.find((f) => f.id === par)
+      const refus = !ancienne ? [404, 'Facture introuvable']
+        : ancienne.statut !== 'validee' ? [409, 'Seule une facture validée se remplace (un brouillon se supprime)']
+          : !nouvelle ? [400, 'Facture de remplacement introuvable']
+            : nouvelle.immeuble_id !== ancienne.immeuble_id ? [400, 'La facture de remplacement est d\'un autre immeuble']
+              : nouvelle.statut !== 'validee' ? [400, 'La facture de remplacement doit être validée']
+                : null
+      if (refus) {
+        await client.query('ROLLBACK')
+        return reply.code(refus[0] as number).send({ message: refus[1] })
+      }
+      await client.query(
+        `UPDATE facture SET statut = 'remplacee', remplacee_par = $2, remplacee_le = now(), motif_remplacement = $3
+         WHERE id = $1`,
+        [id, par, motif],
+      )
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+    return { ...(await load(id))!, regularisations: await regularisationsTouchees([id, par]) }
+  })
+
+  // Correct a validated invoice: a draft copy (header, lines, PDF, extractor) that replaces it once validated
+  app.post('/factures/:id/corriger', async (request, reply) => {
+    const id = Number((request.params as { id: string }).id)
+    const current = await load(id)
+    if (!current) {
+      return reply.code(404).send({ message: 'Facture introuvable' })
+    }
+    if (current.facture.statut !== 'validee') {
+      return reply.code(409).send({ message: 'Seule une facture validée se corrige (un brouillon se modifie)' })
+    }
+    if (current.liens.correction) {
+      return reply.code(409).send({
+        message: 'Une correction de cette facture est déjà en cours', facture_id: current.liens.correction.id,
+      })
+    }
+    const client = await db.connect()
+    try {
+      await client.query('BEGIN')
+      const { rows: [copie] } = await client.query<{ id: number }>(
+        `INSERT INTO facture (immeuble_id, fournisseur_id, energie, numero, date_facture, montant_ttc, fichier_pdf, note,
+                              extracteur_id, remplace_id)
+         SELECT immeuble_id, fournisseur_id, energie, numero, date_facture, montant_ttc, fichier_pdf, note,
+                extracteur_id, id
+         FROM facture WHERE id = $1 RETURNING id`,
+        [id],
+      )
+      await insertLines(client, copie!.id, current.lignes)
+      await client.query('COMMIT')
+      return reply.code(201).send(await load(copie!.id))
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
   })
 
   // Only a draft can be deleted (to import it again, for instance)
@@ -378,7 +537,7 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     if (!deleted) {
       const { rowCount } = await db.query('SELECT 1 FROM facture WHERE id = $1', [id])
       return rowCount
-        ? reply.code(409).send({ message: 'Facture validée : suppression impossible' })
+        ? reply.code(409).send({ message: 'Facture validée : suppression impossible (« Remplacer par… »)' })
         : reply.code(404).send({ message: 'Facture introuvable' })
     }
     if (deleted.fichier_pdf) {

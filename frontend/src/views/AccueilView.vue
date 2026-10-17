@@ -241,6 +241,12 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
         date invalide…), en jaune ce qui est à vérifier (période non imprimée, période inhabituelle).</li>
       <li><strong>Valider</strong> : seule une facture validée compte dans les décomptes. Une facture validée n'est plus
         modifiable.</li>
+      <li>Une facture validée fausse ou en double ne se modifie pas : elle se <strong>remplace</strong>, avec une trace.
+        <strong>Corriger…</strong> crée un brouillon, copie de la facture, qui la remplace à sa validation (jusque-là,
+        l'originale compte) ; <strong>Remplacer par…</strong> la remplace par une autre facture validée (facture
+        rectificative, vrai PDF d'une facture saisie à la main), avec le motif. La facture remplacée reste consultable
+        (« Afficher les factures remplacées ») mais ne compte plus ; les régularisations envoyées touchées sont
+        listées, l'écran Régularisations dit si l'une est « à rectifier ».</li>
     </ol>
   </details>
 

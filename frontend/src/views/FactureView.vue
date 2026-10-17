@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { VGrid, type ColumnRegular } from '@revolist/vue3-datagrid'
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, RouterLink, useRouter } from 'vue-router'
 
 import {
-  api, ApiError, CATEGORIES, ENERGIES, type Controle, type Facture, type FactureDetail, type FactureSaisie,
+  api, ApiError, CATEGORIES, ENERGIES, STATUTS, type Controle, type Facture, type FactureDetail, type FactureResumee,
+  type FactureSaisie, type LiensFacture, type RegularisationTouchee,
 } from '../api'
-import { depuisGrille, euros, ligneVide, nombreApi, nombreFr, versGrille, type LigneGrille } from '../format'
+import { dateFr, depuisGrille, euros, ligneVide, nombreApi, nombreFr, versGrille, type LigneGrille } from '../format'
 
 const props = defineProps<{ id: number }>()
 const router = useRouter()
@@ -20,7 +21,13 @@ const occupe = ref(false)
 const message = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
 const ligneActive = ref<number | null>(null)
 
+const liens = ref<LiensFacture | null>(null)
+// Sent regularisations touched by a replacement just made: to check (ADR 0017)
+const touchees = ref<RegularisationTouchee[]>([])
+
 const validee = computed(() => facture.value?.statut === 'validee')
+// Validated or replaced: never edited (ADR 0003, 0017)
+const figee = computed(() => facture.value !== null && facture.value.statut !== 'a_verifier')
 
 const colonnes: ColumnRegular[] = [
   { prop: 'categorie', name: 'Catégorie', size: 130 },
@@ -36,6 +43,13 @@ const colonnes: ColumnRegular[] = [
 ]
 
 onMounted(charger)
+// From an invoice to the one replacing it: same screen, another id
+watch(() => props.id, () => {
+  touchees.value = []
+  remplacement.value = null
+  message.value = null
+  charger()
+})
 
 async function charger() {
   try {
@@ -47,6 +61,7 @@ async function charger() {
 
 function appliquer(detail: FactureDetail) {
   facture.value = detail.facture
+  liens.value = detail.liens
   Object.assign(entete, {
     numero: detail.facture.numero,
     date_facture: detail.facture.date_facture,
@@ -160,10 +175,12 @@ function supprimerLigne() {
 
 // ---------------------------------------------------------------- actions
 
-async function executer(action: () => Promise<FactureDetail>, succes: string) {
+async function executer(action: () => Promise<FactureDetail & { regularisations?: RegularisationTouchee[] }>, succes: string) {
   occupe.value = true
   try {
-    appliquer(await action())
+    const detail = await action()
+    appliquer(detail)
+    touchees.value = detail.regularisations ?? []
     message.value = { texte: succes, type: 'info' }
     return true
   } catch (e) {
@@ -184,7 +201,56 @@ async function valider() {
   if (modifie.value && !(await enregistrer())) {
     return
   }
-  await executer(() => api.valider(props.id), 'Facture validée : elle entre dans les décomptes')
+  const corrige = liens.value?.corrige
+  await executer(
+    () => api.valider(props.id),
+    corrige
+      ? `Facture validée : elle remplace la facture corrigée (${corrige.fournisseur} n° ${corrige.numero}) dans les décomptes`
+      : 'Facture validée : elle entre dans les décomptes',
+  )
+}
+
+// ---------------------------------------------------------------- replacing a validated invoice (ADR 0017)
+
+const remplacement = ref<{ candidates: FactureResumee[], par: number | null, motif: string } | null>(null)
+
+async function ouvrirRemplacement() {
+  if (!facture.value) {
+    return
+  }
+  const candidates = (await api.factures(facture.value.immeuble_id))
+    .filter((f) => f.statut === 'validee' && f.id !== facture.value?.id)
+  remplacement.value = { candidates, par: null, motif: '' }
+}
+
+async function remplacer() {
+  const r = remplacement.value
+  if (!r?.par || !r.motif.trim()) {
+    return
+  }
+  if (await executer(() => api.remplacer(props.id, r.par!, r.motif.trim()), 'Facture remplacée : elle ne compte plus dans les décomptes')) {
+    remplacement.value = null
+  }
+}
+
+async function corriger() {
+  if (!confirm('Créer un brouillon, copie de cette facture, à corriger puis valider ? À sa validation, il la remplace ; '
+    + 'jusque-là, elle continue de compter.')) {
+    return
+  }
+  occupe.value = true
+  try {
+    const copie = await api.corriger(props.id)
+    await router.push({ name: 'facture', params: { id: copie.facture.id } })
+  } catch (e) {
+    const existante = e instanceof ApiError ? e.body.facture_id as number | undefined : undefined
+    message.value = { texte: (e as Error).message, type: 'erreur' }
+    if (existante) {
+      await router.push({ name: 'facture', params: { id: existante } })
+    }
+  } finally {
+    occupe.value = false
+  }
 }
 
 // ---------------------------------------------------------------- invoice PDF
@@ -239,7 +305,10 @@ function choisirPdf(event: Event) {
 }
 
 async function supprimer() {
-  if (!confirm('Supprimer ce brouillon ? Le PDF pourra être importé à nouveau.')) {
+  const texte = liens.value?.corrige
+    ? 'Supprimer ce brouillon ? La correction est abandonnée, la facture d\'origine reste validée.'
+    : 'Supprimer ce brouillon ? Le PDF pourra être importé à nouveau.'
+  if (!confirm(texte)) {
     return
   }
   try {
@@ -274,20 +343,20 @@ onBeforeUnmount(() => {
     <section class="entete-facture">
       <h1>
         {{ facture.fournisseur }}
-        <span class="pastille" :class="facture.statut">{{ validee ? 'Validée' : 'Brouillon' }}</span>
+        <span class="pastille" :class="facture.statut">{{ STATUTS[facture.statut] }}</span>
       </h1>
       <div class="champs">
-        <label>N° <input v-model="entete.numero" :disabled="validee" @input="changer"></label>
-        <label>Date <input v-model="entete.date_facture" type="date" :disabled="validee" @input="changer"></label>
+        <label>N° <input v-model="entete.numero" :disabled="figee" @input="changer"></label>
+        <label>Date <input v-model="entete.date_facture" type="date" :disabled="figee" @input="changer"></label>
         <label>Énergie
-          <select v-model="entete.energie" :disabled="validee" @change="changer">
+          <select v-model="entete.energie" :disabled="figee" @change="changer">
             <option v-for="(nom, code) in ENERGIES" :key="code" :value="code">{{ nom }}</option>
           </select>
         </label>
         <label>Total imprimé TTC
-          <input v-model="entete.montant_ttc" class="nombre" :disabled="validee" @input="changer">
+          <input v-model="entete.montant_ttc" class="nombre" :disabled="figee" @input="changer">
         </label>
-        <label class="note">Note <input v-model="entete.note" :disabled="validee" @input="changer"></label>
+        <label class="note">Note <input v-model="entete.note" :disabled="figee" @input="changer"></label>
       </div>
     </section>
 
@@ -302,11 +371,45 @@ onBeforeUnmount(() => {
       <span v-if="modifie" class="discret">modifications non enregistrées</span>
     </section>
 
+    <!-- Replacement links (ADR 0017) -->
+    <p v-if="facture.statut === 'remplacee'" class="message avertissement">
+      Facture <strong>remplacée</strong> le {{ dateFr(facture.remplacee_le?.slice(0, 10) ?? null) }}
+      <template v-if="liens?.remplacante">
+        par <RouterLink :to="{ name: 'facture', params: { id: liens.remplacante.id } }">{{ liens.remplacante.fournisseur }} n° {{ liens.remplacante.numero }}</RouterLink>
+      </template>
+      ({{ facture.motif_remplacement }}) : elle n'entre plus dans les décomptes ni dans la synthèse fiscale.
+    </p>
+    <p v-if="liens?.corrige && facture.statut === 'a_verifier'" class="message info">
+      Correction de <RouterLink :to="{ name: 'facture', params: { id: liens.corrige.id } }">{{ liens.corrige.fournisseur }} n° {{ liens.corrige.numero }}</RouterLink>,
+      validée : à la validation de ce brouillon, elle est remplacée ; jusque-là, c'est elle qui compte. La note est reprise
+      dans le motif.
+    </p>
+    <p v-if="liens?.correction" class="message info">
+      Correction en cours :
+      <RouterLink :to="{ name: 'facture', params: { id: liens.correction.id } }">brouillon {{ liens.correction.fournisseur }} n° {{ liens.correction.numero }}</RouterLink>.
+    </p>
+    <p v-if="liens?.remplacees.length" class="discret">
+      Remplace :
+      <template v-for="(r, i) in liens.remplacees" :key="r.id">
+        {{ i ? ', ' : '' }}<RouterLink :to="{ name: 'facture', params: { id: r.id } }">{{ r.fournisseur }} n° {{ r.numero }}</RouterLink>
+      </template>
+    </p>
+
     <p v-if="message" class="message" :class="message.type">{{ message.texte }}</p>
+    <div v-if="touchees.length" class="message avertissement">
+      Régularisations envoyées dont la période touche cette facture : leur décompte refait peut différer du montant
+      envoyé (« à rectifier » s'il diffère de plus de 5 €).
+      <ul>
+        <li v-for="r in touchees" :key="r.id">
+          <RouterLink :to="{ name: 'regularisation', params: { id: r.id } }">{{ r.locataire }} ({{ r.lot }}), {{ dateFr(r.debut) }} → {{ dateFr(r.fin) }}</RouterLink>
+          : solde envoyé {{ euros(r.solde) }}
+        </li>
+      </ul>
+    </div>
 
     <div class="edition">
       <div class="gauche">
-        <div v-if="!validee" class="outils">
+        <div v-if="!figee" class="outils">
           <button type="button" @click="ajouterLigne">+ Ligne</button>
           <button type="button" :disabled="ligneActive === null" @click="supprimerLigne">
             Supprimer la ligne {{ ligneActive === null ? '' : ligneActive + 1 }}
@@ -318,7 +421,7 @@ onBeforeUnmount(() => {
           <VGrid
             :source="lignes"
             :columns="colonnes"
-            :readonly="validee"
+            :readonly="figee"
             :range="true"
             :resize="true"
             :row-headers="true"
@@ -336,17 +439,36 @@ onBeforeUnmount(() => {
         </ul>
 
         <div class="actions">
-          <template v-if="!validee">
+          <template v-if="!figee">
             <button type="button" :disabled="occupe || !modifie" @click="enregistrer">Enregistrer le brouillon</button>
             <button type="button" class="principal" :disabled="occupe || !controle?.validable" @click="valider">
               Valider la facture
             </button>
             <button type="button" class="danger" :disabled="occupe" @click="supprimer">Supprimer le brouillon</button>
           </template>
-          <p v-else class="discret">
-            Facture validée : elle entre dans les décomptes et ne peut plus être modifiée.
-          </p>
+          <template v-else-if="validee">
+            <p class="discret">
+              Facture validée : elle entre dans les décomptes et n'est plus modifiée. Une erreur se corrige par une copie
+              qui la remplace ; un doublon ou une facture rectificative la remplace.
+            </p>
+            <button type="button" :disabled="occupe || !!liens?.correction" @click="corriger">Corriger…</button>
+            <button type="button" :disabled="occupe" @click="ouvrirRemplacement">Remplacer par…</button>
+          </template>
         </div>
+
+        <form v-if="remplacement" class="formulaire" @submit.prevent="remplacer">
+          <label>Remplacée par
+            <select v-model="remplacement.par" required>
+              <option :value="null" disabled>Choisir une facture validée</option>
+              <option v-for="f in remplacement.candidates" :key="f.id" :value="f.id">
+                {{ f.fournisseur }} n° {{ f.numero }} du {{ dateFr(f.date_facture) }} ({{ euros(f.montant_ttc) }})
+              </option>
+            </select>
+          </label>
+          <label class="note">Motif <input v-model="remplacement.motif" required placeholder="doublon, facture rectificative…"></label>
+          <button type="submit" class="principal" :disabled="occupe || !remplacement.par || !remplacement.motif.trim()">Remplacer</button>
+          <button type="button" @click="remplacement = null">Annuler</button>
+        </form>
       </div>
 
       <div class="colonne-pdf">
