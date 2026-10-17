@@ -186,7 +186,7 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
     <div class="phase">Tenue des comptes, au fil de l'année</div>
     <template v-for="e in etapes" :key="e.numero">
       <div v-if="e.numero === 4" class="phase">Bilan de l'exercice</div>
-      <div v-if="e.numero === 7" class="phase">Déclaration</div>
+      <div v-if="e.numero === 7" class="phase">Clôture</div>
       <RouterLink :to="e.lien" class="etape" :class="e.etat">
         <span class="pastille-etape">{{ SYMBOLES[e.etat] }}</span>
         <span class="numero">{{ e.numero }}</span>
@@ -210,9 +210,9 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
   <details>
     <summary><strong>Mise en place</strong> (une fois) : Immeuble, Locataires</summary>
     <ol>
-      <li>Pour un autre immeuble : Gestion des immeubles › Immeuble › « + Nouvel immeuble », puis le choisir en haut à
+      <li>Pour un autre immeuble : ⚙ Réglages › Immeuble › « + Nouvel immeuble », puis le choisir en haut à
         droite ; chaque écran travaille ensuite sur l'immeuble choisi.</li>
-      <li><strong>Immeuble</strong> (menu Gestion des immeubles) : vérifier les lots et leurs tantièmes ; le total sert de diviseur
+      <li><strong>Immeuble</strong> (menu ⚙ Réglages) : vérifier les lots et leurs tantièmes ; le total sert de diviseur
         à toute la répartition. Changer des tantièmes modifie aussi les décomptes passés.</li>
       <li><strong>Locataires</strong> : « + Nouveau locataire » ouvre la fiche : nom, e-mail (pour les mails de
         régularisation), téléphone, puis son séjour : lot, date d'entrée, date de sortie (vide tant que le locataire est
@@ -329,9 +329,9 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
   <details>
     <summary><strong>SCI</strong> : société, associés, assemblées générales</summary>
     <ol>
-      <li>« Société » : la dénomination, le capital, le siège, le RCS, et les associés avec leurs parts et
+      <li>« Société et associés » (menu ⚙ Réglages) : la dénomination, le capital, le siège, le RCS, et les associés avec leurs parts et
         le gérant ; repris en tête des procès-verbaux.</li>
-      <li>« Assemblées » : « + Nouvelle assemblée » (annuelle : ordre du jour et résolutions habituelles proposés,
+      <li>« Assemblées » (menu Clôture) : « + Nouvelle assemblée » (annuelle : ordre du jour et résolutions habituelles proposés,
         approbation des comptes, répartition du résultat au prorata des parts, quitus, pouvoirs). Dans le brouillon :
         présences, texte des résolutions (compléter le montant du résultat), votes ; « Projet de procès-verbal »
         pour le relire.</li>
@@ -341,7 +341,7 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
   </details>
 
   <details>
-    <summary><strong>Fournisseurs</strong> (administration) : extracteurs, factures confidentielles</summary>
+    <summary><strong>Fournisseurs</strong> (menu ⚙ Réglages) : extracteurs, factures confidentielles</summary>
     <ol>
       <li>La liste montre chaque fournisseur, ses factures et la version de son extracteur. Sur la page d'un
         fournisseur : <strong>Confidentiel</strong> (ses factures, comme l'avis de taxe foncière, ne sont jamais jointes

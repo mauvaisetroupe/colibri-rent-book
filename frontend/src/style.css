@@ -44,10 +44,37 @@ h1 {
 }
 
 .barre .marque {
-  font-weight: 700;
-  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding-right: 1.6rem;
+  border-right: 1px solid var(--bord);
   text-decoration: none;
+  color: var(--accent);
+}
+
+.marque-logo {
+  width: 2.5rem;
+  height: 2rem;
+}
+
+.marque-texte {
+  display: flex;
+  flex-direction: column;
+  font-weight: 700;
+  font-size: 1.15rem;
+  line-height: 1;
+  letter-spacing: 0.01em;
   color: var(--texte);
+}
+
+.marque-texte small {
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--discret);
+  margin-top: 0.15rem;
 }
 
 .barre nav {
@@ -76,6 +103,22 @@ h1 {
   white-space: nowrap;
 }
 
+/* The first group follows the separator of the logo: no line of its own; its title, wider than its only link, stays
+   in the flow so that the group takes its width */
+.barre .groupe.premier {
+  flex-direction: column;
+  gap: 0;
+  border-left: none;
+  padding: 0;
+}
+
+.barre .groupe.premier .groupe-titre {
+  position: relative;
+  top: -0.2rem;
+  left: 0;
+  line-height: 0.9rem;
+}
+
 .barre nav a {
   white-space: nowrap;
   text-decoration: none;
@@ -85,15 +128,60 @@ h1 {
   margin-left: auto;
 }
 
-/* Version of colibri-rent-book running, at the right of the bar (after the choice of building when there is one) */
-.version {
+/* Right of the bar: choice of building (when there are several), « Réglages » menu, version running */
+.reglages {
+  position: relative;
   margin-left: auto;
-  font-size: 0.8rem;
+}
+
+.choix-immeuble + .reglages {
+  margin-left: 0;
+}
+
+.reglages-bouton {
   white-space: nowrap;
 }
 
-.choix-immeuble + .version {
-  margin-left: 0.8rem;
+.reglages-bouton.actif {
+  font-weight: 600;
+}
+
+.reglages-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.3rem);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 12rem;
+  padding: 0.3rem 0;
+  background: var(--fond);
+  border: 1px solid var(--bord);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
+}
+
+.reglages-menu a {
+  padding: 0.4rem 0.9rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.reglages-menu a:hover {
+  background: var(--surface);
+}
+
+.reglages-menu a.router-link-active {
+  font-weight: 600;
+}
+
+.reglages-menu .version {
+  margin-top: 0.3rem;
+  padding: 0.5rem 0.9rem 0.2rem;
+  border-top: 1px solid var(--bord);
+  font-size: 0.8rem;
+  color: var(--discret);
+  font-weight: normal;
 }
 
 .barre nav a.router-link-active {
