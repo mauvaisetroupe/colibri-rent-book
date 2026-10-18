@@ -4,10 +4,11 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import {
-  aEncaisser, api, ENERGIES, type Couverture, type Decompte, type FactureResumee, type Paiement, type Regularisation,
-  type Sejour,
+  aEncaisser, api, ENERGIES, type Couverture, type Decompte, type FactureResumee, type Mouvement, type Paiement,
+  type Regularisation, type ReleveResume, type Sejour,
 } from '../api'
 import ChoixExercice from '../components/ChoixExercice.vue'
+import { etatBanque } from '../controleBanque'
 import { useExercice } from '../exercice'
 import { dateFr, euros } from '../format'
 import { useImmeuble } from '../immeuble'
@@ -26,6 +27,8 @@ const couverture = ref<Couverture | null>(null)
 const regularisations = ref<Regularisation[]>([])
 const paiements = ref<Paiement[]>([])
 const sejours = ref<Sejour[]>([])
+const releves = ref<ReleveResume[]>([])
+const mouvementsBanque = ref<Mouvement[]>([])
 const erreur = ref<string | null>(null)
 
 async function charger() {
@@ -36,9 +39,11 @@ async function charger() {
   try {
     const annees = [...new Set([Number(debut.value.slice(0, 4)), Number(fin.value.slice(0, 4))])]
     let lus: Paiement[][]
-    ;[factures.value, decompte.value, couverture.value, regularisations.value, sejours.value, ...lus] = await Promise.all([
+    ;[factures.value, decompte.value, couverture.value, regularisations.value, sejours.value, releves.value,
+      mouvementsBanque.value, ...lus] = await Promise.all([
       api.factures(exercice.immeuble), api.decompte(exercice), api.couverture(exercice),
-      api.regularisations(exercice.immeuble), api.sejours(exercice.immeuble),
+      api.regularisations(exercice.immeuble), api.sejours(exercice.immeuble), api.releves(),
+      api.mouvements('tous', exercice.debut, exercice.fin),
       ...annees.map((a) => api.paiements(exercice.immeuble, a)),
     ])
     paiements.value = lus.flat()
@@ -112,10 +117,26 @@ const etapes = computed<Etape[]>(() => {
     details: [...manquantes, ...impayes],
   }
 
-  // 4. Checks: coverage, overlaps, drafts
+  // 4. Bank: statements imported, movements categorised, payments seen on a statement
+  const b = etatBanque(releves.value, mouvementsBanque.value, paiements.value, debut.value, fin.value)
+  const manquants = b.comptes.reduce((n, x) => n + x.manquants.length, 0)
+  const banqueEtape: Etape = {
+    numero: 4, titre: 'Banque', lien: b.aCategoriser.length || !releves.value.length ? '/banque' : `/controles${query}`,
+    etat: !releves.value.length ? 'attention' : manquants || b.finManquante || b.aCategoriser.length ? 'a-faire'
+      : b.incomplets.length || b.sansMouvement.length ? 'attention' : 'ok',
+    resume: !releves.value.length ? 'Aucun relevé importé' : [
+      b.finManquante ? `relevés importés jusqu'au ${dateFr(b.finManquante)}` : manquants ? `${nombre(manquants, 'relevé manquant', 'relevés manquants')}` : 'Relevés à jour',
+      b.aCategoriser.length ? `${nombre(b.aCategoriser.length, 'mouvement', 'mouvements')} à catégoriser` : 'tout est catégorisé',
+      ...(b.incomplets.length ? [`${b.incomplets.length} à compléter`] : []),
+      ...(b.sansMouvement.length ? [`${nombre(b.sansMouvement.length, 'paiement absent', 'paiements absents')} des relevés`] : []),
+    ].join(' · '),
+    details: b.sansMouvement.map((p) => `Paiement du ${dateFr(p.date_paiement)}, ${p.locataire} : sur aucun relevé`),
+  }
+
+  // 5. Checks: coverage, overlaps, drafts
   const trous = c.energies.flatMap((e) => e.trous.map((t) => ({ ...t, energie: e.energie })))
   const controleEtape: Etape = {
-    numero: 4, titre: 'Contrôles', lien: `/controles${query}`,
+    numero: 5, titre: 'Contrôles', lien: `/controles${query}`,
     etat: trous.length || c.brouillons.length ? 'a-faire' : c.chevauchements.length ? 'attention' : 'ok',
     resume: [
       trous.length ? `${nombre(trous.length, 'période', 'périodes')} sans facture validée` : 'Toute la période est facturée',
@@ -124,24 +145,24 @@ const etapes = computed<Etape[]>(() => {
     details: trous.map((t) => `${ENERGIES[t.energie]} : aucune facture validée du ${dateFr(t.debut)} au ${dateFr(t.fin)}`),
   }
 
-  // 5. Statement
+  // 6. Statement
   const somme = (cle: 'total' | 'provisions' | 'solde') =>
     d.sejours.reduce((t, s) => t.plus(s[cle]), new Big(0)).toString()
   const decompteEtape: Etape = {
-    numero: 5, titre: 'Décompte', lien: `/decompte${query}`,
+    numero: 6, titre: 'Décompte', lien: `/decompte${query}`,
     etat: d.avertissements.some((a) => !a.includes('chevauchement')) ? 'attention' : 'ok',
     resume: `Charges des locataires ${euros(somme('total'))} · provisions ${euros(somme('provisions'))} · `
       + `solde ${euros(somme('solde'))}`,
     details: [],
   }
 
-  // 6. Regularisations of the exercise (current ones: not replaced)
+  // 7. Regularisations of the exercise (current ones: not replaced)
   const courantes = regularisations.value.filter((r) => r.debut === debut.value && r.fin === fin.value && !r.remplacee_par)
   const envoyees = courantes.filter((r) => r.etat !== 'brouillon')
   const enAttente = envoyees.filter(aEncaisser)
   const regularisationEtape: Etape = {
     // Stays still without a regularisation over the exercise: the creation page, else the list
-    numero: 6, titre: 'Régularisations',
+    numero: 7, titre: 'Régularisations',
     lien: courantes.length < presents.length ? `/regularisations/nouvelle${query}` : '/regularisations',
     etat: envoyees.length >= presents.length && presents.length ? 'ok' : courantes.length ? 'attention' : 'a-faire',
     resume: `${nombre(envoyees.length, 'envoyée', 'envoyées')} sur ${nombre(presents.length, 'séjour', 'séjours')}`
@@ -151,16 +172,16 @@ const etapes = computed<Etape[]>(() => {
     details: enAttente.map((r) => `${r.locataire} : reste ${euros(new Big(r.solde).minus(r.montant_recu).toString())}`),
   }
 
-  // 7. Tax summary of the calendar year of the end of the exercise
+  // 8. Tax summary of the calendar year of the end of the exercise
   const anneeFiscale = Number(fin.value.slice(0, 4))
   const fiscalEtape: Etape = {
-    numero: 7, titre: 'Synthèse fiscale', lien: '/fiscal',
+    numero: 8, titre: 'Synthèse fiscale', lien: '/fiscal',
     etat: 'ok',
     resume: `Charges non récupérées et vacance de ${anneeFiscale}, pour la déclaration de revenus fonciers`,
     details: [],
   }
 
-  return [factureEtape, sejourEtape, provisionEtape, controleEtape, decompteEtape, regularisationEtape, fiscalEtape]
+  return [factureEtape, sejourEtape, provisionEtape, banqueEtape, controleEtape, decompteEtape, regularisationEtape, fiscalEtape]
 })
 
 function moisSuivant(m: string) {
@@ -185,8 +206,8 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
   <div class="cycle">
     <div class="phase">Tenue des comptes, au fil de l'année</div>
     <template v-for="e in etapes" :key="e.numero">
-      <div v-if="e.numero === 4" class="phase">Bilan de l'exercice</div>
-      <div v-if="e.numero === 7" class="phase">Clôture</div>
+      <div v-if="e.numero === 5" class="phase">Bilan de l'exercice</div>
+      <div v-if="e.numero === 8" class="phase">Clôture</div>
       <RouterLink :to="e.lien" class="etape" :class="e.etat">
         <span class="pastille-etape">{{ SYMBOLES[e.etat] }}</span>
         <span class="numero">{{ e.numero }}</span>
@@ -276,7 +297,7 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
   </details>
 
   <details>
-    <summary><strong>Banque</strong> (tenue des comptes) : relevés bancaires, catégorisation des mouvements</summary>
+    <summary><strong>4. Banque</strong> : relevés bancaires, catégorisation des mouvements</summary>
     <ol>
       <li><strong>Banque › Relevés bancaires</strong> : déposer les relevés PDF ; l'extracteur de la banque (voir
         <strong>Fournisseurs</strong>) les lit dans le navigateur, et un relevé n'est enregistré que si solde précédent +
@@ -297,16 +318,18 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
   </details>
 
   <details>
-    <summary><strong>4. Contrôles</strong> : rien d'oublié, rien de compté deux fois</summary>
+    <summary><strong>5. Contrôles</strong> : rien d'oublié, rien de compté deux fois</summary>
     <p>Pour l'exercice choisi, chaque énergie doit être couverte par des factures validées du premier au dernier jour.
       Un <em>trou</em> signale une facture manquante ou encore en brouillon ; un <em>chevauchement</em>, une période
       facturée deux fois. À régler avant de calculer le décompte. Le bloc « Paiements » compare chaque mois le loyer et
       la provision reçus au montant appelé (fiche du locataire) : payé, payé en partie (en orange), rien reçu (✗), et
-      le reste dû par locataire.</p>
+      le reste dû par locataire. Le bloc « Banque » liste les relevés manquants, les mouvements à catégoriser ou à
+      compléter (un loyer reçu mais pas saisi, une facture de travaux à saisir) et les paiements de l'exercice
+      qu'aucun relevé ne montre (saisie en double, paiement par l'agence, ou jamais reçu).</p>
   </details>
 
   <details>
-    <summary><strong>5. Décompte</strong> : ce que doit chaque locataire</summary>
+    <summary><strong>6. Décompte</strong> : ce que doit chaque locataire</summary>
     <p>Une ligne par séjour : quote-part par énergie, total, provisions, solde (positif : à payer ; négatif : à
       rembourser). Cliquer sur un montant montre les lignes de facture qui le composent et le calcul. Les avertissements
       en tête signalent ce qui pourrait fausser le résultat. « Exporter en Excel » produit le fichier pour
@@ -314,7 +337,7 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
   </details>
 
   <details>
-    <summary><strong>6. Régularisations</strong> : figer, envoyer, corriger</summary>
+    <summary><strong>7. Régularisations</strong> : figer, envoyer, corriger</summary>
     <ol>
       <li>L'écran liste toutes les régularisations, quelle que soit leur période, avec des filtres par période, état et
         locataire. « + Nouvelle
@@ -348,7 +371,7 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
   </details>
 
   <details>
-    <summary><strong>7. Synthèse fiscale</strong> : pour la déclaration de revenus fonciers</summary>
+    <summary><strong>8. Synthèse fiscale</strong> : pour la déclaration de revenus fonciers</summary>
     <p>Pour une année civile : charges de la vacance, charges restées impayées par les locataires partis dans l'année
       (sur tout leur séjour, versements reçus au 31 décembre), dépôts de garantie conservés pour charges. Au départ d'un
       locataire, saisir dans son séjour la part du dépôt conservée pour charges. Méthode à faire valider par

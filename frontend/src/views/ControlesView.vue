@@ -3,15 +3,17 @@ import { computed, onMounted, ref, watch } from 'vue'
 
 import { api, ENERGIES, type Couverture } from '../api'
 import ChoixExercice from '../components/ChoixExercice.vue'
+import ControleBanque from '../components/ControleBanque.vue'
 import Frise, { type Piste } from '../components/Frise.vue'
 import PaiementsRecus from '../components/PaiementsRecus.vue'
 import { useExercice } from '../exercice'
 import { dateFr } from '../format'
 import { useImmeuble } from '../immeuble'
 
-// Checks of an exercise, in two groups. Invoices: coverage of the exercise by validated invoices (SPEC R1), a gap is a
+// Checks of an exercise, in three groups. Invoices: coverage of the exercise by validated invoices (SPEC R1), a gap is a
 // period nobody is charged for (forgotten invoice, draft), an overlap a period charged twice; gas and electricity:
-// consumption lines only. Payments: each month received against the amount called (PaiementsRecus).
+// consumption lines only. Payments: each month received against the amount called (PaiementsRecus). Bank: statements,
+// movements and payments seen on them (ControleBanque).
 
 const { immeubleId, pret } = useImmeuble()
 const { debut, fin } = useExercice()
@@ -118,4 +120,5 @@ const pistes = computed<Piste[]>(() =>
   </section>
 
   <PaiementsRecus v-if="immeubleId !== null" :immeuble="immeubleId" :debut="debut" :fin="fin" />
+  <ControleBanque v-if="immeubleId !== null" :immeuble="immeubleId" :debut="debut" :fin="fin" />
 </template>
