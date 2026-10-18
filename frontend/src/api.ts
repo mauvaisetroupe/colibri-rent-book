@@ -1,3 +1,5 @@
+import type { PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser'
+
 // Client of the Colibri API (same origin: /api, relayed by Vite in development and Nginx in production).
 // Types mirror backend/src/invoices/types.ts and checks.ts: amounts are decimal strings, dates ISO with
 // inclusive bounds.
@@ -594,6 +596,12 @@ export type FactureSaisie = FactureEnTete & {
   lignes: Ligne[]
 }
 
+// ---------------------------------------------------------------- authentication (ADR 0020)
+
+export type Utilisateur = { id: number, email: string, nom: string }
+export type Passkey = { id: string, appareil: string, cree_le: string, utilisee_le: string | null }
+export type JetonApi = { id: number, nom: string, cree_le: string, utilise_le: string | null, revoque_le: string | null }
+
 export class ApiError extends Error {
   readonly status: number
   readonly body: Record<string, unknown>
@@ -614,9 +622,18 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   return answer<T>(response)
 }
 
+// The pages open without a session (ADR 0020): connecting, registering a passkey from a link
+export const PAGES_PUBLIQUES = ['/connexion', '/enregistrer']
+
 async function answer<T>(response: Response): Promise<T> {
   if (response.status === 204) {
     return undefined as T
+  }
+  // Session ended (or none): to the login page, back here once connected
+  if (response.status === 401 && !new URL(response.url).pathname.startsWith('/api/auth/')
+    && !PAGES_PUBLIQUES.includes(window.location.pathname)) {
+    window.location.assign(`/connexion?retour=${encodeURIComponent(window.location.pathname + window.location.search)}`)
+    return new Promise<T>(() => {})
   }
   const json = await response.json().catch(() => ({}))
   if (!response.ok) {
@@ -626,6 +643,22 @@ async function answer<T>(response: Response): Promise<T> {
 }
 
 export const api = {
+  // ---------------------------------------------------------------- authentication (ADR 0020)
+  session: () => request<{ utilisateur: Utilisateur }>('GET', '/auth/session'),
+  connexionOptions: () => request<{ id: string, options: PublicKeyCredentialRequestOptionsJSON }>('POST', '/auth/connexion/options'),
+  connexion: (id: string, reponse: unknown) => request<{ ok: true }>('POST', '/auth/connexion', { id, reponse }),
+  deconnexion: () => request<void>('POST', '/auth/deconnexion'),
+  // From a link (jeton), or for the account connected (this device)
+  enregistrementOptions: (jeton: string | null) => request<{ id: string, options: PublicKeyCredentialCreationOptionsJSON, utilisateur: Utilisateur }>(
+    'POST', '/auth/enregistrement/options', { jeton }),
+  enregistrement: (id: string, reponse: unknown, appareil: string) => request<{ ok: true }>('POST', '/auth/enregistrement', { id, reponse, appareil }),
+  passkeys: () => request<Passkey[]>('GET', '/auth/passkeys'),
+  supprimerPasskey: (id: string) => request<void>('DELETE', `/auth/passkeys/${encodeURIComponent(id)}`),
+  lienAppareil: () => request<{ url: string, expire_le: string }>('POST', '/auth/liens'),
+  jetons: () => request<JetonApi[]>('GET', '/auth/jetons'),
+  creerJeton: (nom: string) => request<{ id: number, jeton: string }>('POST', '/auth/jetons', { nom }),
+  revoquerJeton: (id: number) => request<void>('DELETE', `/auth/jetons/${id}`),
+
   immeubles: () => request<Immeuble[]>('GET', '/immeubles'),
   immeuble: (id: number) => request<ImmeubleDetail>('GET', `/immeubles/${id}`),
   creerImmeuble: (data: Pick<Immeuble, 'code' | 'nom' | 'adresse'>) => request<Immeuble>('POST', '/immeubles', data),

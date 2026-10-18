@@ -401,6 +401,14 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
   </details>
 
   <details>
+    <summary><strong>Mon compte</strong> (menu ⚙ Réglages) : passkeys, autres appareils, jetons d'API</summary>
+    <p>On se connecte par passkey : l'empreinte, le visage ou le code de l'appareil, sans mot de passe. « Mon compte »
+      liste vos passkeys ; « Ajouter une passkey ici » en crée une sur cet appareil, « Ajouter un autre appareil »
+      affiche un QR code (valable 15 minutes, une seule fois) que le téléphone scanne pour créer la sienne. Gardez au
+      moins deux appareils. Les jetons d'API servent aux scripts ; « Se déconnecter » ferme la session.</p>
+  </details>
+
+  <details>
     <summary><strong>Fournisseurs</strong> (menu ⚙ Réglages) : extracteurs, factures confidentielles</summary>
     <ol>
       <li>La liste montre chaque fournisseur, ses factures et la version de son extracteur. Sur la page d'un

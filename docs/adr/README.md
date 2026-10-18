@@ -26,5 +26,6 @@ seed cités ici sont dans ce dépôt-là, qui lance aussi les tests sur ces donn
 | 0017 | [Remplacer une facture validée](0017-remplacer-une-facture-validee.md) | Accepté (complète 0003) |
 | 0018 | [Relevés bancaires : extracteurs, mouvements, rapprochement](0018-releves-bancaires.md) | Accepté |
 | 0019 | [Travaux payés en plusieurs fois, dépôts de garantie, associés](0019-reglements-depots-associes.md) | Accepté (complète 0015, 0018) |
+| 0020 | [Authentification par passkey, dans l'application](0020-authentification-par-passkey.md) | Accepté |
 
-La prochaine décision du logiciel prend le numéro 0020.
+La prochaine décision du logiciel prend le numéro 0021.

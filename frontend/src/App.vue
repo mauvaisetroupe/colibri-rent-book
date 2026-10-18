@@ -47,6 +47,7 @@ const REGLAGES: Entree[] = [
   { label: 'Immeuble', icon: 'oi oi-building', route: '/immeuble' },
   { label: 'Société et associés', icon: 'oi oi-address-book', route: '/societe' },
   { label: 'Fournisseurs', icon: 'oi oi-cog', route: '/fournisseurs' },
+  { label: 'Mon compte', icon: 'oi oi-user', route: '/compte' },
 ]
 
 // The current screen: the most precise route of the menu the path starts with (/banque/releves is not /banque)
@@ -96,7 +97,7 @@ const reglageActif = computed(() => REGLAGES.some((r) => actif(r.route!)))
 </script>
 
 <template>
-  <header class="barre">
+  <header v-if="!route.meta.publique" class="barre">
     <Menubar :model="menu" class="menu">
       <template #start>
         <RouterLink to="/" class="marque" title="Accueil">

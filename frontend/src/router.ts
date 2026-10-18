@@ -18,6 +18,10 @@ export default createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', name: 'accueil', component: AccueilView },
+    // Open without a session (ADR 0020): no menu bar
+    { path: '/connexion', name: 'connexion', component: () => import('./views/ConnexionView.vue'), meta: { publique: true } },
+    { path: '/enregistrer', name: 'enregistrer', component: () => import('./views/EnregistrementView.vue'), meta: { publique: true } },
+    { path: '/compte', name: 'compte', component: () => import('./views/CompteView.vue') },
     { path: '/factures', name: 'factures', component: FacturesView },
     { path: '/factures/:id', name: 'facture', component: FactureView, props: (route) => ({ id: Number(route.params.id) }) },
     { path: '/controles', name: 'controles', component: ControlesView },

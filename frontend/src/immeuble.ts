@@ -1,6 +1,6 @@
 import { ref, watch } from 'vue'
 
-import { api, type Immeuble } from './api'
+import { api, PAGES_PUBLIQUES, type Immeuble } from './api'
 
 // Building chosen on every screen. Remembered in this browser only (a convenience: the page works without it).
 
@@ -38,6 +38,7 @@ export async function rechargerImmeubles() {
 }
 
 export function useImmeuble() {
-  chargement ??= rechargerImmeubles()
+  // Not on the login pages (no session yet: the page loads again once connected)
+  chargement ??= PAGES_PUBLIQUES.includes(window.location.pathname) ? Promise.resolve() : rechargerImmeubles()
   return { immeubles, immeubleId, pret: chargement }
 }

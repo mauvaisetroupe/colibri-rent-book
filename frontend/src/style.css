@@ -1009,3 +1009,32 @@ button.actif {
 .p-datatable th.nombre .p-datatable-column-header-content {
   justify-content: flex-end;
 }
+
+/* Login and passkey registration (ADR 0020): a card in the middle, without the menu bar */
+.carte-auth {
+  max-width: 28rem;
+  margin: 12vh auto 0;
+  padding: 1.5rem 1.8rem;
+  border: 1px solid var(--bord);
+  border-radius: 10px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.carte-auth h1 {
+  margin: 0;
+}
+
+.carte-auth h1 small {
+  font-size: 0.55em;
+  color: var(--discret);
+  font-weight: normal;
+}
+
+.carte-auth button.principal {
+  font-size: 1.05rem;
+  padding: 0.6rem 1rem;
+}
+

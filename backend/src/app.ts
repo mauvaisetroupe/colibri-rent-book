@@ -3,6 +3,7 @@ import Fastify, { type FastifyServerOptions } from 'fastify'
 import type { Pool } from 'pg'
 
 
+import { authRoutes, proteger, type AuthOptions } from './auth.js'
 import assembleeRoutes from './routes/assemblees.js'
 import controleRoutes from './routes/controle.js'
 import decompteRoutes from './routes/decompte.js'
@@ -25,11 +26,18 @@ export type AppOptions = {
   storageDir: string
   // Built frontend (frontend/dist), served by the API in production (ADR 0011); absent in development (Vite)
   frontendDir?: string
+  // Authentication by passkey (ADR 0020); absent: no authentication (tests, development without COLIBRI_ORIGIN)
+  auth?: AuthOptions
 }
 
 /** Builds the application on a given pool and storage folder, so that tests can use their own. */
-export async function buildApp({ db, storageDir, frontendDir }: AppOptions, options: FastifyServerOptions = {}) {
+export async function buildApp({ db, storageDir, frontendDir, auth }: AppOptions, options: FastifyServerOptions = {}) {
   const app = Fastify(options)
+
+  if (auth) {
+    proteger(app, db, auth)
+    await app.register(authRoutes, { prefix: '/api', db, ...auth })
+  }
 
   await app.register(healthRoutes, { prefix: '/api', db })
   await app.register(immeubleRoutes, { prefix: '/api', db })

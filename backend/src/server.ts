@@ -10,7 +10,18 @@ const storageDir = process.env.STORAGE_DIR ?? fileURLToPath(new URL('../storage/
 // Production (container, ADR 0011): the built frontend is served by the API
 const frontendDir = process.env.FRONTEND_DIR || undefined
 
-const app = await buildApp({ db: pool, storageDir, frontendDir }, { logger: true })
+// Authentication by passkey (ADR 0020), bound to the address of the application. Required in production: without it,
+// the API would be open to anyone who reaches it
+const origin = process.env.COLIBRI_ORIGIN?.replace(/\/$/, '') || undefined
+if (!origin && process.env.NODE_ENV === 'production') {
+  console.error('COLIBRI_ORIGIN manquant (adresse de l\'application, ex. https://colibri.example.org) : authentification obligatoire en production')
+  process.exit(1)
+}
+
+const app = await buildApp({ db: pool, storageDir, frontendDir, auth: origin ? { origin } : undefined }, { logger: true })
+if (!origin) {
+  app.log.warn('COLIBRI_ORIGIN absent : pas d\'authentification (développement seulement)')
+}
 
 // PDFs of a storage written before the folders by kind (migration 014): moved into their folder, once
 const ranges = await rangerStockage(pool, storageDir)
