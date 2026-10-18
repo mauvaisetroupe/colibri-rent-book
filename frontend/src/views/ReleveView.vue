@@ -9,7 +9,7 @@ import Toast from 'openvue/toast'
 import { useConfirm } from 'openvue/useconfirm'
 import { useToast } from 'openvue/usetoast'
 import { computed, ref, watch } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { api, CATEGORIES_MOUVEMENT, type CategorieMouvement, type ReleveDetail, type ReleveResume } from '../api'
 import { dateFr, euros } from '../format'
@@ -20,6 +20,9 @@ import { dateFr, euros } from '../format'
 
 const props = defineProps<{ id: number }>()
 const router = useRouter()
+// Opened from a movement (« Catégorisation »): that movement is highlighted
+const route = useRoute()
+const surligne = computed(() => Number(route.query.mouvement) || null)
 const confirm = useConfirm()
 const toast = useToast()
 
@@ -107,7 +110,10 @@ function supprimer() {
 
     <div class="cote-a-cote">
       <div class="mouvements">
-        <DataTable :value="releve.mouvements" data-key="id" size="small" striped-rows>
+        <DataTable
+          :value="releve.mouvements" data-key="id" size="small" striped-rows
+          :row-class="(m: { id: number }) => (m.id === surligne ? 'surligne' : '')"
+        >
           <template #header>
             <div class="entete-table">
               <span>{{ releve.mouvements.length }} mouvement(s) lus, {{ categorises }} catégorisé(s)</span>
@@ -192,6 +198,10 @@ function supprimer() {
   white-space: pre-line;
   font-size: 0.8rem;
   color: var(--discret);
+}
+
+.mouvements :deep(tr.surligne > td) {
+  background: var(--fond-avertissement);
 }
 
 .petit {

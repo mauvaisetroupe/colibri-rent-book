@@ -193,6 +193,11 @@ function enregistrerNote() {
   return agir(() => api.categoriserMouvement(s.mouvement.id, s.categorie, s.note.trim() || null), 'Enregistré')
 }
 
+// The note of a categorised movement, edited at any time (empty: removed, except for « autre »)
+function editerNote(m: Mouvement) {
+  saisieNote.value = { mouvement: m, categorie: m.categorie!, note: m.note ?? '', titre: 'Note du mouvement' }
+}
+
 const retirerCategorie = (m: Mouvement) => agir(() => api.retirerCategorie(m.id), 'Catégorie retirée')
 
 // The menu of the categories (those that apply to the sense of the movement)
@@ -652,6 +657,14 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
           <div v-if="data.statut === 'incomplet'" class="discret">reste {{ euros(reste(data)) }}</div>
         </template>
       </Column>
+      <Column header="Relevé" style="width: 7.5rem">
+        <template #body="{ data }">
+          <RouterLink
+            :to="{ name: 'releve', params: { id: data.releve_id }, query: { mouvement: data.id } }" class="lien-releve"
+            title="Ouvrir le relevé, ce mouvement surligné" @click.stop
+          ><i class="oi oi-file-pdf" /> {{ dateFr(data.date_releve) }}</RouterLink>
+        </template>
+      </Column>
       <!-- To categorise: the proposal (one button), then any other category -->
       <Column v-if="onglet === 'a_categoriser'" header="Proposition" style="width: 22rem">
         <template #body="{ data }">
@@ -670,18 +683,28 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
           />
         </template>
       </Column>
-      <!-- Categorised: the category, its note, ✕ to take it back -->
-      <Column v-else header="Catégorie" style="width: 30rem">
+      <!-- Categorised: the category, ✕ to take it back; then its note, ✎ to edit it -->
+      <Column v-if="onglet === 'categorises'" header="Catégorie" style="width: 23rem">
         <template #body="{ data }">
           <div class="categorie">
             <Tag :value="nomCategorie(data.categorie)" :icon="iconeCategorie(data.categorie)" severity="info" />
             <Tag v-if="data.statut === 'incomplet'" value="à compléter" severity="warn" />
-            <span v-if="data.note" class="discret note">{{ data.note }}</span>
             <Button
               icon="oi oi-times" size="small" text rounded severity="secondary"
               :disabled="occupe || data.paiements.length > 0 || data.travaux.length > 0"
               :title="data.paiements.length || data.travaux.length ? 'Détacher d\'abord les paiements ou travaux du détail' : 'Retirer la catégorie'"
               @click="retirerCategorie(data)"
+            />
+          </div>
+        </template>
+      </Column>
+      <Column v-if="onglet === 'categorises'" header="Note" style="width: 18rem">
+        <template #body="{ data }">
+          <div class="note-cellule">
+            <span class="discret note">{{ data.note }}</span>
+            <Button
+              icon="oi oi-pencil" size="small" text rounded severity="secondary" :disabled="occupe"
+              :title="data.note ? 'Modifier la note' : 'Ajouter une note'" @click.stop="editerNote(data)"
             />
           </div>
         </template>
@@ -775,10 +798,11 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
   >
     <form v-if="saisieNote" class="note-form" @submit.prevent="enregistrerNote">
       <p class="discret">{{ saisieNote.mouvement.libelle }} du {{ dateFr(saisieNote.mouvement.date_operation) }} : {{ euros(saisieNote.mouvement.montant) }}</p>
-      <InputText v-model="saisieNote.note" required autofocus placeholder="dépôt de garantie, apport des associés…" fluid />
+      <InputText v-model="saisieNote.note" :required="saisieNote.categorie === 'autre'" autofocus placeholder="dépôt de garantie, apport des associés…" fluid />
+      <p v-if="saisieNote.categorie !== 'autre'" class="discret">Vide : la note est retirée.</p>
       <div class="actions-detail fin">
         <Button label="Annuler" text @click="saisieNote = null" />
-        <Button type="submit" label="Enregistrer" :disabled="occupe || !saisieNote.note.trim()" />
+        <Button type="submit" label="Enregistrer" :disabled="occupe || (saisieNote.categorie === 'autre' && !saisieNote.note.trim())" />
       </div>
     </form>
   </Dialog>
@@ -815,6 +839,18 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
 </template>
 
 <style scoped>
+.lien-releve {
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.note-cellule {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem;
+}
+
 .a-completer {
   margin-left: 0.3rem;
   padding: 0 0.4rem;
@@ -874,7 +910,7 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
   gap: 0.4rem;
 }
 
-.categorie .note {
+.note-cellule .note {
   font-size: 0.85rem;
 }
 
