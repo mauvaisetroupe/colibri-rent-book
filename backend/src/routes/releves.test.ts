@@ -20,6 +20,7 @@ describe('bank statements', { skip: skipWithoutDatabase }, () => {
   let storageDir: string
   let extracteur: number
   let sejour: number
+  let immeuble: number
   let pdfNumero = 0
 
   // A different PDF each time (its content gives its name in the storage)
@@ -58,7 +59,7 @@ describe('bank statements', { skip: skipWithoutDatabase }, () => {
     extracteur = (await pool.query<{ id: number }>(
       `INSERT INTO extracteur (fournisseur_id, version, type, energie, reglages, source, code, moteur)
        SELECT id, 1, 'releve', NULL, '{}', 'source', 'code', 2 FROM fournisseur WHERE nom = 'Banque Exemple' RETURNING id`)).rows[0]!.id
-    const immeuble = (await pool.query<{ id: number }>(
+    immeuble = (await pool.query<{ id: number }>(
       'INSERT INTO immeuble (code, nom) VALUES (\'IMM1\', \'Immeuble fictif\') RETURNING id')).rows[0]!.id
     const lot = (await pool.query<{ id: number }>(
       'INSERT INTO lot (immeuble_id, code, tantiemes) VALUES ($1, \'L1\', 100) RETURNING id', [immeuble])).rows[0]!.id
@@ -150,10 +151,12 @@ describe('bank statements', { skip: skipWithoutDatabase }, () => {
     const emprunt = await app.inject({ method: 'PUT', url: `/api/mouvements/${debit.id}/categorie`, payload: { categorie: 'emprunt' } })
     assert.deepEqual([emprunt.json().statut, emprunt.json().categorie], ['categorise', 'emprunt'])
     // Works on a movement of another category are refused
-    assert.equal((await app.inject({
+    const facture = await app.inject({
       method: 'POST', url: '/api/travaux',
-      payload: { immeuble_id: 1, fournisseur: 'X', description: 'Y', nature: 'entretien', date_facture: '2026-01-06', montant_ttc: '149.50', mouvement_id: debit.id },
-    })).statusCode, 400)
+      payload: { immeuble_id: immeuble, fournisseur: 'X', description: 'Y', nature: 'entretien', date_facture: '2026-01-06', montant_ttc: '149.50' },
+    })
+    assert.equal((await app.inject({ method: 'POST', url: `/api/mouvements/${debit.id}/lier`, payload: { travaux_id: facture.json().id } })).statusCode, 400)
+    await app.inject({ method: 'DELETE', url: `/api/travaux/${facture.json().id}` })
     assert.equal((await app.inject({ method: 'DELETE', url: `/api/mouvements/${debit.id}/categorie` })).json().statut, 'a_categoriser')
 
     const fevrier = (await app.inject('/api/mouvements?statut=a_categoriser')).json().find((x: { date_operation: string }) => x.date_operation === '2026-02-04')
@@ -175,6 +178,61 @@ describe('bank statements', { skip: skipWithoutDatabase }, () => {
     assert.deepEqual(groupe.map((x: { type: string, ids: number[] }) => [x.type, x.ids]), [['groupe', [main.json().id, second.json().id]]])
     const tous = await app.inject({ method: 'POST', url: `/api/mouvements/${fevrier.id}/lier`, payload: { paiement_ids: groupe[0].ids } })
     assert.deepEqual([tous.json().statut, tous.json().paiements.length], ['categorise', 2])
+  })
+
+  test('works paid by two transfers; a deposit paid with the rent, then refunded alone', async () => {
+    const r = await importer(releve('2026-04-30', '9999', '8099', [
+      mvt('2026-03-10', 'VIR ACOMPTE DEVIS', '-1000'),
+      mvt('2026-03-12', 'VIR DE ALICE EXEMPLE', '1000'),
+      mvt('2026-04-10', 'VIR SOLDE FACTURE', '-1500'),
+      mvt('2026-04-15', 'VIR REMB GARANTIE ALICE', '-400'),
+    ]))
+    assert.equal(r.statusCode, 201, r.body)
+    const [acompte, loyer, solde, remboursement] = r.json().mouvements
+
+    // The invoice first, then the deposit's transfer linked to it: the movement becomes « travaux »
+    const travaux = await app.inject({
+      method: 'POST', url: '/api/travaux',
+      payload: { immeuble_id: immeuble, fournisseur: 'Maçon Exemple', description: 'Ravalement', nature: 'entretien', date_facture: '2026-04-01', montant_ttc: '2500' },
+    })
+    assert.equal(travaux.statusCode, 201, travaux.body)
+    await app.inject({ method: 'POST', url: `/api/mouvements/${acompte.id}/lier`, payload: { travaux_id: travaux.json().id } })
+    assert.deepEqual([(await mouvement(acompte.id)).categorie, (await mouvement(acompte.id)).statut], ['travaux', 'categorise'])
+    // The balance's transfer: what remains of the invoice is proposed, then linked as a second payment
+    assert.deepEqual((await mouvement(solde.id)).possibles.map((x: { type: string, id: number }) => [x.type, x.id]), [['travaux', travaux.json().id]])
+    const lie = await app.inject({ method: 'POST', url: `/api/mouvements/${solde.id}/lier`, payload: { travaux_id: travaux.json().id } })
+    assert.deepEqual([lie.json().statut, lie.json().travaux[0].total, lie.json().travaux[0].reste], ['categorise', '1500.00', '0.00'])
+    // Paid in full: nothing more to link
+    assert.equal((await app.inject({ method: 'POST', url: `/api/mouvements/${remboursement.id}/lier`, payload: { travaux_id: travaux.json().id } })).statusCode, 400)
+
+    // 1000 = rent 600 + deposit 400
+    await app.inject({
+      method: 'POST', url: '/api/paiements',
+      payload: { sejour_id: sejour, date_paiement: '2026-03-12', mois: '2026-03', loyer: '600', mode: 'virement', mouvement_id: loyer.id },
+    })
+    assert.equal((await app.inject({
+      method: 'POST', url: '/api/depots', payload: { sejour_id: sejour, date_versement: '2026-03-12', montant: '500', mouvement_id: loyer.id },
+    })).statusCode, 400)
+    const verse = await app.inject({
+      method: 'POST', url: '/api/depots', payload: { sejour_id: sejour, date_versement: '2026-03-12', montant: '400', mouvement_id: loyer.id },
+    })
+    assert.equal(verse.statusCode, 201, verse.body)
+    const m = await mouvement(loyer.id)
+    assert.deepEqual([m.categorie, m.statut, m.couvert, m.depots.length], ['locataire', 'categorise', '1000.00', 1])
+
+    // Refunded alone: a negative deposit, the movement becomes « depot_garantie »; a positive one is refused there
+    assert.equal((await app.inject({
+      method: 'POST', url: '/api/depots', payload: { sejour_id: sejour, date_versement: '2026-04-15', montant: '400', mouvement_id: remboursement.id },
+    })).statusCode, 400)
+    const rendu = await app.inject({
+      method: 'POST', url: '/api/depots', payload: { sejour_id: sejour, date_versement: '2026-04-15', montant: '-400' },
+    })
+    const lieDepot = await app.inject({ method: 'POST', url: `/api/mouvements/${remboursement.id}/lier`, payload: { depot_id: rendu.json().id } })
+    assert.deepEqual([lieDepot.json().categorie, lieDepot.json().statut], ['depot_garantie', 'categorise'])
+    assert.equal((await app.inject({ method: 'PUT', url: `/api/mouvements/${remboursement.id}/categorie`, payload: { categorie: 'travaux' } })).statusCode, 409)
+    assert.deepEqual((await app.inject(`/api/depots?immeuble=${immeuble}`)).json().map((d: { montant: string }) => d.montant), ['400.00', '-400.00'])
+    const delie = await app.inject({ method: 'POST', url: `/api/mouvements/${remboursement.id}/delier`, payload: { depot_id: rendu.json().id } })
+    assert.equal(delie.json().statut, 'incomplet')
   })
 
   test('a storage written before the folders is put in order at start-up', async () => {

@@ -63,10 +63,26 @@ export type Sejour = {
   // null while the stay goes on
   sortie: string | null
   note: string | null
+  // Deposit of the lease
   depot_garantie: string | null
   // Part of the deposit kept at exit for unpaid charges (SPEC § 9)
   depot_retenu_charges: string | null
+  // Held (ADR 0019): paid minus refunded; null without any payment recorded
+  depot_detenu: string | null
 }
+
+// A deposit paid by a tenant (positive) or refunded to them (negative), seen on a bank statement when linked (ADR 0019)
+export type VersementDepot = {
+  id: number
+  sejour_id: number
+  locataire: string
+  lot: string
+  date_versement: string
+  montant: string
+  mouvement_id: number | null
+  note: string | null
+}
+export type VersementDepotSaisi = Omit<VersementDepot, 'id' | 'locataire' | 'lot' | 'mouvement_id'> & { mouvement_id?: number | null }
 
 export type Provision = {
   // id of the yearly total entered by hand (null when the amount comes from the monthly payments)
@@ -271,12 +287,13 @@ export type SyntheseFiscale = {
   total_deductible: string
   non_recuperables: { facture_id: number, fournisseur: string, numero: string, date_facture: string, libelle: string, montant: string }[]
   abandons_en_cours: { regularisation_id: number, locataire: string, lot: string, debut: string, fin: string, reste: string }[]
-  travaux: Travaux[]
+  travaux: TravauxFiscal[]
   total_travaux_deductibles: string
-  travaux_non_payes: Travaux[]
+  travaux_non_payes: TravauxFiscal[]
 }
 
-// Works paid by the owner (ADR 0015): deductible according to their nature, in the tax year of their payment
+// Works paid by the owner (ADR 0015): deductible according to their nature; paid by bank movements only (ADR 0019),
+// one or several, each in the tax year of its movement
 export type NatureTravaux = 'entretien' | 'amelioration' | 'construction'
 export const NATURES_TRAVAUX: Record<NatureTravaux, string> = {
   entretien: 'Entretien, réparation',
@@ -293,14 +310,23 @@ export type Travaux = {
   description: string
   nature: NatureTravaux
   date_facture: string
-  date_paiement: string | null
   montant_ttc: string
   pdf: boolean
   note: string | null
   deductible: boolean
-  // Paid as seen on a bank statement (ADR 0018)
-  mouvement_id?: number | null
+  reglements: ReglementTravaux[]
+  paye: string
+  reste: string
+  // Date of the last payment, null when nothing is paid
+  date_paiement: string | null
 }
+
+// One payment of a works invoice: the bank movement that paid it (its date: the tax year), for an amount
+export type ReglementTravaux = { id: number, mouvement_id: number, date_paiement: string, libelle: string, montant: string }
+
+// In the tax summary: one payment of the year (date_paiement, montant), or what remains unpaid (date_paiement null)
+export type TravauxFiscal = Pick<Travaux, 'id' | 'fournisseur' | 'description' | 'nature' | 'lot' | 'date_facture' | 'montant_ttc'
+  | 'deductible'> & { date_paiement: string | null, montant: string }
 
 // The company, its partners, its general meetings (ADR 0016)
 export type Societe = { denomination: string, forme: string, capital: string | null, siege: string | null, rcs: string | null }
@@ -341,8 +367,9 @@ export type Assemblee = {
 
 export type AssembleeResumee = Pick<Assemblee, 'id' | 'numero' | 'type' | 'date' | 'statut' | 'pv_signe'> & { nb_resolutions: number }
 
+// The invoice only: its payments are bank movements linked to it (« Catégorisation », or the invoice)
 export type TravauxSaisie = Pick<Travaux, 'immeuble_id' | 'lot_id' | 'fournisseur' | 'description' | 'nature'
-  | 'date_facture' | 'date_paiement' | 'montant_ttc' | 'note'> & { mouvement_id?: number | null }
+  | 'date_facture' | 'montant_ttc' | 'note'>
 
 // ---------------------------------------------------------------- bank statements (ADR 0018)
 
@@ -361,13 +388,15 @@ export type Releve = {
 // suite: the opening balance is the closing balance of the previous statement of the account (null: the first one)
 export type ReleveResume = Releve & { nb_mouvements: number, suite: boolean | null }
 
-// What a bank movement is (ADR 0018), fixed in the code: « locataire » and « travaux » have a detail (the payments, the
-// works linked to it); the others only a note, required for « autre ». sens: the movements it applies to.
-export type CategorieMouvement = 'locataire' | 'travaux' | 'emprunt' | 'assurance' | 'energie' | 'eau' | 'impots'
-  | 'frais_bancaires' | 'copropriete' | 'honoraires' | 'remboursement_depot' | 'virement_interne' | 'autre'
+// What a bank movement is (ADR 0018, 0019), fixed in the code: « locataire », « travaux » and « depot_garantie » have a
+// detail (the payments of a tenant, the payments of works invoices, the deposits paid or refunded, linked to it); the
+// others only a note, required for « autre ». sens: the movements it applies to.
+export type CategorieMouvement = 'locataire' | 'travaux' | 'depot_garantie' | 'emprunt' | 'assurance' | 'energie' | 'eau'
+  | 'impots' | 'frais_bancaires' | 'copropriete' | 'honoraires' | 'associes' | 'virement_interne' | 'autre'
 export const CATEGORIES_MOUVEMENT: Record<CategorieMouvement, { nom: string, sens: 'credit' | 'debit' | 'tous', icone: string }> = {
   locataire: { nom: 'Paiement de locataire', sens: 'tous', icone: 'oi oi-users' },
   travaux: { nom: 'Travaux', sens: 'debit', icone: 'oi oi-hammer' },
+  depot_garantie: { nom: 'Dépôt de garantie', sens: 'tous', icone: 'oi oi-key' },
   emprunt: { nom: 'Emprunt', sens: 'tous', icone: 'oi oi-building-columns' },
   assurance: { nom: 'Assurance', sens: 'tous', icone: 'oi oi-shield' },
   energie: { nom: 'Énergie (gaz, électricité)', sens: 'debit', icone: 'oi oi-bolt' },
@@ -376,13 +405,13 @@ export const CATEGORIES_MOUVEMENT: Record<CategorieMouvement, { nom: string, sen
   frais_bancaires: { nom: 'Frais bancaires', sens: 'tous', icone: 'oi oi-credit-card' },
   copropriete: { nom: 'Copropriété', sens: 'tous', icone: 'oi oi-building' },
   honoraires: { nom: 'Honoraires (comptable, agence)', sens: 'tous', icone: 'oi oi-briefcase' },
-  remboursement_depot: { nom: 'Remboursement de dépôt de garantie', sens: 'debit', icone: 'oi oi-replay' },
-  virement_interne: { nom: 'Virement interne, apport', sens: 'tous', icone: 'oi oi-arrow-right-arrow-left' },
+  associes: { nom: 'Associés (apports, versements)', sens: 'tous', icone: 'oi oi-user' },
+  virement_interne: { nom: 'Virement entre comptes de la société', sens: 'tous', icone: 'oi oi-arrow-right-arrow-left' },
   autre: { nom: 'Autre', sens: 'tous', icone: 'oi oi-tag' },
 }
-export const AVEC_DETAIL: CategorieMouvement[] = ['locataire', 'travaux']
+export const AVEC_DETAIL: CategorieMouvement[] = ['locataire', 'travaux', 'depot_garantie']
 
-// a_categoriser: no category yet; incomplet: tenant payment or works whose detail does not cover the amount (no note
+// a_categoriser: no category yet; incomplet: a category with a detail that does not cover the amount (no note
 // to justify the rest); categorise
 export type StatutMouvement = 'a_categoriser' | 'incomplet' | 'categorise'
 
@@ -402,11 +431,14 @@ export type Mouvement = {
   compte: string
   date_releve: string
   paiements: { id: number, locataire: string, lot: string, mois: string | null, total: string }[]
-  travaux: { id: number, description: string, fournisseur: string, total: string }[]
+  // Payments of works invoices: total is this payment; montant_ttc and reste, those of the invoice
+  travaux: { id: number, reglement_id: number, description: string, fournisseur: string, total: string, montant_ttc: string, reste: string }[]
+  depots: { id: number, sejour_id: number, locataire: string, lot: string, date: string, montant: string }[]
   couvert: string
   statut: StatutMouvement
   // Recorded by hand, of the same amount and within ten days: to link
   possibles: ({ type: 'paiement', id: number, locataire: string, lot: string, mois: string | null, date: string }
+    // An invoice whose unpaid rest is the amount; date: that of the invoice
     | { type: 'travaux', id: number, description: string, fournisseur: string, date: string | null }
     // Several payments of one tenant whose sum is the amount (a transfer of several months); mois: « 10/2025, 11/2025 »
     | { type: 'groupe', ids: number[], locataire: string, lot: string, mois: string })[]
@@ -610,8 +642,8 @@ export const api = {
   supprimerLocataire: (id: number) => request<void>('DELETE', `/locataires/${id}`),
 
   sejours: (immeuble: number) => request<Sejour[]>('GET', `/sejours?immeuble=${immeuble}`),
-  creerSejour: (s: Omit<Sejour, 'id' | 'lot' | 'locataire'>) => request<Sejour>('POST', '/sejours', s),
-  modifierSejour: (s: Omit<Sejour, 'lot' | 'locataire'>) => request<Sejour>('PUT', `/sejours/${s.id}`, s),
+  creerSejour: (s: Omit<Sejour, 'id' | 'lot' | 'locataire' | 'depot_detenu'>) => request<Sejour>('POST', '/sejours', s),
+  modifierSejour: (s: Omit<Sejour, 'lot' | 'locataire' | 'depot_detenu'>) => request<Sejour>('PUT', `/sejours/${s.id}`, s),
   supprimerSejour: (id: number) => request<void>('DELETE', `/sejours/${id}`),
 
   echeances: (immeuble: number) => request<Echeance[]>('GET', `/echeances?immeuble=${immeuble}`),
@@ -709,10 +741,15 @@ export const api = {
   categoriserMouvement: (id: number, categorie: CategorieMouvement, note: string | null = null) =>
     request<Mouvement>('PUT', `/mouvements/${id}/categorie`, { categorie, note }),
   retirerCategorie: (id: number) => request<Mouvement>('DELETE', `/mouvements/${id}/categorie`),
-  lierMouvement: (id: number, lien: { paiement_id: number } | { travaux_id: number } | { paiement_ids: number[] }) =>
+  lierMouvement: (id: number, lien: { paiement_id: number } | { travaux_id: number } | { paiement_ids: number[] } | { depot_id: number }) =>
     request<Mouvement>('POST', `/mouvements/${id}/lier`, lien),
-  delierMouvement: (id: number, lien: { paiement_id: number } | { travaux_id: number }) =>
+  delierMouvement: (id: number, lien: { paiement_id: number } | { reglement_id: number } | { depot_id: number }) =>
     request<Mouvement>('POST', `/mouvements/${id}/delier`, lien),
+
+  depots: (immeuble: number) => request<VersementDepot[]>('GET', `/depots?immeuble=${immeuble}`),
+  creerDepot: (d: VersementDepotSaisi) => request<VersementDepot>('POST', '/depots', d),
+  modifierDepot: (id: number, d: VersementDepotSaisi) => request<VersementDepot>('PUT', `/depots/${id}`, d),
+  supprimerDepot: (id: number) => request<void>('DELETE', `/depots/${id}`),
 
   fiscal: (immeuble: number, annee: number) => request<SyntheseFiscale>('GET', `/fiscal?immeuble=${immeuble}&annee=${annee}`),
 

@@ -20,17 +20,18 @@ import { RouterLink, useRoute } from 'vue-router'
 import {
   api, AVEC_DETAIL, CATEGORIES_MOUVEMENT, type CategorieMouvement, type Echeance,
   type Immeuble, type Lot, type Mouvement, type Paiement, type Regularisation, type ReleveResume,
-  type Sejour, type StatutMouvement, type Travaux,
+  type Sejour, type StatutMouvement, type Travaux, type VersementDepot,
 } from '../api'
 import FormulairePaiement, { type Brouillon, enregistrerBrouillon, saisies } from '../components/FormulairePaiement.vue'
-import FormulaireTravaux, { type BrouillonTravaux } from '../components/FormulaireTravaux.vue'
+import FormulaireTravaux, { type BrouillonTravaux, travauxVersApi } from '../components/FormulaireTravaux.vue'
 import { dateFr, euros, nombreApi, nombreFr } from '../format'
 import { categoriePropose, proposer } from '../rapprochement'
 
 // Categorisation of the bank movements (ADR 0018; the statements are imported in RelevesView): each movement gets a
-// category (proposed from its label or the tenant named in it); a tenant payment and works have a detail, unfolded
-// under the movement: the payments or works linked to it, added in the same forms as the Paiements and Travaux
-// screens, linked when typed before, changed or deleted there; a note justifies a rest. Two tabs: to categorise, and
+// category (proposed from its label or the tenant named in it); a tenant payment, works and a deposit have a detail
+// (ADR 0019), unfolded under the movement: the payments, works payments or deposits linked to it, added in the same
+// forms as the Paiements and Travaux screens, linked when typed before, changed or deleted there; a note justifies a
+// rest. Two tabs: to categorise, and
 // categorised (those whose detail does not cover the amount first, « à compléter »).
 
 type Onglet = 'a_categoriser' | 'categorises'
@@ -62,6 +63,7 @@ const echeances = ref<Echeance[]>([])
 const regularisations = ref<Regularisation[]>([])
 const paiements = ref<Paiement[]>([])
 const travaux = ref<Travaux[]>([])
+const depots = ref<VersementDepot[]>([])
 const lots = ref<Map<number, Lot[]>>(new Map())
 
 const ok = (texte: string) => toast.add({ severity: 'success', summary: texte, life: 3000 })
@@ -87,13 +89,14 @@ onMounted(async () => {
 async function chargerReferentiel() {
   const parImmeuble = await Promise.all(immeubles.value.map(async (i) => ({
     sejours: await api.sejours(i.id), echeances: await api.echeances(i.id), regularisations: await api.regularisations(i.id),
-    paiements: await api.paiements(i.id, null), travaux: await api.travaux(i.id),
+    paiements: await api.paiements(i.id, null), travaux: await api.travaux(i.id), depots: await api.depots(i.id),
   })))
   sejours.value = parImmeuble.flatMap((x) => x.sejours)
   echeances.value = parImmeuble.flatMap((x) => x.echeances)
   regularisations.value = parImmeuble.flatMap((x) => x.regularisations)
   paiements.value = parImmeuble.flatMap((x) => x.paiements)
   travaux.value = parImmeuble.flatMap((x) => x.travaux)
+  depots.value = parImmeuble.flatMap((x) => x.depots)
 }
 
 async function charger() {
@@ -218,10 +221,9 @@ function ouvrirMenu(event: Event, m: Mouvement) {
   menuCategories.value?.toggle(event)
 }
 
-// ---------------------------------------------------------------- detail: payments of a tenant, works
+// ---------------------------------------------------------------- detail: payments of a tenant, works, deposits
 
 const paiementsDe = (m: Mouvement) => paiements.value.filter((p) => p.mouvement_id === m.id)
-const travauxDe = (m: Mouvement) => travaux.value.filter((t) => t.mouvement_id === m.id)
 const totalPaiement = (p: Paiement) => new Big(p.loyer).plus(p.provision).plus(p.regularisation).toString()
 const moisFr = (mois: string | null) => (mois ? `${mois.slice(5, 7)}/${mois.slice(0, 4)}` : 'régularisation')
 const contexte = (m: Mouvement) => ({ libelle: m.libelle, date: m.date_operation, montant: m.montant, couvert: m.couvert })
@@ -245,11 +247,25 @@ function possibles(m: Mouvement) {
   }
   return liste
 }
-type Possible = Mouvement['possibles'][number]
+// What the « Rattacher » button links, and how many typed by hand match
+const NOMS_SAISIS: Record<string, string> = { locataire: 'Paiement saisi', travaux: 'Facture de travaux', depot_garantie: 'Dépôt saisi' }
+function libelleRattacher(m: Mouvement) {
+  const nom = { locataire: 'Rattacher à un paiement existant…', travaux: 'Rattacher à une facture de travaux…' }[m.categorie as string]
+    ?? 'Rattacher à un dépôt saisi…'
+  const n = correspondances(m)
+  return n ? `${nom} ✓ ${n} correspond${n > 1 ? 'ent' : ''}` : nom
+}
+
+// A deposit typed by hand, to link (« depot_garantie »)
+type Possible = Mouvement['possibles'][number] | { type: 'depot', id: number }
 const lien = (p: Possible) =>
-  p.type === 'groupe' ? { paiement_ids: p.ids } : p.type === 'paiement' ? { paiement_id: p.id } : { travaux_id: p.id }
+  p.type === 'groupe' ? { paiement_ids: p.ids } : p.type === 'paiement' ? { paiement_id: p.id }
+    : p.type === 'depot' ? { depot_id: p.id } : { travaux_id: p.id }
 const clePossible = (p: Possible) => (p.type === 'groupe' ? `g${p.ids.join('-')}` : `${p.type}${p.id}`)
 function libellePossible(p: Possible) {
+  if (p.type === 'depot') {
+    return 'dépôt de garantie'
+  }
   if (p.type === 'travaux') {
     return `${p.fournisseur} : ${p.description}`
   }
@@ -305,8 +321,12 @@ const basculer = (m: Mouvement) => {
 // « Rattacher à un existant »: the payments (or works) not linked, of a smaller amount, close in time; those of the
 // tenant named first
 /** How many payments or works typed by hand match the movement (shown on the button that links them). */
-const correspondances = (m: Mouvement) =>
-  possibles(m).filter((p) => (m.categorie === 'travaux') === (p.type === 'travaux')).length
+const correspondances = (m: Mouvement) => (m.categorie === 'depot_garantie'
+  ? depotsLibres(m).filter((d) => new Big(d.montant).abs().eq(reste(m))).length
+  : possibles(m).filter((p) => (m.categorie === 'travaux') === (p.type === 'travaux')).length)
+
+/** Deposits typed by hand, not linked, of the sign of the movement. */
+const depotsLibres = (m: Mouvement) => depots.value.filter((d) => !d.mouvement_id && new Big(d.montant).gt(0) === estCredit(m))
 
 // The list offers everything typed by hand and not linked (works; payments of the tenant named, else all): no filter
 // on amount or date (a deposit, a transfer before the invoice). What matches the movement (same amount, close date, or
@@ -321,11 +341,22 @@ function ouvrirRattachement(m: Mouvement) {
   const correspond = (l: Possible) => correspondants.some((c) => clePossible(c) === clePossible(l))
   let choix: Choix[]
   if (m.categorie === 'travaux') {
-    choix = travaux.value.filter((t) => !t.mouvement_id).map((t) => {
-      const l: Possible = { type: 'travaux', id: t.id, description: t.description, fournisseur: t.fournisseur, date: t.date_paiement }
+    // Invoices not paid in full: this movement pays their rest, or a part of it
+    choix = travaux.value.filter((t) => Number(t.reste) > 0).map((t) => {
+      const l: Possible = { type: 'travaux', id: t.id, description: t.description, fournisseur: t.fournisseur, date: t.date_facture }
       return {
-        cle: clePossible(l), texte: `${t.fournisseur} : ${t.description}, ${euros(t.montant_ttc)}, facture du ${dateFr(t.date_facture)}`,
-        correspond: correspond(l), lien: l, montant: t.montant_ttc, date: t.date_paiement ?? t.date_facture,
+        cle: clePossible(l),
+        texte: `${t.fournisseur} : ${t.description}, facture du ${dateFr(t.date_facture)} de ${euros(t.montant_ttc)}`
+          + (Number(t.paye) > 0 ? `, reste ${euros(t.reste)}` : ''),
+        correspond: correspond(l), lien: l, montant: t.reste, date: t.date_facture,
+      }
+    })
+  } else if (m.categorie === 'depot_garantie') {
+    choix = depotsLibres(m).map((d) => {
+      const l: Possible = { type: 'depot', id: d.id }
+      return {
+        cle: clePossible(l), texte: `${d.locataire} (${d.lot}), ${dateFr(d.date_versement)} : ${euros(d.montant)}`,
+        correspond: new Big(d.montant).abs().eq(reste(m)), lien: l, montant: new Big(d.montant).abs().toString(), date: d.date_versement,
       }
     })
   } else {
@@ -381,7 +412,7 @@ function rattacher() {
   return agir(() => api.lierMouvement(r.mouvement.id, lien(choisi.lien)), 'Rattaché')
 }
 
-const detacher = (m: Mouvement, l: { paiement_id: number } | { travaux_id: number }) =>
+const detacher = (m: Mouvement, l: { paiement_id: number } | { reglement_id: number } | { depot_id: number }) =>
   agir(() => api.delierMouvement(m.id, l), 'Détaché (gardé dans son écran)')
 
 function justifier(m: Mouvement) {
@@ -424,8 +455,10 @@ function nouveauPaiement(m: Mouvement) {
       provision: credit && !dejaPaye ? nombreFr(new Big(p.provision).toFixed(2)) : '',
       versements: p.regularisation_id ? [{ regularisation_id: p.regularisation_id, montant: nombreFr(p.regularisation) }] : [],
       mode: 'virement', note: '',
-      // The rest of the transfer not split: a deposit, most of the time
-      justification: m.note ?? (/CAUTION|DEPOT|GARANTIE/i.test(`${m.libelle} ${m.detail ?? ''}`) ? 'Dépôt de garantie' : ''),
+      // The rest of the transfer not split: a deposit when the label says so, or with the first rent of the stay
+      resteDepot: /CAUTION|DEPOT|GARANTIE/i.test(`${m.libelle} ${m.detail ?? ''}`)
+        || Boolean(p.sejour && ecartJours(m, p.sejour.entree)! <= 31),
+      justification: m.note ?? '',
     },
   }
   erreurFormulaire.value = dejaPaye
@@ -449,14 +482,22 @@ function modifierPaiement(m: Mouvement, p: Paiement) {
 async function enregistrerPaiement(suivant: boolean) {
   const f = formulairePaiement.value!
   const b = f.brouillon
+  const recu = new Big(nombreApi(b.montant) ?? '0')
   const reparti = saisies(b).reduce((t, x) => t.plus(x.montant!), new Big(0))
-  const nonReparti = new Big(nombreApi(b.montant) ?? '0').minus(reparti)
+  // What the form left unsplit, with the sign of the amount (negative for a refund)
+  const nonReparti = recu.minus(reparti)
   occupe.value = true
   try {
     await enregistrerBrouillon(b, f.mouvement.id)
-    // The rest of the transfer, justified in the form: the note of the movement
-    if (nonReparti.gt(0) && b.justification?.trim()) {
-      await api.categoriserMouvement(f.mouvement.id, 'locataire', b.justification.trim())
+    if (!nonReparti.eq(0) && nonReparti.gt(0) === recu.gt(0)) {
+      if (b.resteDepot) {
+        // A deposit paid with the rent (or refunded with the last month)
+        await api.creerDepot({
+          sejour_id: b.sejour_id!, date_versement: b.date, montant: nonReparti.toString(), note: null, mouvement_id: f.mouvement.id,
+        })
+      } else if (b.justification?.trim()) {
+        await api.categoriserMouvement(f.mouvement.id, 'locataire', b.justification.trim())
+      }
     }
     await recharger()
     const m = mouvements.value.find((x) => x.id === f.mouvement.id)!
@@ -487,57 +528,29 @@ function supprimerPaiement(p: Paiement | undefined) {
   })
 }
 
-function nouveauxTravaux(m: Mouvement) {
-  formulaireTravaux.value = {
-    mouvement: m,
-    brouillon: {
-      id: null, immeuble_id: immeubles.value.length === 1 ? immeubles.value[0]!.id : null, lot_id: null,
-      fournisseur: m.libelle.replace(/^(VIR( INST)?|PRLV SEPA|CB|PAIEMENT CB)\s+/, '').slice(0, 40), description: '',
-      nature: 'entretien', date_facture: m.date_operation, date_paiement: m.date_operation,
-      montant_ttc: nombreFr(new Big(reste(m)).toFixed(2)), note: '',
-    },
-  }
-  erreurFormulaire.value = null
-}
-
 function modifierTravaux(m: Mouvement, t: Travaux) {
   formulaireTravaux.value = {
     mouvement: m,
     brouillon: {
       id: t.id, immeuble_id: t.immeuble_id, lot_id: t.lot_id, fournisseur: t.fournisseur, description: t.description,
-      nature: t.nature, date_facture: t.date_facture, date_paiement: t.date_paiement ?? '', montant_ttc: nombreFr(t.montant_ttc),
-      note: t.note ?? '',
+      nature: t.nature, date_facture: t.date_facture, montant_ttc: nombreFr(t.montant_ttc), note: t.note ?? '', pdf: null,
     },
   }
   erreurFormulaire.value = null
 }
 
-async function enregistrerTravaux(suivant: boolean) {
-  const f = formulaireTravaux.value!
-  const b = f.brouillon
-  if (!b.immeuble_id) {
-    erreurFormulaire.value = 'Choisir l\'immeuble'
-    return
-  }
-  const saisie = {
-    immeuble_id: b.immeuble_id, lot_id: b.lot_id, fournisseur: b.fournisseur.trim(), description: b.description.trim(),
-    nature: b.nature, date_facture: b.date_facture, date_paiement: b.date_paiement || null,
-    montant_ttc: nombreApi(b.montant_ttc) ?? b.montant_ttc, note: b.note.trim() || null, mouvement_id: f.mouvement.id,
-  }
+// The invoice changed (its payments are the movements linked); its PDF attached or replaced
+async function enregistrerTravaux() {
+  const b = formulaireTravaux.value!.brouillon
   occupe.value = true
   try {
-    if (b.id === null) {
-      await api.creerTravaux(saisie)
-    } else {
-      await api.modifierTravaux(b.id, saisie)
+    await api.modifierTravaux(b.id!, travauxVersApi(b))
+    if (b.pdf) {
+      await api.joindrePdfTravaux(b.id!, b.pdf)
     }
-    await recharger()
-    const m = mouvements.value.find((x) => x.id === f.mouvement.id)!
     formulaireTravaux.value = null
-    if (suivant && new Big(reste(m)).gt(0)) {
-      nouveauxTravaux(m)
-    }
-    ok('Travaux enregistrés (écran Travaux pour joindre la facture)')
+    await recharger()
+    ok('Facture de travaux enregistrée')
   } catch (e) {
     erreurFormulaire.value = (e as Error).message
   } finally {
@@ -556,6 +569,69 @@ function supprimerTravaux(t: Travaux | undefined) {
       formulaireTravaux.value = null
       return agir(() => api.supprimerTravaux(t.id), 'Travaux supprimés')
     },
+  })
+}
+
+// ---------------------------------------------------------------- deposits (ADR 0019)
+
+// A deposit paid (positive) or refunded (negative), typed from the movement: the amount follows its sign
+type SaisieDepot = { mouvement: Mouvement, id: number | null, sejour_id: number | null, date: string, montant: string, note: string }
+const saisieDepot = ref<SaisieDepot | null>(null)
+const erreurDepot = ref<string | null>(null)
+
+// Present tenants first; around the date of the movement
+const sejoursTries = computed(() => [...sejours.value].sort((a, b) => Number(Boolean(a.sortie)) - Number(Boolean(b.sortie))
+  || a.lot.localeCompare(b.lot)))
+
+function nouveauDepot(m: Mouvement) {
+  const signe = estCredit(m) ? '' : '-'
+  saisieDepot.value = {
+    mouvement: m, id: null, sejour_id: proposer(m, sejours.value, echeances.value, regularisations.value).sejour?.id ?? null,
+    date: m.date_operation, montant: nombreFr(`${signe}${new Big(reste(m)).toFixed(2)}`), note: '',
+  }
+  erreurDepot.value = null
+}
+
+function modifierDepot(m: Mouvement, id: number) {
+  const d = depots.value.find((x) => x.id === id)
+  if (d) {
+    saisieDepot.value = { mouvement: m, id: d.id, sejour_id: d.sejour_id, date: d.date_versement, montant: nombreFr(d.montant), note: d.note ?? '' }
+    erreurDepot.value = null
+  }
+}
+
+async function enregistrerDepot() {
+  const s = saisieDepot.value
+  if (!s || s.sejour_id === null) {
+    return
+  }
+  const donnees = { sejour_id: s.sejour_id, date_versement: s.date, montant: nombreApi(s.montant) ?? s.montant, note: s.note.trim() || null }
+  occupe.value = true
+  try {
+    if (s.id === null) {
+      await api.creerDepot({ ...donnees, mouvement_id: s.mouvement.id })
+    } else {
+      await api.modifierDepot(s.id, donnees)
+    }
+    saisieDepot.value = null
+    await recharger()
+    ok('Dépôt de garantie enregistré')
+  } catch (e) {
+    erreurDepot.value = (e as Error).message
+  } finally {
+    occupe.value = false
+  }
+}
+
+function supprimerDepot(id: number) {
+  const d = depots.value.find((x) => x.id === id)
+  if (!d) {
+    return
+  }
+  confirm.require({
+    message: `Supprimer le dépôt de garantie de ${d.locataire} (${euros(d.montant)}) ?`,
+    header: 'Supprimer', acceptLabel: 'Supprimer', rejectLabel: 'Annuler', acceptClass: 'p-button-danger',
+    accept: () => agir(() => api.supprimerDepot(id), 'Dépôt supprimé'),
   })
 }
 
@@ -723,30 +799,41 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
               </template>
             </p>
             <ul class="liens">
-              <template v-if="data.categorie === 'locataire'">
-                <li v-for="p in paiementsDe(data)" :key="`p${p.id}`">
-                  <span class="oi oi-user" />
-                  <span>
-                    {{ p.locataire }}, {{ moisFr(p.mois) }} :
-                    <template v-if="p.mois">loyer {{ euros(p.loyer) }} + provision {{ euros(p.provision) }}</template>
-                    <template v-if="p.regularisation_id">{{ p.mois ? ' + ' : '' }}régularisation {{ euros(p.regularisation) }}</template>
-                    = <strong>{{ euros(totalPaiement(p)) }}</strong>
+              <li v-for="p in paiementsDe(data)" :key="`p${p.id}`">
+                <span class="oi oi-user" />
+                <span>
+                  {{ p.locataire }}, {{ moisFr(p.mois) }} :
+                  <template v-if="p.mois">loyer {{ euros(p.loyer) }} + provision {{ euros(p.provision) }}</template>
+                  <template v-if="p.regularisation_id">{{ p.mois ? ' + ' : '' }}régularisation {{ euros(p.regularisation) }}</template>
+                  = <strong>{{ euros(totalPaiement(p)) }}</strong>
+                </span>
+                <Button label="Modifier" size="small" text :disabled="occupe" @click="modifierPaiement(data, p)" />
+                <Button label="Détacher" size="small" text severity="secondary" :disabled="occupe" @click="detacher(data, { paiement_id: p.id })" />
+                <Button label="Supprimer" size="small" text severity="danger" :disabled="occupe" @click="supprimerPaiement(p)" />
+              </li>
+              <li v-for="t in data.travaux" :key="`t${t.reglement_id}`">
+                <span class="oi oi-hammer" />
+                <span>
+                  {{ t.fournisseur }} : {{ t.description }} : règlement de <strong>{{ euros(t.total) }}</strong>
+                  <span class="discret">
+                    (facture de {{ euros(t.montant_ttc) }}{{ Number(t.reste) > 0 ? `, reste ${euros(t.reste)} à payer` : ', payée en entier' }})
                   </span>
-                  <Button label="Modifier" size="small" text :disabled="occupe" @click="modifierPaiement(data, p)" />
-                  <Button label="Détacher" size="small" text severity="secondary" :disabled="occupe" @click="detacher(data, { paiement_id: p.id })" />
-                  <Button label="Supprimer" size="small" text severity="danger" :disabled="occupe" @click="supprimerPaiement(p)" />
-                </li>
-              </template>
-              <template v-else>
-                <li v-for="t in travauxDe(data)" :key="`t${t.id}`">
-                  <span class="oi oi-hammer" />
-                  <span>{{ t.fournisseur }} : {{ t.description }} = <strong>{{ euros(t.montant_ttc) }}</strong></span>
-                  <Button label="Modifier" size="small" text :disabled="occupe" @click="modifierTravaux(data, t)" />
-                  <Button label="Détacher" size="small" text severity="secondary" :disabled="occupe" @click="detacher(data, { travaux_id: t.id })" />
-                  <Button label="Supprimer" size="small" text severity="danger" :disabled="occupe" @click="supprimerTravaux(t)" />
-                </li>
-              </template>
-              <li v-if="!data.paiements.length && !data.travaux.length" class="discret">Rien de rattaché pour l'instant.</li>
+                </span>
+                <Button label="Modifier" size="small" text :disabled="occupe" @click="modifierTravaux(data, travaux.find((x) => x.id === t.id)!)" />
+                <Button label="Détacher" size="small" text severity="secondary" :disabled="occupe" @click="detacher(data, { reglement_id: t.reglement_id })" />
+                <Button label="Supprimer" size="small" text severity="danger" :disabled="occupe" @click="supprimerTravaux(travaux.find((x) => x.id === t.id))" />
+              </li>
+              <li v-for="d in data.depots" :key="`d${d.id}`">
+                <span class="oi oi-key" />
+                <span>
+                  Dépôt de garantie de {{ d.locataire }} ({{ d.lot }}) :
+                  {{ Number(d.montant) > 0 ? 'versé' : 'remboursé' }} <strong>{{ euros(new Big(d.montant).abs().toString()) }}</strong>
+                </span>
+                <Button label="Modifier" size="small" text :disabled="occupe" @click="modifierDepot(data, d.id)" />
+                <Button label="Détacher" size="small" text severity="secondary" :disabled="occupe" @click="detacher(data, { depot_id: d.id })" />
+                <Button label="Supprimer" size="small" text severity="danger" :disabled="occupe" @click="supprimerDepot(d.id)" />
+              </li>
+              <li v-if="!data.paiements.length && !data.travaux.length && !data.depots.length" class="discret">Rien de rattaché pour l'instant.</li>
             </ul>
             <div class="actions-detail">
               <Button
@@ -754,12 +841,12 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
                 :disabled="occupe || Number(reste(data)) <= 0" @click="nouveauPaiement(data)"
               />
               <Button
-                v-else label="Ajouter des travaux…" icon="oi oi-plus" size="small" :disabled="occupe || Number(reste(data)) <= 0"
-                @click="nouveauxTravaux(data)"
+                v-if="data.categorie === 'locataire' || data.categorie === 'depot_garantie'" label="Ajouter un dépôt de garantie…"
+                icon="oi oi-key" size="small" :outlined="data.categorie === 'locataire'"
+                :disabled="occupe || Number(reste(data)) <= 0" @click="nouveauDepot(data)"
               />
               <Button
-                :label="(data.categorie === 'locataire' ? 'Rattacher à un paiement existant…' : 'Rattacher à des travaux existants…')
-                  + (correspondances(data) ? ` ✓ ${correspondances(data)} correspond${correspondances(data) > 1 ? 'ent' : ''}` : '')"
+                :label="libelleRattacher(data)"
                 :icon="correspondances(data) ? 'oi oi-link' : 'oi oi-search'" size="small" outlined
                 :severity="correspondances(data) ? 'success' : undefined" :disabled="occupe || Number(reste(data)) <= 0"
                 @click="ouvrirRattachement(data)"
@@ -770,12 +857,12 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
               />
             </div>
             <form v-if="rattachement && rattachement.mouvement.id === data.id" class="formulaire" @submit.prevent="rattacher">
-              <label v-if="rattachement.choix.length">{{ data.categorie === 'locataire' ? 'Paiement saisi' : 'Travaux saisis' }}
+              <label v-if="rattachement.choix.length">{{ NOMS_SAISIS[data.categorie] }}
                 <select v-model="rattachement.cle" required>
                   <option v-for="c in rattachement.choix" :key="c.cle" :value="c.cle">{{ c.correspond ? '✓ correspond · ' : '' }}{{ c.texte }}</option>
                 </select>
               </label>
-              <span v-else class="discret">{{ data.categorie === 'locataire' ? 'Aucun paiement saisi non rattaché.' : 'Aucuns travaux saisis non rattachés.' }}</span>
+              <span v-else class="discret">Rien de saisi qui ne soit déjà rattaché.</span>
               <span v-if="rattachement.choix.some((c) => c.correspond)" class="ok petit">✓ : même montant, à la date du mouvement</span>
               <span v-for="(a, i) in alertes" :key="i" class="alerte petit">⚠ {{ a }}</span>
               <Button type="submit" label="Rattacher" size="small" :disabled="occupe || !rattachement.cle" />
@@ -807,6 +894,35 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
     </form>
   </Dialog>
 
+  <!-- A deposit paid or refunded, from the movement -->
+  <Dialog
+    :visible="saisieDepot !== null" modal :header="saisieDepot?.id ? 'Modifier le dépôt de garantie' : 'Dépôt de garantie'"
+    :style="{ width: '34rem' }" @update:visible="(v: boolean) => { if (!v) saisieDepot = null }"
+  >
+    <form v-if="saisieDepot" class="note-form" @submit.prevent="enregistrerDepot">
+      <p class="discret">
+        {{ saisieDepot.mouvement.libelle }} du {{ dateFr(saisieDepot.mouvement.date_operation) }} : {{ euros(saisieDepot.mouvement.montant) }}
+        · reste {{ euros(reste(saisieDepot.mouvement)) }}
+      </p>
+      <label>Locataire
+        <select v-model="saisieDepot.sejour_id" required>
+          <option :value="null" disabled>Choisir…</option>
+          <option v-for="x in sejoursTries" :key="x.id" :value="x.id">{{ x.lot }} – {{ x.locataire }}{{ x.sortie ? ` (parti le ${dateFr(x.sortie)})` : '' }}</option>
+        </select>
+      </label>
+      <div class="rangee">
+        <label>Date <input v-model="saisieDepot.date" type="date" required></label>
+        <label>Montant (négatif : remboursé au locataire) <input v-model="saisieDepot.montant" class="nombre" size="10" required></label>
+      </div>
+      <label>Note <InputText v-model="saisieDepot.note" fluid /></label>
+      <p v-if="erreurDepot" class="message erreur">{{ erreurDepot }}</p>
+      <div class="actions-detail fin">
+        <Button label="Annuler" text @click="saisieDepot = null" />
+        <Button type="submit" label="Enregistrer" :disabled="occupe || saisieDepot.sejour_id === null" />
+      </div>
+    </form>
+  </Dialog>
+
   <FormulairePaiement
     v-if="formulairePaiement"
     :key="formulairePaiement.brouillon.id ?? `nouveau-${formulairePaiement.mouvement.id}-${formulairePaiement.mouvement.couvert}`"
@@ -825,13 +941,14 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
   />
   <FormulaireTravaux
     v-if="formulaireTravaux"
-    :key="formulaireTravaux.brouillon.id ?? `nouveaux-${formulaireTravaux.mouvement.id}-${formulaireTravaux.mouvement.couvert}`"
+    :key="formulaireTravaux.brouillon.id ?? 0"
     v-model="formulaireTravaux.brouillon"
     :immeubles="immeubles"
     :lots="lots"
     :occupe="occupe"
     :erreur="erreurFormulaire"
-    :mouvement="contexte(formulaireTravaux.mouvement)"
+    :travaux="travaux.find((t) => t.id === formulaireTravaux?.brouillon.id) ?? null"
+    @change="recharger"
     @enregistrer="enregistrerTravaux"
     @fermer="formulaireTravaux = null"
     @supprimer="supprimerTravaux(travaux.find((t) => t.id === formulaireTravaux?.brouillon.id))"

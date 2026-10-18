@@ -1,16 +1,17 @@
-// Categories of a bank movement (ADR 0018): what it is. « locataire » and « travaux » have a detail (the payments of a
-// tenant, the works, linked to the movement); the others only a note, required for « autre ». Fixed in the code: the
-// tax summary will read some of them (insurance, bank fees…).
+// Categories of a bank movement (ADR 0018, 0019): what it is. « locataire », « travaux » and « depot_garantie » have a
+// detail (the payments of a tenant, the payments of works invoices, the deposits paid or refunded, linked to the
+// movement); the others only a note, required for « autre ». Fixed in the code: the tax summary will read some of them
+// (insurance, bank fees…).
 
 export const CATEGORIES = [
-  'locataire', 'travaux', 'emprunt', 'assurance', 'energie', 'eau', 'impots', 'frais_bancaires', 'copropriete',
-  'honoraires', 'remboursement_depot', 'virement_interne', 'autre',
+  'locataire', 'travaux', 'depot_garantie', 'emprunt', 'assurance', 'energie', 'eau', 'impots', 'frais_bancaires',
+  'copropriete', 'honoraires', 'associes', 'virement_interne', 'autre',
 ] as const
 
 export type Categorie = typeof CATEGORIES[number]
 
-/** The categories whose detail is linked rows: payments of a tenant, works. */
-export const AVEC_DETAIL = { locataire: 'paiement', travaux: 'travaux' } as const
+/** The categories whose detail is linked rows. */
+export const AVEC_DETAIL: Categorie[] = ['locataire', 'travaux', 'depot_garantie']
 
 export const estCategorie = (value: unknown): value is Categorie =>
   typeof value === 'string' && (CATEGORIES as readonly string[]).includes(value)

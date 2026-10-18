@@ -12,7 +12,9 @@ import { inclusiveBounds, inclusiveRange } from '../periods.js'
 
 const SEJOUR_COLUMNS = `
   s.id, s.lot_id, lt.code AS lot, s.locataire_id, lo.nom AS locataire, ${inclusiveBounds('s.periode', 'entree', 'sortie')},
-  s.note, s.depot_garantie::text, s.depot_retenu_charges::text`
+  s.note, s.depot_garantie::text, s.depot_retenu_charges::text,
+  -- Deposit held (ADR 0019): paid minus refunded; null without any payment recorded
+  (SELECT sum(vd.montant)::text FROM versement_depot vd WHERE vd.sejour_id = s.id) AS depot_detenu`
 
 const SEJOUR_FROM = 'sejour s JOIN lot lt ON lt.id = s.lot_id JOIN locataire lo ON lo.id = s.locataire_id'
 
@@ -35,7 +37,7 @@ function readSejour(raw: Record<string, unknown>) {
 
 const SEJOUR_ERRORS = {
   '23P01': 'Ce séjour chevauche un autre séjour du même lot',
-  '23503': 'Ce séjour a des provisions, des paiements ou des régularisations : suppression impossible',
+  '23503': 'Ce séjour a des provisions, des paiements, des régularisations ou des versements de dépôt : suppression impossible',
 }
 
 function readEcheance(raw: Record<string, unknown>) {

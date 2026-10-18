@@ -39,16 +39,18 @@ export type SyntheseFiscale = {
   total_deductible: string
   non_recuperables: { facture_id: number, fournisseur: string, numero: string, date_facture: string, libelle: string, montant: string }[]
   abandons_en_cours: { regularisation_id: number, locataire: string, lot: string, debut: string, fin: string, reste: string }[]
-  // Works paid during the year (ADR 0015): the deductible ones for the 2044, line 224
+  // Payments of works made during the year (ADR 0015, 0019): the bank movements that paid them, the deductible ones for
+  // the 2044, line 224; an invoice paid in several times appears once per payment, in the year of each
   travaux: Travaux[]
   total_travaux_deductibles: string
-  // Works invoiced but not paid yet: not in the year until paid
+  // Works invoiced by the end of the year and not paid in full: the rest is not in the year until paid
   travaux_non_payes: Travaux[]
 }
 
 export type Travaux = {
   id: number, fournisseur: string, description: string, nature: string, lot: string | null, date_facture: string,
-  date_paiement: string | null, montant_ttc: string, deductible: boolean
+  // The payment (null for an invoice not paid in full: montant is then what remains), and the invoice's amount
+  date_paiement: string | null, montant: string, montant_ttc: string, deductible: boolean
 }
 
 const sum = (values: string[]) => values.reduce((s, v) => s.plus(v), new Big(0))
@@ -124,13 +126,27 @@ export async function syntheseFiscale(db: Pool, immeuble: number, annee: number)
   )
 
   const { rows: travaux } = await db.query<Travaux>(
-    `SELECT t.id, t.fournisseur, t.description, t.nature, lt.code AS lot, t.date_facture::text, t.date_paiement::text,
-            t.montant_ttc::text, t.nature <> 'construction' AS deductible
-     FROM travaux t LEFT JOIN lot lt ON lt.id = t.lot_id
-     WHERE t.immeuble_id = $1 AND (t.date_paiement BETWEEN $2::date AND $3::date
-       OR (t.date_paiement IS NULL AND t.date_facture <= $3::date))
-     ORDER BY coalesce(t.date_paiement, t.date_facture), t.id`,
+    `SELECT t.id, t.fournisseur, t.description, t.nature, lt.code AS lot, t.date_facture::text,
+            m.date_operation::text AS date_paiement, rt.montant::text, t.montant_ttc::text,
+            t.nature <> 'construction' AS deductible
+     FROM reglement_travaux rt JOIN travaux t ON t.id = rt.travaux_id JOIN mouvement m ON m.id = rt.mouvement_id
+     LEFT JOIN lot lt ON lt.id = t.lot_id
+     WHERE t.immeuble_id = $1 AND m.date_operation BETWEEN $2::date AND $3::date
+     ORDER BY m.date_operation, t.id, rt.id`,
     [immeuble, debut, fin],
+  )
+  // Not paid in full at the end of the year: what remains then
+  const { rows: nonPayes } = await db.query<Travaux>(
+    `SELECT * FROM (
+       SELECT t.id, t.fournisseur, t.description, t.nature, lt.code AS lot, t.date_facture::text, NULL AS date_paiement,
+              (t.montant_ttc - (SELECT coalesce(sum(rt.montant), 0) FROM reglement_travaux rt
+                                JOIN mouvement m ON m.id = rt.mouvement_id
+                                WHERE rt.travaux_id = t.id AND m.date_operation <= $2::date))::text AS montant,
+              t.montant_ttc::text, t.nature <> 'construction' AS deductible
+       FROM travaux t LEFT JOIN lot lt ON lt.id = t.lot_id
+       WHERE t.immeuble_id = $1 AND t.date_facture <= $2::date) x
+     WHERE montant::numeric > 0 ORDER BY date_facture, id`,
+    [immeuble, fin],
   )
 
   const totalVacance = sum(vacance.map((v) => v.montant))
@@ -146,8 +162,8 @@ export async function syntheseFiscale(db: Pool, immeuble: number, annee: number)
     total_deductible: totalVacance.plus(totalDeductibleDeparts).toString(),
     non_recuperables: nonRecuperables,
     abandons_en_cours: abandons,
-    travaux: travaux.filter((t) => t.date_paiement),
-    total_travaux_deductibles: sum(travaux.filter((t) => t.date_paiement && t.deductible).map((t) => t.montant_ttc)).toString(),
-    travaux_non_payes: travaux.filter((t) => !t.date_paiement),
+    travaux,
+    total_travaux_deductibles: sum(travaux.filter((t) => t.deductible).map((t) => t.montant)).toString(),
+    travaux_non_payes: nonPayes,
   }
 }

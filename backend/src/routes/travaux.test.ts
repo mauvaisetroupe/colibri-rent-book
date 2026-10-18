@@ -10,8 +10,8 @@ import type pg from 'pg'
 import { buildApp } from '../app.js'
 import { createTestPool, resetDatabase, skipWithoutDatabase } from '../test/database.js'
 
-// Works paid by the owner (ADR 0015), on a made-up building: deductible according to their nature, in the tax year
-// of their payment, with their PDF.
+// Works paid by the owner (ADR 0015, 0019), on a made-up building: deductible according to their nature, paid by bank
+// movements only, each in the tax year of its movement, with their PDF.
 
 describe('works invoices', { skip: skipWithoutDatabase }, () => {
   let pool: pg.Pool
@@ -19,12 +19,23 @@ describe('works invoices', { skip: skipWithoutDatabase }, () => {
   let storageDir: string
   let immeuble: number
   let lot: number
+  let releve: number
+  let ordre = 0
 
   const creer = (payload: object) => app.inject({ method: 'POST', url: '/api/travaux', payload })
   const base = () => ({
     immeuble_id: immeuble, lot_id: null, fournisseur: 'Menuiserie Exemple', description: 'Fenêtre du séjour',
-    nature: 'entretien', date_facture: '2025-11-20', date_paiement: '2025-12-05', montant_ttc: '1250.40', note: null,
+    nature: 'entretien', date_facture: '2025-11-20', montant_ttc: '1250.40', note: null,
   })
+  /** A debit of the bank statement, linked to the invoice: its payment. */
+  async function payer(travaux: number, date: string, montant: string) {
+    const m = (await pool.query<{ id: number }>(
+      'INSERT INTO mouvement (releve_id, ordre, date_operation, libelle, montant) VALUES ($1, $2, $3, \'VIR ARTISAN\', $4) RETURNING id',
+      [releve, ordre++, date, `-${montant}`])).rows[0]!.id
+    const r = await app.inject({ method: 'POST', url: `/api/mouvements/${m}/lier`, payload: { travaux_id: travaux } })
+    assert.equal(r.statusCode, 200, r.body)
+    return m
+  }
 
   before(async () => {
     pool = createTestPool()
@@ -35,6 +46,10 @@ describe('works invoices', { skip: skipWithoutDatabase }, () => {
       'INSERT INTO immeuble (code, nom) VALUES (\'IMM1\', \'Immeuble fictif\') RETURNING id')).rows[0]!.id
     lot = (await pool.query<{ id: number }>(
       'INSERT INTO lot (immeuble_id, code, tantiemes) VALUES ($1, \'L1\', 100) RETURNING id', [immeuble])).rows[0]!.id
+    await pool.query('INSERT INTO fournisseur (nom) VALUES (\'Banque Exemple\')')
+    releve = (await pool.query<{ id: number }>(
+      `INSERT INTO releve_bancaire (fournisseur_id, compte, date_releve, solde_precedent, nouveau_solde)
+       SELECT id, '001', '2030-01-01', 0, 0 FROM fournisseur WHERE nom = 'Banque Exemple' RETURNING id`)).rows[0]!.id
   })
 
   after(async () => {
@@ -46,9 +61,8 @@ describe('works invoices', { skip: skipWithoutDatabase }, () => {
   test('works are recorded, checked, changed and listed', async () => {
     const created = await creer(base())
     assert.equal(created.statusCode, 201, created.body)
-    assert.equal(created.json().deductible, true)
+    assert.deepEqual([created.json().deductible, created.json().reste, created.json().reglements], [true, '1250.40', []])
     assert.equal((await creer({ ...base(), nature: 'agrandissement' })).statusCode, 400)
-    assert.equal((await creer({ ...base(), date_paiement: '2025-10-01' })).statusCode, 400)
     assert.equal((await creer({ ...base(), lot_id: 999999 })).statusCode, 400)
 
     const changed = await app.inject({
@@ -57,19 +71,44 @@ describe('works invoices', { skip: skipWithoutDatabase }, () => {
     assert.equal(changed.statusCode, 200, changed.body)
     assert.deepEqual([changed.json().lot, changed.json().montant_ttc], ['L1', '1300.00'])
     assert.equal((await app.inject(`/api/travaux?immeuble=${immeuble}`)).json().length, 1)
+    await payer(created.json().id, '2025-12-05', '1300')
   })
 
   test('the tax summary of the year: paid works, deductible ones for line 224, unpaid ones apart', async () => {
-    await creer({ ...base(), description: 'Extension', nature: 'construction', montant_ttc: '20000' })
-    await creer({ ...base(), description: 'Toiture', nature: 'amelioration', montant_ttc: '3000.50' })
-    await creer({ ...base(), description: 'Devis accepté', date_paiement: null, montant_ttc: '500' })
-    await creer({ ...base(), description: 'Payé l\'année suivante', date_facture: '2025-12-20', date_paiement: '2026-01-10' })
+    await payer((await creer({ ...base(), description: 'Extension', nature: 'construction', montant_ttc: '20000' })).json().id, '2025-12-05', '20000')
+    await payer((await creer({ ...base(), description: 'Toiture', nature: 'amelioration', montant_ttc: '3000.50' })).json().id, '2025-12-06', '3000.50')
+    await creer({ ...base(), description: 'Devis accepté', montant_ttc: '500' })
+    const suivante = (await creer({ ...base(), description: 'Payé l\'année suivante', date_facture: '2025-12-20' })).json().id
+    await payer(suivante, '2026-01-10', '1250.40')
 
     const fiscal = (await app.inject(`/api/fiscal?immeuble=${immeuble}&annee=2025`)).json()
     assert.deepEqual(fiscal.travaux.map((t: { description: string }) => t.description).sort(),
       ['Extension', 'Fenêtre du séjour', 'Toiture'])
     assert.equal(fiscal.total_travaux_deductibles, '4300.5')
-    assert.deepEqual(fiscal.travaux_non_payes.map((t: { description: string }) => t.description), ['Devis accepté'])
+    // Unpaid at the end of 2025: the quote, and the invoice paid in January 2026
+    assert.deepEqual(fiscal.travaux_non_payes.map((t: { description: string }) => t.description), ['Devis accepté', 'Payé l\'année suivante'])
+  })
+
+  test('works paid by two transfers: each payment in its year, no more than the invoice', async () => {
+    const id = (await creer({ ...base(), description: 'Ravalement', date_facture: '2027-03-01', montant_ttc: '5000' })).json().id
+    await payer(id, '2027-02-15', '1500')
+    // The balance: a transfer of more than what remains pays only the rest (the other part for another invoice)
+    const solde = await payer(id, '2028-01-10', '4000')
+    const lu = (await app.inject(`/api/travaux?immeuble=${immeuble}`)).json().find((t: { id: number }) => t.id === id)
+    assert.deepEqual([lu.paye, lu.reste, lu.reglements.map((r: { montant: string }) => r.montant)], ['5000.00', '0.00', ['1500.00', '3500.00']])
+    const fiscal = async (annee: number) => (await app.inject(`/api/fiscal?immeuble=${immeuble}&annee=${annee}`)).json()
+    const a2027 = await fiscal(2027)
+    assert.deepEqual(a2027.travaux.map((t: { montant: string }) => t.montant), ['1500.00'])
+    assert.deepEqual(a2027.travaux_non_payes.filter((t: { id: number }) => t.id === id).map((t: { montant: string }) => t.montant), ['3500.00'])
+    assert.equal((await fiscal(2028)).total_travaux_deductibles, '3500')
+
+    // Paid in full: nothing more; a lower amount than what was paid is refused
+    assert.equal((await app.inject({ method: 'POST', url: `/api/mouvements/${solde}/lier`, payload: { travaux_id: id } })).statusCode, 400)
+    assert.equal((await app.inject({ method: 'PUT', url: `/api/travaux/${id}`, payload: { ...base(), montant_ttc: '4000' } })).statusCode, 400)
+    // Detached: the payment goes, the invoice has a rest again
+    const reglement = lu.reglements[1].id
+    await app.inject({ method: 'POST', url: `/api/mouvements/${solde}/delier`, payload: { reglement_id: reglement } })
+    assert.equal((await app.inject(`/api/travaux?immeuble=${immeuble}`)).json().find((t: { id: number }) => t.id === id).reste, '3500.00')
   })
 
   test('the PDF of the invoice is attached, served, and removed with the works', async () => {

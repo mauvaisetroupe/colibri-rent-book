@@ -2,6 +2,7 @@ import Big from 'big.js'
 import type { FastifyPluginAsync } from 'fastify'
 import type { Pool, PoolClient } from 'pg'
 
+import { categoriserSiVide, verifierMouvement } from '../couverture.js'
 import {
   body, idParam, InputError, optionalDecimal, optionalText, query, requiredDate, requiredId, sendError,
 } from '../http.js'
@@ -97,43 +98,24 @@ async function checkRegularisation(db: Pool | PoolClient, p: Saisie) {
 
 /**
  * A payment seen on a bank statement (ADR 0018): a payment received on a credit, a refund (negative) on a debit; the
- * payments linked do not exceed the amount (a transfer may pay two months: two payments). The movement must be of the
+ * detail linked does not exceed the amount (a transfer may pay two months: two payments). The movement must be of the
  * category « locataire », or have none yet.
  */
 async function checkMouvement(db: Pool | PoolClient, p: Saisie, id: number | null) {
   if (!p.mouvement_id) {
     return
   }
-  const { rows: [m] } = await db.query<{ montant: string, couvert: string, categorie: string | null }>(
-    `SELECT m.montant::text, m.categorie,
-            (SELECT coalesce(sum(loyer + provision + regularisation), 0) FROM paiement
-             WHERE mouvement_id = m.id AND id IS DISTINCT FROM $2)::text AS couvert
-     FROM mouvement m WHERE m.id = $1`,
-    [p.mouvement_id, id],
-  )
-  if (!m) {
-    throw new InputError('Mouvement bancaire introuvable')
-  }
-  if (m.categorie && m.categorie !== 'locataire') {
-    throw new InputError('Ce mouvement a une autre catégorie : la retirer d\'abord')
-  }
-  const montant = new Big(m.montant)
   const paiement = new Big(p.loyer).plus(p.provision).plus(p.regularisation)
-  if (paiement.eq(0) || paiement.gt(0) !== montant.gt(0)) {
-    throw new InputError(montant.gt(0)
-      ? 'Un paiement reçu se rattache à un crédit du relevé'
-      : 'Un débit du relevé ne porte qu\'un remboursement au locataire (montant négatif)')
+  if (paiement.eq(0)) {
+    throw new InputError('Un paiement nul ne se rattache pas à un mouvement')
   }
-  const total = new Big(m.couvert).plus(paiement)
-  if (total.abs().gt(montant.abs())) {
-    throw new InputError(`Les paiements rattachés (${total.toFixed(2)}) dépassent le montant du mouvement (${montant.toFixed(2)})`)
-  }
+  await verifierMouvement(db, p.mouvement_id, {
+    categories: ['locataire'], signe: paiement.gt(0) ? 1 : -1, montant: paiement, detail: 'paiement', exclure: id,
+  })
 }
 
 /** A payment linked to a movement without category: it becomes « locataire ». */
-const categoriserMouvement = (db: Pool, p: Saisie) => (p.mouvement_id
-  ? db.query('UPDATE mouvement SET categorie = \'locataire\' WHERE id = $1 AND categorie IS NULL', [p.mouvement_id])
-  : Promise.resolve())
+const categoriserMouvement = (db: Pool, p: Saisie) => categoriserSiVide(db, p.mouvement_id, 'locataire')
 
 const paiementRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
   const load = async (id: number) => (await db.query(`SELECT ${COLUMNS} FROM ${FROM} WHERE p.id = $1`, [id])).rows[0]

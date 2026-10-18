@@ -24,7 +24,9 @@ export type Brouillon = {
   versements: Versement[]
   mode: ModePaiement | ''
   note: string
-  // Opened from a bank movement: what justifies the rest of the transfer not split here
+  // Opened from a bank movement: the rest of the transfer not split here is a deposit (recorded as such, ADR 0019),
+  // or is justified by this note on the movement
+  resteDepot?: boolean
   justification?: string
 }
 
@@ -123,15 +125,17 @@ const repartition = computed(() => {
   if (montant === null) {
     return { ok: false, texte: `Réparti : ${euros(total.toString())} · indiquer le montant reçu` }
   }
-  const ecart = new Big(montant).minus(total)
+  // What is not split, positive: less received (or refunded, for a negative amount) than split is a rest
+  const ecart = new Big(montant).minus(total).times(new Big(montant).lt(0) ? -1 : 1)
   if (ecart.eq(0)) {
     return { ok: true, texte: `✓ ${euros(total.toString())} répartis sur ${euros(montant)} reçus` }
   }
-  // From a bank movement, less than received: the rest justified on the movement
-  if (props.mouvement && ecart.gt(0) && total.gt(0)) {
-    return (b.value.justification ?? '').trim()
-      ? { ok: true, texte: `✓ ${euros(total.toString())} répartis, reste de ${euros(ecart.toString())} justifié sur le mouvement`, reste: ecart }
-      : { ok: false, texte: `Reste ${euros(ecart.toString())} non réparti : le justifier ci-dessous, ou le répartir`, reste: ecart }
+  // From a bank movement, less than received: the rest is a deposit, or justified on the movement
+  if (props.mouvement && ecart.gt(0) && !total.eq(0)) {
+    const texte = b.value.resteDepot ? 'enregistré comme dépôt de garantie' : 'justifié sur le mouvement'
+    return b.value.resteDepot || (b.value.justification ?? '').trim()
+      ? { ok: true, texte: `✓ ${euros(total.toString())} répartis, reste de ${euros(ecart.toString())} ${texte}`, reste: ecart }
+      : { ok: false, texte: `Reste ${euros(ecart.toString())} non réparti : dire ce qu'il est ci-dessous, ou le répartir`, reste: ecart }
   }
   return { ok: false, texte: `✗ Réparti ${euros(total.toString())} sur ${euros(montant)} reçus : écart de ${euros(ecart.toString())}` }
 })
@@ -264,10 +268,17 @@ function changerDate(event: Event) {
 
       <label class="large">Note du paiement <input v-model="b.note"></label>
 
-      <label v-if="mouvement && resteAJustifier" class="large justification">
-        Justification du reste de {{ euros(resteAJustifier.toString()) }} (portée sur le mouvement)
-        <input v-model="b.justification" placeholder="ex. Dépôt de garantie">
-      </label>
+      <div v-if="mouvement && resteAJustifier" class="justification">
+        <strong>Reste de {{ euros(resteAJustifier.toString()) }}</strong>
+        <label class="choix">
+          <input v-model="b.resteDepot" type="checkbox">
+          C'est le dépôt de garantie {{ Number(b.montant.replace(',', '.')) < 0 ? 'remboursé au' : 'versé par le' }} locataire
+          (enregistré comme tel, visible dans sa fiche)
+        </label>
+        <label v-if="!b.resteDepot" class="large">Sinon, ce qui le justifie (note portée sur le mouvement)
+          <input v-model="b.justification" placeholder="ex. avance sur le mois suivant">
+        </label>
+      </div>
 
       <p class="controle" :class="repartition.ok ? 'ok' : 'ko'">{{ repartition.texte }}</p>
       <p v-if="erreur" class="message erreur">{{ erreur }}</p>
@@ -315,6 +326,9 @@ label.choix {
 }
 
 .justification {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
   padding: 0.5rem 0.8rem;
   border-radius: 6px;
   background: var(--fond-avertissement);

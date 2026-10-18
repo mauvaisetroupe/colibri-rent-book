@@ -305,15 +305,21 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
         montre son PDF à côté des mouvements lus, pour vérifier la lecture (une erreur se corrige dans l'extracteur, puis
         on supprime et réimporte le relevé).</li>
       <li><strong>Banque › Catégorisation des mouvements</strong>, onglet « À catégoriser » : chaque mouvement reçoit une
-        catégorie (paiement de locataire, travaux, emprunt, assurance, énergie, frais bancaires…). Le bouton bleu de la
+        catégorie (paiement de locataire, travaux, dépôt de garantie, emprunt, assurance, énergie, frais bancaires,
+        associés…). Le bouton bleu de la
         colonne « Proposition » donne la catégorie proposée (lue dans le libellé, le locataire nommé, ou un paiement ou des
         travaux déjà saisis qui lui correspondent) ; « Autre catégorie » ouvre la liste. « Accepter les N propositions »
         catégorise d'un coup.</li>
-      <li>Onglet « Catégorisés » : un <strong>paiement de locataire</strong> et des <strong>travaux</strong> ont un détail ;
-        la flèche ▸ le déplie. « Ajouter un paiement du locataire… » ouvre la fenêtre de l'écran Paiements, préremplie
-        (locataire, mois, loyer et provision encore dus, montant restant) ; on peut couvrir une partie et en ajouter un
-        autre (virement de plusieurs mois). « Rattacher à un paiement existant… » reprend un paiement ou des travaux déjà saisis (tout ce qui n'est pas encore rattaché ; ce qui correspond est marqué ✓ et choisi d'office, une alerte signale un montant ou une date qui diffère) ; « Justifier le reste… » explique ce que le détail ne couvre pas (dépôt de
-        garantie). Ceux à compléter viennent en tête ; ✕ retire la catégorie.</li>
+      <li>Onglet « Catégorisés » : un <strong>paiement de locataire</strong>, des <strong>travaux</strong> et un
+        <strong>dépôt de garantie</strong> ont un détail ; la flèche ▸ le déplie. « Ajouter un paiement du locataire… »
+        ouvre la fenêtre de l'écran Paiements, préremplie (locataire, mois, loyer et provision du séjour encore dus,
+        montant restant) : un reste s'y déclare dépôt de garantie, ou se justifie par une note. « Ajouter un dépôt de
+        garantie… » enregistre un dépôt versé ou remboursé (négatif), visible dans la fiche du locataire. Des travaux :
+        la facture se saisit d'abord (écran Travaux), puis « Rattacher à une facture de travaux… » y accroche le virement
+        (un acompte, puis le solde : deux virements pour une facture). « Rattacher… » reprend ce qui a été saisi (ce qui
+        correspond est marqué ✓ et choisi d'office, une alerte signale un montant ou une date qui diffère) ;
+        « Justifier le reste… » explique ce que le détail ne couvre pas. Ceux à compléter viennent en tête ; ✕ retire la
+        catégorie.</li>
     </ol>
   </details>
 
@@ -364,10 +370,12 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
 
   <details>
     <summary><strong>Travaux</strong> (tenue des comptes) : factures de travaux du propriétaire</summary>
-    <p>Écran Travaux : « + Ajouter des travaux » (fournisseur, description, nature, logement ou parties communes, date
-      de la facture, date du paiement, montant), puis « joindre » le PDF. Les travaux ne sont jamais répartis entre les
-      locataires : ils servent à la déclaration. Entretien, réparation et amélioration sont déductibles (2044, ligne
-      224) l'année de leur paiement ; construction et agrandissement non. La synthèse fiscale les reprend.</p>
+    <p>Écran Travaux : « + Ajouter une facture de travaux » (fournisseur, description, nature, logement ou parties
+      communes, date, montant, PDF). Elle est payée par les virements de la banque qu'on lui rattache, depuis la facture
+      (« Rattacher un virement… ») ou depuis la catégorisation des mouvements : payé, c'est vu à la banque. Les travaux
+      ne sont jamais répartis entre les locataires : ils servent à la déclaration. Entretien, réparation et amélioration
+      sont déductibles (2044, ligne 224), chaque virement l'année où il est passé ; construction et agrandissement non.
+      La synthèse fiscale les reprend.</p>
   </details>
 
   <details>

@@ -94,8 +94,8 @@ const mois = (p: Paiement) => (p.mois ? `${p.mois.slice(5, 7)}/${p.mois.slice(0,
       <template v-if="etat.incomplets.length">
         <h3>Mouvements à compléter</h3>
         <p class="discret">
-          Paiement de locataire ou travaux dont le détail ne couvre pas le montant : un loyer reçu mais pas saisi, une
-          facture de travaux à saisir, ou un reste à justifier.
+          Paiement de locataire, travaux ou dépôt de garantie dont le détail ne couvre pas le montant : un loyer reçu
+          mais pas saisi, une facture de travaux (ou son solde) à saisir, un dépôt à enregistrer, ou un reste à justifier.
         </p>
         <ul class="constats">
           <li v-for="m in etat.incomplets" :key="m.id" class="avertissement">

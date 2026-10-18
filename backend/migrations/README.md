@@ -36,3 +36,4 @@ après une mise à jour qui les change ; le fichier est rejouable.
 | `013_facture_remplacee.sql` | 0017 | Facture validée remplacée (statut `remplacee`, par qui, quand, motif), brouillon de correction, numéro unique parmi les validées |
 | `014_releves_bancaires.sql` | 0018 | Relevés bancaires et mouvements, extracteurs de relevés (`extracteur.type`), lien paiement / travaux → mouvement, PDF rangés par type (`factures/`, `releves/`, `travaux/`, `assemblees/`) |
 | `015_categorie_mouvement.sql` | 0018 | Catégorie d'un mouvement bancaire (paiement de locataire, travaux, emprunt, assurance…) et note, à la place du motif « ignoré » |
+| `016_reglements_depots_associes.sql` | 0019 | Règlements des travaux (payés en plusieurs fois, année fiscale de chaque paiement), versements de dépôt de garantie, catégories « associés » et « dépôt de garantie » |

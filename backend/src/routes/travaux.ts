@@ -2,25 +2,36 @@ import { createReadStream } from 'node:fs'
 import { join } from 'node:path'
 
 import multipart from '@fastify/multipart'
+import Big from 'big.js'
 import type { FastifyPluginAsync } from 'fastify'
 import type { Pool } from 'pg'
 
 import {
-  body, idParam, InputError, optionalDate, optionalText, query, requiredDate, requiredDecimal, requiredId, requiredText,
-  sendError,
+  body, idParam, InputError, optionalText, query, requiredDate, requiredDecimal, requiredId, requiredText, sendError,
 } from '../http.js'
 import { isPdf, removeIfUnused, storePdf } from '../pdfStorage.js'
 
 // Invoices of works paid by the owner (ADR 0015), for the tax return only: never allocated to the tenants. Deductible
-// (2044, line 224) according to their nature; tax year: that of the payment.
+// (2044, line 224) according to their nature. Paid by bank movements only (ADR 0019: paid = seen at the bank), one or
+// several (a deposit, then the balance), linked in « Catégorisation » or from the invoice; here, the invoice alone and
+// its payments to read.
 
 export const NATURES = ['entretien', 'amelioration', 'construction'] as const
 
 const COLUMNS = `t.id, t.immeuble_id, t.lot_id, lt.code AS lot, t.fournisseur, t.description, t.nature,
-  t.date_facture::text, t.date_paiement::text, t.montant_ttc::text, t.fichier_pdf IS NOT NULL AS pdf, t.note,
-  t.nature <> 'construction' AS deductible, t.mouvement_id`
+  t.date_facture::text, t.montant_ttc::text, t.fichier_pdf IS NOT NULL AS pdf, t.note,
+  t.nature <> 'construction' AS deductible,
+  coalesce(r.reglements, '[]'::json) AS reglements, coalesce(r.paye, 0)::text AS paye,
+  (t.montant_ttc - coalesce(r.paye, 0))::text AS reste, r.dernier::text AS date_paiement`
 
-const FROM = 'travaux t LEFT JOIN lot lt ON lt.id = t.lot_id'
+// Its payments (the movement: date, label), the amount paid, the date of the last one
+const FROM = `travaux t LEFT JOIN lot lt ON lt.id = t.lot_id
+  LEFT JOIN LATERAL (
+    SELECT json_agg(json_build_object('id', rt.id, 'mouvement_id', m.id, 'date_paiement', m.date_operation::text,
+                                      'libelle', m.libelle, 'montant', rt.montant::text) ORDER BY m.date_operation, rt.id) AS reglements,
+           sum(rt.montant) AS paye, max(m.date_operation) AS dernier
+    FROM reglement_travaux rt JOIN mouvement m ON m.id = rt.mouvement_id WHERE rt.travaux_id = t.id
+  ) r ON true`
 
 async function readTravaux(db: Pool, raw: Record<string, unknown>) {
   const immeuble = requiredId(raw.immeuble_id, 'Immeuble')
@@ -35,26 +46,9 @@ async function readTravaux(db: Pool, raw: Record<string, unknown>) {
   if (!(NATURES as readonly string[]).includes(nature)) {
     throw new InputError('Nature : entretien, amélioration ou construction')
   }
-  const dateFacture = requiredDate(raw.date_facture, 'Date de la facture')
-  const datePaiement = optionalDate(raw.date_paiement, 'Date du paiement')
-  if (datePaiement && datePaiement < dateFacture) {
-    throw new InputError('Le paiement est antérieur à la facture')
-  }
-  const montant = requiredDecimal(raw.montant_ttc, 'Montant TTC')
-  // Paid as seen on a bank statement (ADR 0018): a debit of at least this amount
-  const mouvement = raw.mouvement_id ? requiredId(raw.mouvement_id, 'Mouvement') : null
-  if (mouvement !== null) {
-    const { rows: [m] } = await db.query<{ montant: string, categorie: string | null }>(
-      'SELECT montant::text, categorie FROM mouvement WHERE id = $1', [mouvement])
-    if (!m || Number(m.montant) >= 0) {
-      throw new InputError('Des travaux se rattachent à un débit du relevé')
-    }
-    if (m.categorie && m.categorie !== 'travaux') {
-      throw new InputError('Ce mouvement a une autre catégorie : la retirer d\'abord')
-    }
-  }
   return [immeuble, lot, requiredText(raw.fournisseur, 'Fournisseur'), requiredText(raw.description, 'Description'),
-    nature, dateFacture, datePaiement, montant, optionalText(raw.note), mouvement]
+    nature, requiredDate(raw.date_facture, 'Date de la facture'), requiredDecimal(raw.montant_ttc, 'Montant TTC'),
+    optionalText(raw.note)] as const
 }
 
 const travauxRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async (app, { db, storageDir }) => {
@@ -69,7 +63,7 @@ const travauxRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = asyn
       const immeuble = requiredId(query(request).immeuble, 'Immeuble')
       const { rows } = await db.query(
         `SELECT ${COLUMNS} FROM ${FROM} WHERE t.immeuble_id = $1
-         ORDER BY coalesce(t.date_paiement, t.date_facture) DESC, t.id DESC`,
+         ORDER BY coalesce(r.dernier, t.date_facture) DESC, t.id DESC`,
         [immeuble],
       )
       return rows
@@ -81,32 +75,29 @@ const travauxRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = asyn
   app.post('/travaux', async (request, reply) => {
     try {
       const { rows: [created] } = await db.query<{ id: number }>(
-        `INSERT INTO travaux (immeuble_id, lot_id, fournisseur, description, nature, date_facture, date_paiement,
-                              montant_ttc, note, mouvement_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-        await readTravaux(db, body(request)),
-      )
-      await db.query(
-        `UPDATE mouvement SET categorie = 'travaux'
-         WHERE id = (SELECT mouvement_id FROM travaux WHERE id = $1) AND categorie IS NULL`, [created!.id])
+        `INSERT INTO travaux (immeuble_id, lot_id, fournisseur, description, nature, date_facture, montant_ttc, note)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`, [...await readTravaux(db, body(request))])
       return reply.code(201).send(await load(created!.id))
     } catch (error) {
       return sendError(reply, error)
     }
   })
 
+  // The invoice only: its payments are linked movements (a lower amount than what they paid is refused)
   app.put('/travaux/:id', async (request, reply) => {
     try {
-      const raw = body(request)
-      // Without « mouvement_id », a change keeps the link to the bank movement (Travaux screen)
+      const id = idParam(request)
+      const champs = await readTravaux(db, body(request))
+      const { rows: [paye] } = await db.query<{ paye: string }>(
+        'SELECT coalesce(sum(montant), 0)::text AS paye FROM reglement_travaux WHERE travaux_id = $1', [id])
+      if (new Big(paye!.paye).gt(champs[6])) {
+        throw new InputError(`Les virements rattachés (${new Big(paye!.paye).toFixed(2)}) dépassent ce montant`)
+      }
       const { rowCount } = await db.query(
         `UPDATE travaux SET immeuble_id = $2, lot_id = $3, fournisseur = $4, description = $5, nature = $6,
-                            date_facture = $7, date_paiement = $8, montant_ttc = $9, note = $10,
-                            mouvement_id = CASE WHEN $12 THEN $11 ELSE mouvement_id END
-         WHERE id = $1`,
-        [idParam(request), ...await readTravaux(db, raw), 'mouvement_id' in raw],
-      )
-      return rowCount ? load(idParam(request)) : reply.code(404).send({ message: 'Travaux introuvables' })
+                            date_facture = $7, montant_ttc = $8, note = $9
+         WHERE id = $1`, [id, ...champs])
+      return rowCount ? load(id) : reply.code(404).send({ message: 'Travaux introuvables' })
     } catch (error) {
       return sendError(reply, error)
     }

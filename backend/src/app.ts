@@ -6,6 +6,7 @@ import type { Pool } from 'pg'
 import assembleeRoutes from './routes/assemblees.js'
 import controleRoutes from './routes/controle.js'
 import decompteRoutes from './routes/decompte.js'
+import depotRoutes from './routes/depots.js'
 import extracteurRoutes from './routes/extracteurs.js'
 import fiscalRoutes from './routes/fiscal.js'
 import fournisseurRoutes from './routes/fournisseurs.js'
@@ -40,6 +41,7 @@ export async function buildApp({ db, storageDir, frontendDir }: AppOptions, opti
   await app.register(decompteRoutes, { prefix: '/api', db })
   await app.register(regularisationRoutes, { prefix: '/api', db, storageDir })
   await app.register(paiementRoutes, { prefix: '/api', db })
+  await app.register(depotRoutes, { prefix: '/api', db })
   await app.register(fiscalRoutes, { prefix: '/api', db })
   await app.register(travauxRoutes, { prefix: '/api', db, storageDir })
   await app.register(assembleeRoutes, { prefix: '/api', db, storageDir })

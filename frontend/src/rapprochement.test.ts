@@ -65,7 +65,8 @@ test('the category: words of the label, else the tenant named in it', () => {
   assert.equal(categoriePropose(mouvement('FACTURE SGT22010000000002', '-33.47')), 'frais_bancaires')
   assert.equal(categoriePropose(mouvement('VIR INST FACTURE N 2026 10 002', '-2710')), null)
   assert.equal(categoriePropose(mouvement('VIR DE ALICE MARTIN', '600'), sejours), 'locataire')
-  assert.equal(categoriePropose(mouvement('VIR DEPOT GARANTIE ALICE MARTIN', '-600'), sejours), 'remboursement_depot')
+  assert.equal(categoriePropose(mouvement('VIR DEPOT GARANTIE ALICE MARTIN', '-600'), sejours), 'depot_garantie')
+  assert.equal(categoriePropose(mouvement('VIR APPORT CAPITAL', '-10000')), 'associes')
 })
 
 test('a month already partly paid: only what is still due is proposed', () => {

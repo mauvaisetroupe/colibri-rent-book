@@ -138,21 +138,23 @@ const MOTS: [RegExp, CategorieMouvement][] = [
   [/DGFIP|IMPOT|TAXE FONCIERE|\bTRESOR\b/, 'impots'],
   [/^FACT(URE)? SGT|FRAIS|COTISATION|COMMISSION|\bAGIOS\b|INTERETS/, 'frais_bancaires'],
   [/\bSYNDIC\b|COPROPRIETE/, 'copropriete'],
-  [/APPORT|VIREMENT INTERNE|VIR(EMENT)? COMPTE/, 'virement_interne'],
+  [/APPORT|ASSOCIE/, 'associes'],
+  [/VIREMENT INTERNE|VIR(EMENT)? COMPTE/, 'virement_interne'],
 ]
 
 /**
- * The probable category: a tenant named in it (a credit is a payment, a debit a refund of deposit when it says so),
+ * The probable category: a tenant named in it (a credit is a payment, a debit a deposit refunded when it says so),
  * else words of its label; null when nothing is recognised.
  */
 export function categoriePropose(m: Pick<Mouvement, 'libelle' | 'detail' | 'montant' | 'date_operation'>, sejours: Sejour[] = []): CategorieMouvement | null {
   const texte = normaliser(`${m.libelle} ${m.detail ?? ''}`)
   const mot = MOTS.find(([re]) => re.test(texte))?.[1] ?? null
+  // A partner named like a tenant: the word wins, except for a transfer between accounts
   if (mot && mot !== 'virement_interne') {
     return mot
   }
   if (sejourDuMouvement(m, sejours)) {
-    return new Big(m.montant).gt(0) ? 'locataire' : /CAUTION|DEPOT|GARANTIE/.test(texte) ? 'remboursement_depot' : 'locataire'
+    return new Big(m.montant).gt(0) ? 'locataire' : /CAUTION|DEPOT|GARANTIE/.test(texte) ? 'depot_garantie' : 'locataire'
   }
   return mot
 }

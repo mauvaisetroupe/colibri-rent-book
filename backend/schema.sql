@@ -55,7 +55,7 @@ CREATE TABLE sejour (
   locataire_id int  NOT NULL REFERENCES locataire(id),
   periode      daterange NOT NULL CHECK (NOT isempty(periode) AND lower(periode) IS NOT NULL),
   note         text,
-  depot_garantie        numeric(12,2),        -- dépôt de garantie reçu (ADR 0008)
+  depot_garantie        numeric(12,2),        -- dépôt de garantie prévu au bail (ADR 0008) ; versé : versement_depot
   depot_retenu_charges  numeric(12,2),        -- part conservée au départ pour des charges impayées (SPEC § 9)
   -- deux séjours ne peuvent pas se chevaucher sur le même lot
   EXCLUDE USING gist (lot_id WITH =, periode WITH &&)
@@ -123,10 +123,12 @@ CREATE TABLE mouvement (
   libelle         text NOT NULL,
   detail          text,
   montant         numeric(12,2) NOT NULL CHECK (montant <> 0),
-  -- Ce qu'est le mouvement : paiement d'un locataire et travaux ont un détail (paiement.mouvement_id,
-  -- travaux.mouvement_id) ; la note justifie alors un reste non couvert (dépôt de garantie versé avec le loyer)
-  categorie       text CHECK (categorie IN ('locataire', 'travaux', 'emprunt', 'assurance', 'energie', 'eau',
-    'impots', 'frais_bancaires', 'copropriete', 'honoraires', 'remboursement_depot', 'virement_interne', 'autre')),
+  -- Ce qu'est le mouvement : paiement d'un locataire, travaux et dépôt de garantie ont un détail
+  -- (paiement.mouvement_id, reglement_travaux.mouvement_id, versement_depot.mouvement_id) ; la note justifie alors un
+  -- reste non couvert (ADR 0018, 0019)
+  categorie       text CONSTRAINT mouvement_categorie_check CHECK (categorie IN ('locataire', 'travaux',
+    'depot_garantie', 'emprunt', 'assurance', 'energie', 'eau', 'impots', 'frais_bancaires', 'copropriete',
+    'honoraires', 'associes', 'virement_interne', 'autre')),
   note            text,
   CONSTRAINT mouvement_autre_note CHECK (categorie IS DISTINCT FROM 'autre' OR note IS NOT NULL)
 );
@@ -232,6 +234,19 @@ CREATE INDEX ON paiement (sejour_id, mois);
 CREATE INDEX ON paiement (regularisation_id);
 CREATE INDEX ON paiement (mouvement_id);
 
+-- Deposits (ADR 0019): what a tenant paid (positive) and what was refunded to them (negative), each seen on a bank
+-- statement when linked; what the owner holds is their sum. sejour.depot_garantie stays the amount of the lease.
+CREATE TABLE versement_depot (
+  id              serial PRIMARY KEY,
+  sejour_id       int  NOT NULL REFERENCES sejour(id),
+  date_versement  date NOT NULL,
+  montant         numeric(12,2) NOT NULL CHECK (montant <> 0),
+  mouvement_id    int REFERENCES mouvement(id) ON DELETE SET NULL,
+  note            text
+);
+CREATE INDEX ON versement_depot (sejour_id);
+CREATE INDEX ON versement_depot (mouvement_id);
+
 -- Rent and provision called each month from a given month on, until the next row of the stay (ADR 0009: revision of
 -- the rent, new provision after a regularisation). A month of presence that is not complete is called pro rata of its
 -- days.
@@ -303,14 +318,22 @@ CREATE TABLE travaux (
   description    text NOT NULL,
   nature         nature_travaux NOT NULL,
   date_facture   date NOT NULL,
-  date_paiement  date,                                   -- année fiscale ; vide tant que la facture n'est pas payée
   montant_ttc    numeric(12,2) NOT NULL,
   fichier_pdf    text,                                   -- PDF archivé : travaux/<empreinte>.pdf
-  note           text,
-  mouvement_id   int REFERENCES mouvement(id) ON DELETE SET NULL      -- paiement vu sur le relevé (ADR 0018)
+  note           text
 );
-CREATE INDEX ON travaux (immeuble_id, date_paiement);
-CREATE INDEX ON travaux (mouvement_id);
+CREATE INDEX ON travaux (immeuble_id, date_facture);
+
+-- ADR 0019 : une facture de travaux est payée par des mouvements bancaires seulement (payé = vu à la banque), un ou
+-- plusieurs (acompte, solde), chacun pour un montant ; l'année fiscale de chacun est celle de son mouvement
+CREATE TABLE reglement_travaux (
+  id             serial PRIMARY KEY,
+  travaux_id     int NOT NULL REFERENCES travaux(id) ON DELETE CASCADE,
+  mouvement_id   int NOT NULL REFERENCES mouvement(id) ON DELETE CASCADE,
+  montant        numeric(12,2) NOT NULL CHECK (montant > 0),
+  UNIQUE (travaux_id, mouvement_id)
+);
+CREATE INDEX ON reglement_travaux (mouvement_id);
 
 -- ADR 0016 : la société (SCI), ses associés et leurs parts, ses assemblées générales et leurs procès-verbaux ;
 -- une assemblée close est numérotée dans le registre et figée.

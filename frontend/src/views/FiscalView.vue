@@ -121,18 +121,22 @@ const annees = [courante, courante - 1, courante - 2, courante - 3, courante - 4
 
     <h2>Travaux payés en {{ synthese.annee }}</h2>
     <p class="discret">
-      Dépenses de réparation, d'entretien et d'amélioration (2044, ligne 224), par date de paiement (écran Travaux).
-      Construction et agrandissement ne sont pas déductibles.
+      Dépenses de réparation, d'entretien et d'amélioration (2044, ligne 224), par date de paiement (écran Travaux) :
+      une facture payée en plusieurs fois compte pour chaque règlement de l'année. Construction et agrandissement ne
+      sont pas déductibles.
     </p>
     <table v-if="synthese.travaux.length" class="liste">
-      <thead><tr><th>Payée le</th><th>Fournisseur</th><th>Description</th><th>Nature</th><th class="nombre">Montant</th></tr></thead>
+      <thead><tr><th>Payé le</th><th>Fournisseur</th><th>Description</th><th>Nature</th><th class="nombre">Montant payé</th></tr></thead>
       <tbody>
-        <tr v-for="t in synthese.travaux" :key="t.id" class="sans-clic">
+        <tr v-for="(t, i) in synthese.travaux" :key="i" class="sans-clic">
           <td>{{ dateFr(t.date_paiement) }}</td>
           <td>{{ t.fournisseur }}</td>
           <td>{{ t.description }}{{ t.lot ? ` (${t.lot})` : '' }}</td>
           <td :class="t.deductible ? '' : 'discret'">{{ NATURES_TRAVAUX[t.nature] }}{{ t.deductible ? '' : ' (non déductible)' }}</td>
-          <td class="nombre">{{ euros(t.montant_ttc) }}</td>
+          <td class="nombre">
+            {{ euros(t.montant) }}
+            <div v-if="t.montant !== t.montant_ttc" class="discret">sur une facture de {{ euros(t.montant_ttc) }}</div>
+          </td>
         </tr>
       </tbody>
       <tfoot>
@@ -141,8 +145,8 @@ const annees = [courante, courante - 1, courante - 2, courante - 3, courante - 4
     </table>
     <p v-else class="discret">Aucuns travaux payés cette année.</p>
     <p v-if="synthese.travaux_non_payes.length" class="discret">
-      Non payés à ce jour (comptent l'année de leur paiement) :
-      {{ synthese.travaux_non_payes.map((t) => `${t.description} ${euros(t.montant_ttc)}`).join(' ; ') }}
+      Restant à payer au 31/12/{{ synthese.annee }} (comptent l'année de leur paiement) :
+      {{ synthese.travaux_non_payes.map((t) => `${t.description} ${euros(t.montant)}`).join(' ; ') }}
     </p>
 
     <h2>Pour information</h2>

@@ -65,6 +65,10 @@ const termine = (s: Sejour) => s.sortie !== null && s.sortie < aujourdhui
 const nbAnciens = computed(() => sejours.value.filter(termine).length)
 const affiches = computed(() => (avecAnciens.value ? sejours.value : sejours.value.filter((s) => !termine(s))))
 
+// A stay going on whose deposit held differs from that of the lease
+const depotEcart = (s: Sejour) => s.sortie === null && s.depot_detenu !== null && s.depot_garantie !== null
+  && !new Big(s.depot_detenu).eq(s.depot_garantie)
+
 const locataireDe = (s: Sejour) => locataires.value.find((l) => l.id === s.locataire_id)
 
 // ---------------------------------------------------------------- modal form
@@ -225,6 +229,10 @@ async function supprimer() {
         <td>{{ s.sortie ? dateFr(s.sortie) : 'en cours' }}</td>
         <td class="nombre">
           {{ euros(s.depot_garantie) }}
+          <!-- Held (ADR 0019): paid minus refunded, from the deposits recorded (bank screen) -->
+          <div v-if="s.depot_detenu !== null" :class="depotEcart(s) ? 'alerte' : 'discret'">
+            {{ Number(s.depot_detenu) === 0 ? 'remboursé' : `détenu ${euros(s.depot_detenu)}` }}
+          </div>
           <div v-if="s.depot_retenu_charges" class="discret">dont {{ euros(s.depot_retenu_charges) }} conservés pour charges</div>
         </td>
         <td class="nombre">

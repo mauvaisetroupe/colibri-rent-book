@@ -10,13 +10,15 @@ import {
   body, idParam, InputError, optionalDate, optionalText, query, requiredDate, requiredDecimal, requiredId, requiredText,
   sendError,
 } from '../http.js'
-import { estCategorie } from '../categories.js'
+import { AVEC_DETAIL, estCategorie, type Categorie } from '../categories.js'
+import { COUVERT_SQL, categoriserSiVide, verifierMouvement } from '../couverture.js'
 import { isPdf, removeIfUnused, storePdf } from '../pdfStorage.js'
 
 // Bank statements (ADR 0018): the PDF is read in the browser by the extractor of its bank, the server checks the
 // balances and stores the statement with its movements. Each movement then gets a category (categories.ts): the payment
-// of a tenant and works have a detail, linked on the other side (paiement.mouvement_id, travaux.mouvement_id), so
-// deleting a payment leaves its movement « incomplet »; a note justifies a rest the detail does not cover.
+// of a tenant, works and deposits have a detail (ADR 0019), linked on the other side (paiement, reglement_travaux,
+// versement_depot: mouvement_id), so deleting a payment leaves its movement « incomplet »; a note justifies a rest the
+// detail does not cover.
 
 type MouvementLu = { date_operation: string, date_valeur: string | null, libelle: string, detail: string | null, montant: string }
 type ReleveLu = {
@@ -81,16 +83,18 @@ const RELEVE_COLUMNS = `
   r.id, fo.nom AS banque, r.compte, r.date_releve::text, r.solde_precedent::text, r.nouveau_solde::text,
   r.fichier_pdf IS NOT NULL AS pdf, r.extracteur_id, r.importe_le::text`
 
-// What a movement became: its payments and works, the amount they cover, and its state
+// What a movement became: its payments, works payments and deposits, the amount they cover, and its state
 const MOUVEMENT_COLUMNS = `
   m.id, m.releve_id, m.ordre, m.date_operation::text, m.date_valeur::text, m.libelle, m.detail, m.montant::text,
   m.categorie, m.note, r.compte, r.date_releve::text,
   coalesce(l.paiements, '[]'::json) AS paiements, coalesce(l.travaux, '[]'::json) AS travaux,
+  coalesce(l.depots, '[]'::json) AS depots,
   coalesce(l.couvert, 0)::text AS couvert,
   coalesce(l.possibles, '[]'::json) AS possibles,
   CASE WHEN m.categorie IS NULL THEN 'a_categoriser'
-       -- A tenant payment or works whose detail does not cover the amount, and no note to justify the rest
-       WHEN m.categorie IN ('locataire', 'travaux') AND coalesce(l.couvert, 0) < abs(m.montant) AND m.note IS NULL
+       -- A category with a detail that does not cover the amount, and no note to justify the rest
+       WHEN m.categorie IN (${AVEC_DETAIL.map((c) => `'${c}'`).join(', ')}) AND coalesce(l.couvert, 0) < abs(m.montant)
+            AND m.note IS NULL
          THEN 'incomplet'
        ELSE 'categorise' END AS statut`
 
@@ -102,11 +106,18 @@ const MOUVEMENT_FROM = `mouvement m
                                          'total', (p.loyer + p.provision + p.regularisation)::text) ORDER BY p.mois)
        FROM paiement p JOIN sejour s ON s.id = p.sejour_id JOIN lot lt ON lt.id = s.lot_id
        JOIN locataire lo ON lo.id = s.locataire_id WHERE p.mouvement_id = m.id) AS paiements,
-      (SELECT json_agg(json_build_object('id', t.id, 'description', t.description, 'fournisseur', t.fournisseur,
-                                         'total', t.montant_ttc::text))
-       FROM travaux t WHERE t.mouvement_id = m.id) AS travaux,
-      abs((SELECT coalesce(sum(p.loyer + p.provision + p.regularisation), 0) FROM paiement p WHERE p.mouvement_id = m.id))
-      + (SELECT coalesce(sum(t.montant_ttc), 0) FROM travaux t WHERE t.mouvement_id = m.id) AS couvert,
+      -- The payments of works invoices: total, the amount of this payment; montant_ttc and reste, those of the invoice
+      (SELECT json_agg(json_build_object('id', t.id, 'reglement_id', rt.id, 'description', t.description,
+                                         'fournisseur', t.fournisseur, 'total', rt.montant::text,
+                                         'montant_ttc', t.montant_ttc::text,
+                                         'reste', (t.montant_ttc - (SELECT sum(x.montant) FROM reglement_travaux x
+                                                                    WHERE x.travaux_id = t.id))::text) ORDER BY rt.id)
+       FROM reglement_travaux rt JOIN travaux t ON t.id = rt.travaux_id WHERE rt.mouvement_id = m.id) AS travaux,
+      (SELECT json_agg(json_build_object('id', vd.id, 'sejour_id', vd.sejour_id, 'locataire', lo.nom, 'lot', lt.code,
+                                         'date', vd.date_versement::text, 'montant', vd.montant::text) ORDER BY vd.id)
+       FROM versement_depot vd JOIN sejour s ON s.id = vd.sejour_id JOIN lot lt ON lt.id = s.lot_id
+       JOIN locataire lo ON lo.id = s.locataire_id WHERE vd.mouvement_id = m.id) AS depots,
+      ${COUVERT_SQL} AS couvert,
       -- Recorded by hand before the statements: payments (credit) or works (debit) not linked yet, of the same amount,
       -- within ten days: to link rather than to type again
       -- (a transfer of several months typed as several payments: those of one tenant whose sum is the amount)
@@ -128,11 +139,12 @@ const MOUVEMENT_FROM = `mouvement m
            HAVING count(*) > 1 AND sum(p.loyer + p.provision + p.regularisation) = m.montant
          ) g))
       ELSE coalesce(
+        -- Works: an invoice whose unpaid rest is the amount
         (SELECT json_agg(json_build_object('type', 'travaux', 'id', t.id, 'description', t.description,
-                                           'fournisseur', t.fournisseur, 'date', t.date_paiement::text))
+                                           'fournisseur', t.fournisseur, 'date', t.date_facture::text))
          FROM travaux t
-         WHERE t.mouvement_id IS NULL AND t.montant_ttc = -m.montant
-           AND (t.date_paiement IS NULL OR abs(t.date_paiement - m.date_operation) <= 10)),
+         WHERE t.montant_ttc - (SELECT coalesce(sum(rt.montant), 0) FROM reglement_travaux rt WHERE rt.travaux_id = t.id)
+               = -m.montant),
         -- A refund to a tenant (negative payment) typed by hand
         (SELECT json_agg(json_build_object('type', 'paiement', 'id', p.id, 'locataire', lo.nom, 'lot', lt.code,
                                            'mois', p.mois::text, 'date', p.date_paiement::text))
@@ -255,7 +267,9 @@ const releveRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async
     const id = idParam(request)
     const { rows: [lie] } = await db.query(
       `SELECT 1 FROM mouvement m WHERE m.releve_id = $1 AND (m.categorie IS NOT NULL
-         OR EXISTS (SELECT 1 FROM paiement p WHERE p.mouvement_id = m.id) OR EXISTS (SELECT 1 FROM travaux t WHERE t.mouvement_id = m.id))`,
+         OR EXISTS (SELECT 1 FROM paiement p WHERE p.mouvement_id = m.id)
+         OR EXISTS (SELECT 1 FROM reglement_travaux rt WHERE rt.mouvement_id = m.id)
+         OR EXISTS (SELECT 1 FROM versement_depot vd WHERE vd.mouvement_id = m.id))`,
       [id],
     )
     if (lie) {
@@ -297,16 +311,28 @@ const releveRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async
   const loadMouvement = async (id: number) => (await db.query(
     `SELECT ${MOUVEMENT_COLUMNS} FROM ${MOUVEMENT_FROM} WHERE m.id = $1`, [id])).rows[0] ?? null
 
-  /** Its links: payments and works. */
+  /** Its links: payments, works payments, deposits. */
   async function liens(id: number) {
-    const { rows: [l] } = await db.query<{ paiements: number, travaux: number }>(
+    const { rows: [l] } = await db.query<{ paiements: number, travaux: number, depots: number }>(
       `SELECT (SELECT count(*)::int FROM paiement WHERE mouvement_id = $1) AS paiements,
-              (SELECT count(*)::int FROM travaux WHERE mouvement_id = $1) AS travaux`, [id])
+              (SELECT count(*)::int FROM reglement_travaux WHERE mouvement_id = $1) AS travaux,
+              (SELECT count(*)::int FROM versement_depot WHERE mouvement_id = $1) AS depots`, [id])
     return l!
   }
 
-  // The category of a movement, and a note (required for « autre »; for a tenant payment or works, it justifies the
-  // rest the detail does not cover). A movement with payments or works linked stays in their category.
+  /** The categories a movement may have with its links: payments, works or deposits keep theirs. */
+  function categoriesPermises(l: { paiements: number, travaux: number, depots: number }): Categorie[] | null {
+    if (l.travaux) {
+      return ['travaux']
+    }
+    if (l.paiements) {
+      return ['locataire']
+    }
+    return l.depots ? ['locataire', 'depot_garantie'] : null
+  }
+
+  // The category of a movement, and a note (required for « autre »; for a category with a detail, it justifies the
+  // rest the detail does not cover). A movement with a detail linked stays in a category that has it.
   app.put('/mouvements/:id/categorie', async (request, reply) => {
     const id = idParam(request)
     try {
@@ -318,9 +344,9 @@ const releveRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async
       if (raw.categorie === 'autre' && !note) {
         throw new InputError('« Autre » : préciser ce qu\'est ce mouvement dans la note')
       }
-      const l = await liens(id)
-      if ((l.paiements && raw.categorie !== 'locataire') || (l.travaux && raw.categorie !== 'travaux')) {
-        return reply.code(409).send({ message: 'Des paiements ou des travaux y sont rattachés : les détacher d\'abord' })
+      const permises = categoriesPermises(await liens(id))
+      if (permises && !permises.includes(raw.categorie)) {
+        return reply.code(409).send({ message: 'Des paiements, des travaux ou des dépôts y sont rattachés : les détacher d\'abord' })
       }
       const { rowCount } = await db.query('UPDATE mouvement SET categorie = $2, note = $3 WHERE id = $1', [id, raw.categorie, note])
       return rowCount ? loadMouvement(id) : reply.code(404).send({ message: 'Mouvement introuvable' })
@@ -331,24 +357,15 @@ const releveRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async
 
   app.delete('/mouvements/:id/categorie', async (request, reply) => {
     const id = idParam(request)
-    const l = await liens(id)
-    if (l.paiements || l.travaux) {
-      return reply.code(409).send({ message: 'Des paiements ou des travaux y sont rattachés : les détacher d\'abord' })
+    if (categoriesPermises(await liens(id))) {
+      return reply.code(409).send({ message: 'Des paiements, des travaux ou des dépôts y sont rattachés : les détacher d\'abord' })
     }
     const { rowCount } = await db.query('UPDATE mouvement SET categorie = NULL, note = NULL WHERE id = $1', [id])
     return rowCount ? loadMouvement(id) : reply.code(404).send({ message: 'Mouvement introuvable' })
   })
 
-  /** A payment or works linked: the movement takes their category (refused when it has another one). */
-  async function categoriser(id: number, categorie: 'locataire' | 'travaux') {
-    const { rows: [m] } = await db.query<{ categorie: string | null }>('SELECT categorie FROM mouvement WHERE id = $1', [id])
-    if (m?.categorie && m.categorie !== categorie) {
-      throw new InputError('Ce mouvement a une autre catégorie : la retirer d\'abord')
-    }
-    await db.query('UPDATE mouvement SET categorie = $2 WHERE id = $1 AND categorie IS NULL', [id, categorie])
-  }
-
-  // Links a payment or works already recorded (by hand, before the statements) to the movement
+  // Links what was recorded by hand (before the statements) to the movement: payments of a tenant, works (a payment
+  // typed of this amount, else a new payment of what remains of the invoice), a deposit
   app.post('/mouvements/:id/lier', async (request, reply) => {
     const id = idParam(request)
     try {
@@ -357,45 +374,88 @@ const releveRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async
       if (!m) {
         return reply.code(404).send({ message: 'Mouvement introuvable' })
       }
-      // Several payments at once (a transfer of several months)
-      if (Array.isArray(raw.paiement_ids)) {
-        const ids = raw.paiement_ids.map((x) => requiredId(x, 'Paiement'))
-        await categoriser(id, 'locataire')
-        const { rowCount } = await db.query(
-          'UPDATE paiement SET mouvement_id = $2 WHERE id = ANY($1) AND (mouvement_id IS NULL OR mouvement_id = $2)', [ids, id])
-        if (rowCount !== ids.length) {
+      const montant = new Big(m.montant)
+      const resteMouvement = montant.abs().minus(m.couvert)
+      if (raw.paiement_ids !== undefined || raw.paiement_id) {
+        // One payment, or several at once (a transfer of several months)
+        const ids = Array.isArray(raw.paiement_ids) ? raw.paiement_ids.map((x) => requiredId(x, 'Paiement')) : [requiredId(raw.paiement_id, 'Paiement')]
+        const { rows } = await db.query<{ id: number, mouvement_id: number | null, total: string }>(
+          'SELECT id, mouvement_id, (loyer + provision + regularisation)::text AS total FROM paiement WHERE id = ANY($1)', [ids])
+        if (rows.length !== ids.length) {
+          return reply.code(404).send({ message: 'Paiement introuvable' })
+        }
+        if (rows.some((p) => p.mouvement_id !== null && p.mouvement_id !== id)) {
           throw new InputError('Un de ces paiements est déjà rattaché à un autre mouvement')
         }
+        // Payments chosen by hand may exceed the transfer: an agency pays the rents it collected less its fees, a rent
+        // paid by two transfers is linked to one of them; only the category and the sign are checked
+        await verifierMouvement(db, id, {
+          categories: ['locataire'], signe: montant.gt(0) ? 1 : -1, montant: new Big(0), detail: 'paiement', exclure: null,
+        })
+        await db.query('UPDATE paiement SET mouvement_id = $2 WHERE id = ANY($1)', [ids, id])
+        await categoriserSiVide(db, id, 'locataire')
         return loadMouvement(id)
       }
-      const table = raw.paiement_id ? 'paiement' : raw.travaux_id ? 'travaux' : null
-      if (!table) {
-        throw new InputError('Indiquer le paiement ou les travaux à rattacher')
+      if (raw.travaux_id) {
+        // A payment of the invoice by this movement: what remains of the movement, no more than what remains of the
+        // invoice (a transfer paying two invoices is linked to both)
+        const travauxId = requiredId(raw.travaux_id, 'Travaux')
+        const { rows: [t] } = await db.query<{ reste: string }>(
+          `SELECT (t.montant_ttc - (SELECT coalesce(sum(montant), 0) FROM reglement_travaux WHERE travaux_id = t.id))::text AS reste
+           FROM travaux t WHERE t.id = $1`, [travauxId])
+        if (!t) {
+          return reply.code(404).send({ message: 'Travaux introuvables' })
+        }
+        const montantReglement = resteMouvement.lt(t.reste) ? resteMouvement : new Big(t.reste)
+        if (!montantReglement.gt(0)) {
+          throw new InputError(new Big(t.reste).gt(0) ? 'Ce mouvement est déjà rattaché en entier' : 'Cette facture est déjà réglée en entier')
+        }
+        await verifierMouvement(db, id, {
+          categories: ['travaux'], signe: -1, montant: montantReglement, detail: 'reglement_travaux', exclure: null,
+        })
+        await db.query(
+          `INSERT INTO reglement_travaux (travaux_id, mouvement_id, montant) VALUES ($1, $2, $3)
+           ON CONFLICT (travaux_id, mouvement_id) DO UPDATE SET montant = reglement_travaux.montant + excluded.montant`,
+          [travauxId, id, montantReglement.toString()])
+        await categoriserSiVide(db, id, 'travaux')
+        return loadMouvement(id)
       }
-      const cible = requiredId(table === 'paiement' ? raw.paiement_id : raw.travaux_id, table === 'paiement' ? 'Paiement' : 'Travaux')
-      const { rows: [lien] } = await db.query<{ mouvement_id: number | null }>(
-        `SELECT mouvement_id FROM ${table} WHERE id = $1`, [cible])
-      if (!lien) {
-        return reply.code(404).send({ message: table === 'paiement' ? 'Paiement introuvable' : 'Travaux introuvables' })
+      if (raw.depot_id) {
+        const depotId = requiredId(raw.depot_id, 'Versement de dépôt')
+        const { rows: [d] } = await db.query<{ montant: string, mouvement_id: number | null }>(
+          'SELECT montant::text, mouvement_id FROM versement_depot WHERE id = $1', [depotId])
+        if (!d) {
+          return reply.code(404).send({ message: 'Versement introuvable' })
+        }
+        if (d.mouvement_id !== null && d.mouvement_id !== id) {
+          throw new InputError('Déjà rattaché à un autre mouvement')
+        }
+        await verifierMouvement(db, id, {
+          categories: ['locataire', 'depot_garantie'], signe: new Big(d.montant).gt(0) ? 1 : -1, montant: new Big(d.montant),
+          detail: 'versement_depot', exclure: depotId,
+        })
+        await db.query('UPDATE versement_depot SET mouvement_id = $2 WHERE id = $1', [depotId, id])
+        await categoriserSiVide(db, id, 'depot_garantie')
+        return loadMouvement(id)
       }
-      if (lien.mouvement_id !== null && lien.mouvement_id !== id) {
-        throw new InputError('Déjà rattaché à un autre mouvement')
-      }
-      await categoriser(id, table === 'paiement' ? 'locataire' : 'travaux')
-      await db.query(`UPDATE ${table} SET mouvement_id = $2 WHERE id = $1`, [cible, id])
-      return loadMouvement(id)
+      throw new InputError('Indiquer le paiement, les travaux ou le versement de dépôt à rattacher')
     } catch (error) {
       return sendError(reply, error)
     }
   })
 
+  // Detaches: the payment or the deposit stays, in its screen; a works payment is the movement itself, it goes
   app.post('/mouvements/:id/delier', async (request, reply) => {
     const id = idParam(request)
     const raw = body(request)
     if (raw.paiement_id) {
       await db.query('UPDATE paiement SET mouvement_id = NULL WHERE id = $1 AND mouvement_id = $2', [Number(raw.paiement_id), id])
+    } else if (raw.reglement_id) {
+      await db.query('DELETE FROM reglement_travaux WHERE id = $1 AND mouvement_id = $2', [Number(raw.reglement_id), id])
     } else if (raw.travaux_id) {
-      await db.query('UPDATE travaux SET mouvement_id = NULL WHERE id = $1 AND mouvement_id = $2', [Number(raw.travaux_id), id])
+      await db.query('DELETE FROM reglement_travaux WHERE travaux_id = $1 AND mouvement_id = $2', [Number(raw.travaux_id), id])
+    } else if (raw.depot_id) {
+      await db.query('UPDATE versement_depot SET mouvement_id = NULL WHERE id = $1 AND mouvement_id = $2', [Number(raw.depot_id), id])
     }
     return (await loadMouvement(id)) ?? reply.code(404).send({ message: 'Mouvement introuvable' })
   })
