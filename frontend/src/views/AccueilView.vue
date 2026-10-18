@@ -276,18 +276,23 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
   </details>
 
   <details>
-    <summary><strong>Banque</strong> (tenue des comptes) : relevés, paiements reçus et dépenses</summary>
+    <summary><strong>Banque</strong> (tenue des comptes) : relevés bancaires, catégorisation des mouvements</summary>
     <ol>
-      <li>Déposer les relevés PDF de la banque sur l'écran Banque : l'extracteur de la banque (voir
-        <strong>Fournisseurs</strong>) les lit dans le navigateur ; un relevé n'est enregistré que si solde précédent
-        + crédits − débits retombe sur le nouveau solde. L'onglet « Relevés » signale un relevé manquant.</li>
-      <li>Onglet « À traiter » : chaque mouvement avec une proposition. Un crédit : le paiement du locataire nommé dans
-        le libellé, pour le mois écrit (« LOYER 02/25 ») ou celui de l'opération, réparti en loyer et provision comme
-        appelés ; « Paiement… » ouvre le formulaire prérempli. Un débit : « Ignorer » avec le motif proposé (emprunt,
-        assurance, énergie…), ou « Travaux… » (facture de travaux préremplie).</li>
-      <li>Un paiement saisi à la main avant les relevés se <strong>rattache</strong> (même montant, à dix jours près)
-        au lieu d'être saisi de nouveau ; « Rattacher les N déjà saisis » le fait pour tout l'historique.</li>
-      <li>Supprimer un paiement remet son mouvement « à traiter » ; « Détacher » garde le paiement.</li>
+      <li><strong>Banque › Relevés bancaires</strong> : déposer les relevés PDF ; l'extracteur de la banque (voir
+        <strong>Fournisseurs</strong>) les lit dans le navigateur, et un relevé n'est enregistré que si solde précédent +
+        crédits − débits retombe au centime sur le nouveau solde. La liste signale un relevé manquant. Ouvrir un relevé
+        montre son PDF à côté des mouvements lus, pour vérifier la lecture (une erreur se corrige dans l'extracteur, puis
+        on supprime et réimporte le relevé).</li>
+      <li><strong>Banque › Catégorisation des mouvements</strong>, onglet « À catégoriser » : chaque mouvement reçoit une
+        catégorie (paiement de locataire, travaux, emprunt, assurance, énergie, frais bancaires…). Le bouton bleu de la
+        colonne « Proposition » donne la catégorie proposée (lue dans le libellé, le locataire nommé, ou un paiement ou des
+        travaux déjà saisis qui lui correspondent) ; « Autre catégorie » ouvre la liste. « Accepter les N propositions »
+        catégorise d'un coup.</li>
+      <li>Onglet « Catégorisés » : un <strong>paiement de locataire</strong> et des <strong>travaux</strong> ont un détail ;
+        la flèche ▸ le déplie. « Ajouter un paiement du locataire… » ouvre la fenêtre de l'écran Paiements, préremplie
+        (locataire, mois, loyer et provision encore dus, montant restant) ; on peut couvrir une partie et en ajouter un
+        autre (virement de plusieurs mois). « Rattacher à un paiement existant… » reprend un paiement ou des travaux déjà saisis (tout ce qui n'est pas encore rattaché ; ce qui correspond est marqué ✓ et choisi d'office, une alerte signale un montant ou une date qui diffère) ; « Justifier le reste… » explique ce que le détail ne couvre pas (dépôt de
+        garantie). Ceux à compléter viennent en tête ; ✕ retire la catégorie.</li>
     </ol>
   </details>
 

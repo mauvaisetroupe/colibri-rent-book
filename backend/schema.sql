@@ -99,8 +99,8 @@ CREATE TRIGGER extracteur_fige BEFORE UPDATE OR DELETE ON extracteur
   FOR EACH ROW EXECUTE FUNCTION extracteur_fige();
 
 -- ---------------------------------------------------------------- relevés bancaires (ADR 0018)
--- Un relevé de la banque (fournisseur), lu par un extracteur ; ses mouvements : crédit positif, débit négatif. Ce qu'un
--- mouvement est devenu est de l'autre côté (paiement.mouvement_id, travaux.mouvement_id) ; ignoré : avec un motif.
+-- Un relevé de la banque (fournisseur), lu par un extracteur ; ses mouvements : crédit positif, débit négatif, chacun
+-- avec une catégorie.
 CREATE TABLE releve_bancaire (
   id               serial PRIMARY KEY,
   fournisseur_id   int  NOT NULL REFERENCES fournisseur(id),
@@ -123,7 +123,12 @@ CREATE TABLE mouvement (
   libelle         text NOT NULL,
   detail          text,
   montant         numeric(12,2) NOT NULL CHECK (montant <> 0),
-  motif_ignore    text
+  -- Ce qu'est le mouvement : paiement d'un locataire et travaux ont un détail (paiement.mouvement_id,
+  -- travaux.mouvement_id) ; la note justifie alors un reste non couvert (dépôt de garantie versé avec le loyer)
+  categorie       text CHECK (categorie IN ('locataire', 'travaux', 'emprunt', 'assurance', 'energie', 'eau',
+    'impots', 'frais_bancaires', 'copropriete', 'honoraires', 'remboursement_depot', 'virement_interne', 'autre')),
+  note            text,
+  CONSTRAINT mouvement_autre_note CHECK (categorie IS DISTINCT FROM 'autre' OR note IS NOT NULL)
 );
 CREATE INDEX ON mouvement (date_operation);
 

@@ -39,6 +39,8 @@ const props = defineProps<{
   paiements: Paiement[]
   occupe: boolean
   erreur: string | null
+  // Opened from a bank movement (ADR 0018): what it is, recalled above the form
+  mouvement?: { libelle: string, date: string, montant: string, couvert: string } | null
 }>()
 const b = defineModel<Brouillon>({ required: true })
 // « suivant »: save, then start another payment (same date and mode), e.g. several lines of one bank statement
@@ -135,7 +137,12 @@ function changerDate(event: Event) {
 <template>
   <dialog ref="fenetre" class="fenetre" @cancel.prevent="emit('fermer')">
     <form @submit.prevent="pret && emit('enregistrer', false)">
-      <h2>{{ nouveau ? 'Nouveau paiement' : 'Modifier le paiement' }}</h2>
+      <h2>{{ nouveau ? 'Nouveau paiement du locataire' : 'Modifier le paiement du locataire' }}</h2>
+      <p v-if="mouvement" class="mouvement">
+        <strong>{{ mouvement.libelle }}</strong> du {{ dateFr(mouvement.date) }} : {{ euros(mouvement.montant) }}
+        · déjà rapproché {{ euros(mouvement.couvert) }}
+        · <strong>reste {{ euros(new Big(mouvement.montant).abs().minus(mouvement.couvert).toString()) }}</strong>
+      </p>
 
       <div class="rangee">
         <label>Reçu le <input :value="b.date" type="date" required @change="changerDate"></label>
@@ -223,6 +230,13 @@ label.choix {
   font-size: 0.95rem;
   color: var(--texte);
   cursor: pointer;
+}
+
+.mouvement {
+  margin: 0;
+  padding: 0.5rem 0.8rem;
+  border-radius: 6px;
+  background: var(--fond-avertissement);
 }
 
 .montant {

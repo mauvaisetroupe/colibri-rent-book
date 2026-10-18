@@ -11,9 +11,12 @@
     "extracteurs:sql": "tsx scripts/extracteurs-sql.ts"
   },
   "dependencies": {
+    "@openvue/openicons": "^1.0.0",
+    "@openvue/themes": "^1.0.0",
     "@revolist/vue3-datagrid": "^4.28.4",
     "big.js": "^7.0.1",
     "monaco-editor": "0.57.0",
+    "openvue": "^1.0.0",
     "pdfjs-dist": "6.4.299",
     "vue": "^3.5.41",
     "vue-router": "^5.4.0"

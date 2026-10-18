@@ -1,12 +1,13 @@
 import Big from 'big.js'
 
-import type { Echeance, Mouvement, Regularisation, Sejour } from './api'
+import type { CategorieMouvement, Echeance, Mouvement, Paiement, Regularisation, Sejour } from './api'
 import { attendu } from './echeances'
 
 // What a bank movement probably is (ADR 0018), for the « Banque » screen: proposals only, the user accepts or changes
-// them. A credit: the payment of a tenant whose name is in the label or the detail, for the month written in it
-// (« LOYER 02/25 ») or else the month of the operation, split into rent and provision as called (ADR 0009), or toward
-// a regularisation still to be paid. A debit: a reason to ignore it, from its label.
+// them. Its category: the payment of a tenant whose name is in the label or the detail, else a category read in the
+// label (loan, insurance, energy…). A tenant payment: for the month written in it (« LOYER 02/25 ») or else the month
+// of the operation, split into rent and provision as called (ADR 0009) minus what is already paid for that month, or
+// toward a regularisation still to be paid.
 
 /** Upper case, without accents: « Hélène » and « HELENE » are the same. */
 export const normaliser = (texte: string) => texte.normalize('NFD').replace(/\p{M}/gu, '').toUpperCase()
@@ -34,7 +35,10 @@ export function sejourDuMouvement(m: Pick<Mouvement, 'libelle' | 'detail' | 'dat
   }
   let meilleur: { sejour: Sejour, score: number } | null = null
   for (const s of sejours.filter(proche)) {
-    const score = motsDuNom(s.locataire).filter((mot) => texte.includes(` ${mot} `)).length
+    // A word of the name, or its beginning when the bank cut the label (« LOYER ET RAPPEL DE CHARGES ZIEG »)
+    const tronques = texte.trim().split(' ').filter((t) => t.length >= 4)
+    const score = motsDuNom(s.locataire)
+      .filter((mot) => texte.includes(` ${mot} `) || tronques.some((t) => mot.startsWith(t))).length
     if (score > 0 && (!meilleur || score > meilleur.score)) {
       meilleur = { sejour: s, score }
     }
@@ -71,11 +75,11 @@ export type Proposition = {
  * when it matches that; else rent = amount − provision called (the difference shown).
  */
 export function proposer(
-  m: Mouvement, sejours: Sejour[], echeances: Echeance[], regularisations: Regularisation[],
+  m: Mouvement, sejours: Sejour[], echeances: Echeance[], regularisations: Regularisation[], paiements: Paiement[] = [],
 ): Proposition {
   const sejour = sejourDuMouvement(m, sejours)
   const mois = moisDuMouvement(m)
-  const montant = new Big(m.montant).minus(m.couvert)
+  const montant = new Big(m.montant).abs().minus(m.couvert)
   const vide: Proposition = { sejour, mois, loyer: montant.toString(), provision: '0', regularisation_id: null, regularisation: '0', ecart: null }
   if (!sejour) {
     return { ...vide, ecart: 'locataire non reconnu dans le libellé' }
@@ -85,9 +89,20 @@ export function proposer(
   if (regul) {
     return { ...vide, loyer: '0', regularisation_id: regul.id, regularisation: montant.toString() }
   }
-  const appele = attendu(echeances, sejour, mois)
-  if (!appele) {
+  const appel = attendu(echeances, sejour, mois)
+  if (!appel) {
     return { ...vide, ecart: `pas de loyer appelé connu pour ${mois}` }
+  }
+  // What is still due for the month: called, minus the payments of the month already recorded
+  const duMois = paiements.filter((p) => p.sejour_id === sejour.id && p.mois?.slice(0, 7) === mois)
+  const dejaLoyer = duMois.reduce((t, p) => t.plus(p.loyer), new Big(0))
+  const dejaProvision = duMois.reduce((t, p) => t.plus(p.provision), new Big(0))
+  const positif = (x: Big) => (x.lt(0) ? new Big(0) : x)
+  const loyerDu = positif(new Big(appel.loyer).minus(dejaLoyer))
+  const provisionDue = positif(new Big(appel.provision).minus(dejaProvision))
+  const appele = { loyer: loyerDu.toString(), provision: provisionDue.toString(), total: loyerDu.plus(provisionDue).toString() }
+  if (duMois.length && new Big(appele.total).eq(0)) {
+    return { ...vide, ecart: `${mois.split('-').reverse().join('/')} déjà payé en entier` }
   }
   if (new Big(appele.total).eq(montant)) {
     return { ...vide, loyer: appele.loyer, provision: appele.provision }
@@ -97,25 +112,34 @@ export function proposer(
     ...vide,
     loyer: (loyer.lt(0) ? montant : loyer).toString(),
     provision: loyer.lt(0) ? '0' : appele.provision,
-    ecart: `appelé ${new Big(appele.total).toFixed(2)} €, reçu ${montant.toFixed(2)} €`,
+    ecart: `${duMois.length ? 'reste dû' : 'appelé'} ${new Big(appele.total).toFixed(2)} €, reçu ${montant.toFixed(2)} €`,
   }
 }
 
-// Reasons to ignore a debit, from words of its label (the most frequent outgoings of a rental company)
-const MOTIFS: [RegExp, string][] = [
-  [/\bPRET\b|ECH PRET|ECHEANCE/, 'Emprunt'],
-  [/ASSURANCE|AURORE|IARD|\bMAAF|\bAXA\b|ALLIANZ|MACIF|MATMUT/, 'Assurance'],
-  [/\bENGIE\b|\bEDF\b|TOTALENERGIES|\bGAZ\b|ELECTRICITE/, 'Facture d\'énergie (prélèvement)'],
-  [/\bEAU\b|SEAFF|VEOLIA|SUEZ|SAUR\b/, 'Facture d\'eau'],
-  [/DGFIP|IMPOT|TAXE FONCIERE|\bTRESOR\b/, 'Impôts et taxes'],
-  [/^FACT(URE)? SGT|FRAIS|COTISATION|COMMISSION|\bAGIOS\b/, 'Frais bancaires'],
-  [/\bSYNDIC\b|COPROPRIETE/, 'Charges de copropriété'],
+// Categories read in the label of a movement (the most frequent ones of a rental company)
+const MOTS: [RegExp, CategorieMouvement][] = [
+  [/\bPRET\b|ECH PRET|ECHEANCE/, 'emprunt'],
+  [/ASSURANCE|AURORE|IARD|\bMAAF|\bAXA\b|ALLIANZ|MACIF|MATMUT|SINISTRE/, 'assurance'],
+  [/\bENGIE\b|\bEDF\b|ELECTRICITE DE FRANCE|TOTALENERGIES|\bGAZ\b|ELECTRICITE/, 'energie'],
+  [/\bEAU\b|SEAFF|VEOLIA|SUEZ|SAUR\b/, 'eau'],
+  [/DGFIP|IMPOT|TAXE FONCIERE|\bTRESOR\b/, 'impots'],
+  [/^FACT(URE)? SGT|FRAIS|COTISATION|COMMISSION|\bAGIOS\b|INTERETS/, 'frais_bancaires'],
+  [/\bSYNDIC\b|COPROPRIETE/, 'copropriete'],
+  [/APPORT|VIREMENT INTERNE|VIR(EMENT)? COMPTE/, 'virement_interne'],
 ]
 
-export function motifPropose(m: Pick<Mouvement, 'libelle' | 'detail' | 'montant'>): string | null {
-  if (new Big(m.montant).gt(0)) {
-    return null
-  }
+/**
+ * The probable category: a tenant named in it (a credit is a payment, a debit a refund of deposit when it says so),
+ * else words of its label; null when nothing is recognised.
+ */
+export function categoriePropose(m: Pick<Mouvement, 'libelle' | 'detail' | 'montant' | 'date_operation'>, sejours: Sejour[] = []): CategorieMouvement | null {
   const texte = normaliser(`${m.libelle} ${m.detail ?? ''}`)
-  return MOTIFS.find(([re]) => re.test(texte))?.[1] ?? null
+  const mot = MOTS.find(([re]) => re.test(texte))?.[1] ?? null
+  if (mot && mot !== 'virement_interne') {
+    return mot
+  }
+  if (sejourDuMouvement(m, sejours)) {
+    return new Big(m.montant).gt(0) ? 'locataire' : /CAUTION|DEPOT|GARANTIE/.test(texte) ? 'remboursement_depot' : 'locataire'
+  }
+  return mot
 }

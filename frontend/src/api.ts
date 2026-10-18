@@ -361,8 +361,30 @@ export type Releve = {
 // suite: the opening balance is the closing balance of the previous statement of the account (null: the first one)
 export type ReleveResume = Releve & { nb_mouvements: number, suite: boolean | null }
 
-// a_traiter: nothing linked; partiel: payments below the amount; rapproche; ignore (with a reason)
-export type StatutMouvement = 'a_traiter' | 'partiel' | 'rapproche' | 'ignore'
+// What a bank movement is (ADR 0018), fixed in the code: « locataire » and « travaux » have a detail (the payments, the
+// works linked to it); the others only a note, required for « autre ». sens: the movements it applies to.
+export type CategorieMouvement = 'locataire' | 'travaux' | 'emprunt' | 'assurance' | 'energie' | 'eau' | 'impots'
+  | 'frais_bancaires' | 'copropriete' | 'honoraires' | 'remboursement_depot' | 'virement_interne' | 'autre'
+export const CATEGORIES_MOUVEMENT: Record<CategorieMouvement, { nom: string, sens: 'credit' | 'debit' | 'tous', icone: string }> = {
+  locataire: { nom: 'Paiement de locataire', sens: 'tous', icone: 'oi oi-users' },
+  travaux: { nom: 'Travaux', sens: 'debit', icone: 'oi oi-hammer' },
+  emprunt: { nom: 'Emprunt', sens: 'tous', icone: 'oi oi-building-columns' },
+  assurance: { nom: 'Assurance', sens: 'tous', icone: 'oi oi-shield' },
+  energie: { nom: 'Énergie (gaz, électricité)', sens: 'debit', icone: 'oi oi-bolt' },
+  eau: { nom: 'Eau', sens: 'debit', icone: 'oi oi-filter' },
+  impots: { nom: 'Impôts et taxes', sens: 'tous', icone: 'oi oi-percentage' },
+  frais_bancaires: { nom: 'Frais bancaires', sens: 'tous', icone: 'oi oi-credit-card' },
+  copropriete: { nom: 'Copropriété', sens: 'tous', icone: 'oi oi-building' },
+  honoraires: { nom: 'Honoraires (comptable, agence)', sens: 'tous', icone: 'oi oi-briefcase' },
+  remboursement_depot: { nom: 'Remboursement de dépôt de garantie', sens: 'debit', icone: 'oi oi-replay' },
+  virement_interne: { nom: 'Virement interne, apport', sens: 'tous', icone: 'oi oi-arrow-right-arrow-left' },
+  autre: { nom: 'Autre', sens: 'tous', icone: 'oi oi-tag' },
+}
+export const AVEC_DETAIL: CategorieMouvement[] = ['locataire', 'travaux']
+
+// a_categoriser: no category yet; incomplet: tenant payment or works whose detail does not cover the amount (no note
+// to justify the rest); categorise
+export type StatutMouvement = 'a_categoriser' | 'incomplet' | 'categorise'
 
 export type Mouvement = {
   id: number
@@ -374,7 +396,9 @@ export type Mouvement = {
   detail: string | null
   // Credit positive, debit negative
   montant: string
-  motif_ignore: string | null
+  categorie: CategorieMouvement | null
+  // Required for « autre »; for a tenant payment or works, justifies the rest the detail does not cover
+  note: string | null
   compte: string
   date_releve: string
   paiements: { id: number, locataire: string, lot: string, mois: string | null, total: string }[]
@@ -680,10 +704,11 @@ export const api = {
   },
   relevesDeLaBanque: (fournisseur: string) =>
     request<ReleveAvecPdf[]>('GET', `/extracteurs/releves?fournisseur=${encodeURIComponent(fournisseur)}`),
-  mouvements: (statut: 'tous' | 'a_traiter' | 'rapproche' | 'ignore', du?: string, au?: string) =>
+  mouvements: (statut: 'tous' | StatutMouvement, du?: string, au?: string) =>
     request<Mouvement[]>('GET', `/mouvements?statut=${statut}${du ? `&du=${du}` : ''}${au ? `&au=${au}` : ''}`),
-  ignorerMouvement: (id: number, motif: string) => request<Mouvement>('POST', `/mouvements/${id}/ignorer`, { motif }),
-  retablirMouvement: (id: number) => request<Mouvement>('DELETE', `/mouvements/${id}/ignorer`),
+  categoriserMouvement: (id: number, categorie: CategorieMouvement, note: string | null = null) =>
+    request<Mouvement>('PUT', `/mouvements/${id}/categorie`, { categorie, note }),
+  retirerCategorie: (id: number) => request<Mouvement>('DELETE', `/mouvements/${id}/categorie`),
   lierMouvement: (id: number, lien: { paiement_id: number } | { travaux_id: number } | { paiement_ids: number[] }) =>
     request<Mouvement>('POST', `/mouvements/${id}/lier`, lien),
   delierMouvement: (id: number, lien: { paiement_id: number } | { travaux_id: number }) =>

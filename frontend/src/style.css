@@ -34,20 +34,27 @@ h1 {
   margin: 0.5rem 0;
 }
 
+/* ---------------------------------------------------------------- bar and menu (OpenVue Menubar) */
+
 .barre {
-  display: flex;
-  align-items: center;
-  gap: 1.4rem;
-  padding: 0.6rem 1.5rem;
   border-bottom: 1px solid var(--bord);
   background: var(--surface);
+}
+
+.barre .menu {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.3rem 1rem;
+  gap: 0.2rem;
 }
 
 .barre .marque {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  padding-right: 1.4rem;
+  padding-right: 1.2rem;
+  margin-right: 0.6rem;
   border-right: 1px solid var(--bord);
   text-decoration: none;
   color: var(--accent);
@@ -77,123 +84,58 @@ h1 {
   margin-top: 0.15rem;
 }
 
-.barre nav {
+/* The current screen and its group */
+.barre .menu .actif > .p-menubar-item-content {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.barre .fleche {
+  font-size: 0.7rem;
+  margin-left: 0.1rem;
+}
+
+/* Right of the bar: choice of building (when there are several), « Réglages » menu with the version running */
+.droite {
   display: flex;
-  align-items: flex-end;
-  gap: 1.2rem;
-}
-
-.barre .groupe {
-  display: flex;
-  gap: 0.8rem;
-  padding-left: 1rem;
-  border-left: 1px solid var(--bord);
-  position: relative;
-  padding-top: 0.9rem;
-}
-
-.barre .groupe-titre {
-  position: absolute;
-  top: -0.2rem;
-  left: 1rem;
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--discret);
-  white-space: nowrap;
-}
-
-/* The first group follows the separator of the logo: no line of its own; its title, wider than its only link, stays
-   in the flow so that the group takes its width */
-.barre .groupe.premier {
-  flex-direction: column;
-  gap: 0;
-  border-left: none;
-  padding: 0;
-}
-
-.barre .groupe.premier .groupe-titre {
-  position: relative;
-  top: -0.2rem;
-  left: 0;
-  line-height: 0.9rem;
-}
-
-.barre nav a {
-  white-space: nowrap;
-  text-decoration: none;
+  align-items: center;
+  gap: 0.6rem;
 }
 
 .choix-immeuble {
-  margin-left: auto;
   max-width: 13rem;
 }
 
-/* Right of the bar: choice of building (when there are several), « Réglages » menu, version running */
-.reglages {
-  position: relative;
-  margin-left: auto;
-}
-
-.choix-immeuble + .reglages {
-  margin-left: 0;
-}
-
 .reglages-bouton {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   white-space: nowrap;
 }
 
 .reglages-bouton.actif {
+  color: var(--accent);
   font-weight: 600;
 }
 
+.reglages-bouton .oi-angle-down {
+  font-size: 0.7rem;
+}
+
 /* A narrow screen: the settings menu shows its icon only */
-@media (max-width: 1500px) {
+@media (max-width: 1300px) {
   .reglages-texte {
     display: none;
   }
 }
 
-.reglages-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 0.3rem);
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  min-width: 12rem;
-  padding: 0.3rem 0;
-  background: var(--fond);
-  border: 1px solid var(--bord);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
-}
-
-.reglages-menu a {
-  padding: 0.4rem 0.9rem;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.reglages-menu a:hover {
-  background: var(--surface);
-}
-
-.reglages-menu a.router-link-active {
+.p-menu .actif > .p-menu-item-content {
+  color: var(--accent);
   font-weight: 600;
 }
 
-.reglages-menu .version {
-  margin-top: 0.3rem;
-  padding: 0.5rem 0.9rem 0.2rem;
-  border-top: 1px solid var(--bord);
+.p-menu .version {
   font-size: 0.8rem;
-  color: var(--discret);
-  font-weight: normal;
-}
-
-.barre nav a.router-link-active {
-  font-weight: 600;
 }
 
 .discret {
@@ -1056,4 +998,14 @@ button.actif {
 .pastille.decision {
   background: var(--surface);
   border: 1px solid var(--bord);
+}
+
+/* Amounts of the OpenVue tables (body-class / header-class « nombre »): on the right, as in our own tables */
+.p-datatable td.nombre,
+.p-datatable th.nombre {
+  text-align: right;
+}
+
+.p-datatable th.nombre .p-datatable-column-header-content {
+  justify-content: flex-end;
 }

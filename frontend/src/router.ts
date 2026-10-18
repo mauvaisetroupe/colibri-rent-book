@@ -51,6 +51,11 @@ export default createRouter({
     // Former list of the extractors: now on the suppliers
     { path: '/extracteurs', redirect: '/fournisseurs' },
     { path: '/banque', name: 'banque', component: () => import('./views/BanqueView.vue') },
+    { path: '/banque/releves', name: 'releves', component: () => import('./views/RelevesView.vue') },
+    {
+      path: '/banque/releves/:id(\\d+)', name: 'releve', component: () => import('./views/ReleveView.vue'),
+      props: (route) => ({ id: Number(route.params.id) }),
+    },
     {
       path: '/extracteurs-releve/nouveau', name: 'nouvel-extracteur-releve',
       component: () => import('./views/ExtracteurReleveView.vue'), props: { id: null },

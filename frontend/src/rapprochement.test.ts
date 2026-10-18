@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import type { Echeance, Mouvement, Sejour } from './api'
-import { moisDuMouvement, motifPropose, motsDuNom, proposer, sejourDuMouvement } from './rapprochement'
+import type { Echeance, Mouvement, Paiement, Sejour } from './api'
+import { categoriePropose, moisDuMouvement, motsDuNom, proposer, sejourDuMouvement } from './rapprochement'
 
 // Proposals of the « Banque » screen (ADR 0018), on made-up tenants.
 
@@ -22,6 +22,9 @@ test('the tenant named in the label or the detail, present around the date', () 
   // Carla Martin left in 2022: Alice (two words) wins; nobody named: null
   assert.equal(sejourDuMouvement(mouvement('LOYER DURAND.A', '600'), sejours)?.id, 1)
   assert.equal(sejourDuMouvement(mouvement('VIR CAF', '600'), sejours), null)
+  // A name cut by the bank, from four letters on
+  assert.equal(sejourDuMouvement(mouvement('LOYER ET RAPPEL DE CHARGES ETIE', '600'), sejours)?.id, 2)
+  assert.equal(sejourDuMouvement(mouvement('LOYER ET RAPPEL DE CHARGES ETI', '600'), sejours), null)
 })
 
 test('the month written in the movement, else that of the operation', () => {
@@ -39,12 +42,20 @@ test('a credit is split as called, or shows the difference', () => {
   assert.match(ecart.ecart!, /appelé 600\.00 €, reçu 580\.00 €/)
 })
 
-test('a debit gets a reason from its label', () => {
-  assert.equal(motifPropose(mouvement('ECH PRET CAP+IN 01234 567890 07', '-1697.54')), 'Emprunt')
-  assert.equal(motifPropose(mouvement('PRLV SEPA ENGIE', '-455.53')), 'Facture d\'énergie (prélèvement)')
-  assert.equal(motifPropose(mouvement('AURORE 2000 BS4076264', '-84.99', '2026-01-01', 'ACM IARD SA')), 'Assurance')
-  assert.equal(motifPropose(mouvement('FACT SGT26010000000001', '-13.78')), 'Frais bancaires')
-  assert.equal(motifPropose(mouvement('FACTURE SGT22010000000002', '-33.47')), 'Frais bancaires')
-  assert.equal(motifPropose(mouvement('VIR INST FACTURE N 2026 10 002', '-2710')), null)
-  assert.equal(motifPropose(mouvement('VIR DE ALICE', '600')), null)
+test('the category: words of the label, else the tenant named in it', () => {
+  assert.equal(categoriePropose(mouvement('ECH PRET CAP+IN 01234 567890 07', '-1697.54')), 'emprunt')
+  assert.equal(categoriePropose(mouvement('PRLV SEPA ENGIE', '-455.53')), 'energie')
+  assert.equal(categoriePropose(mouvement('AURORE 2000 BS4076264', '-84.99', '2026-01-01', 'ACM IARD SA')), 'assurance')
+  assert.equal(categoriePropose(mouvement('FACT SGT26010000000001', '-13.78')), 'frais_bancaires')
+  assert.equal(categoriePropose(mouvement('FACTURE SGT22010000000002', '-33.47')), 'frais_bancaires')
+  assert.equal(categoriePropose(mouvement('VIR INST FACTURE N 2026 10 002', '-2710')), null)
+  assert.equal(categoriePropose(mouvement('VIR DE ALICE MARTIN', '600'), sejours), 'locataire')
+  assert.equal(categoriePropose(mouvement('VIR DEPOT GARANTIE ALICE MARTIN', '-600'), sejours), 'remboursement_depot')
+})
+
+test('a month already partly paid: only what is still due is proposed', () => {
+  const echeances: Echeance[] = [{ id: 1, sejour_id: 1, a_partir_du: '2024-01-01', loyer: '430', provision: '160', note: null }]
+  const deja = [{ id: 9, sejour_id: 1, mois: '2026-02-01', loyer: '430', provision: '100' }] as Paiement[]
+  const p = proposer({ ...mouvement('VIR DE ALICE MARTIN', '590'), couvert: '530' } as Mouvement, sejours, echeances, [], deja)
+  assert.deepEqual([p.loyer, p.provision, p.ecart], ['0', '60', null])
 })

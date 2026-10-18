@@ -59,6 +59,9 @@ function readPaiement(raw: Record<string, unknown>): Saisie {
   if (!p.regularisation_id && Number(p.regularisation) !== 0) {
     throw new InputError('Choisir la régularisation concernée par ce versement')
   }
+  if (p.regularisation_id && Number(p.regularisation) === 0) {
+    throw new InputError('Régularisation choisie sans versement : indiquer le montant, ou choisir « Aucune »')
+  }
   // Amount received (bank statement), when given: the split must add up to it
   const montant = optionalDecimal(raw.montant, 'Montant reçu')
   if (montant !== null) {
@@ -93,15 +96,16 @@ async function checkRegularisation(db: Pool | PoolClient, p: Saisie) {
 }
 
 /**
- * A payment seen on a bank statement (ADR 0018): a credit, and the payments linked to it do not exceed it (a transfer
- * may pay two months: two payments).
+ * A payment seen on a bank statement (ADR 0018): a payment received on a credit, a refund (negative) on a debit; the
+ * payments linked do not exceed the amount (a transfer may pay two months: two payments). The movement must be of the
+ * category « locataire », or have none yet.
  */
 async function checkMouvement(db: Pool | PoolClient, p: Saisie, id: number | null) {
   if (!p.mouvement_id) {
     return
   }
-  const { rows: [m] } = await db.query<{ montant: string, couvert: string }>(
-    `SELECT m.montant::text,
+  const { rows: [m] } = await db.query<{ montant: string, couvert: string, categorie: string | null }>(
+    `SELECT m.montant::text, m.categorie,
             (SELECT coalesce(sum(loyer + provision + regularisation), 0) FROM paiement
              WHERE mouvement_id = m.id AND id IS DISTINCT FROM $2)::text AS couvert
      FROM mouvement m WHERE m.id = $1`,
@@ -110,14 +114,26 @@ async function checkMouvement(db: Pool | PoolClient, p: Saisie, id: number | nul
   if (!m) {
     throw new InputError('Mouvement bancaire introuvable')
   }
-  if (new Big(m.montant).lte(0)) {
-    throw new InputError('Un paiement reçu se rattache à un crédit du relevé, pas à un débit')
+  if (m.categorie && m.categorie !== 'locataire') {
+    throw new InputError('Ce mouvement a une autre catégorie : la retirer d\'abord')
   }
-  const total = new Big(m.couvert).plus(p.loyer).plus(p.provision).plus(p.regularisation)
-  if (total.gt(m.montant)) {
-    throw new InputError(`Les paiements rattachés (${total.toFixed(2)}) dépassent le montant reçu (${new Big(m.montant).toFixed(2)})`)
+  const montant = new Big(m.montant)
+  const paiement = new Big(p.loyer).plus(p.provision).plus(p.regularisation)
+  if (paiement.eq(0) || paiement.gt(0) !== montant.gt(0)) {
+    throw new InputError(montant.gt(0)
+      ? 'Un paiement reçu se rattache à un crédit du relevé'
+      : 'Un débit du relevé ne porte qu\'un remboursement au locataire (montant négatif)')
+  }
+  const total = new Big(m.couvert).plus(paiement)
+  if (total.abs().gt(montant.abs())) {
+    throw new InputError(`Les paiements rattachés (${total.toFixed(2)}) dépassent le montant du mouvement (${montant.toFixed(2)})`)
   }
 }
+
+/** A payment linked to a movement without category: it becomes « locataire ». */
+const categoriserMouvement = (db: Pool, p: Saisie) => (p.mouvement_id
+  ? db.query('UPDATE mouvement SET categorie = \'locataire\' WHERE id = $1 AND categorie IS NULL', [p.mouvement_id])
+  : Promise.resolve())
 
 const paiementRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
   const load = async (id: number) => (await db.query(`SELECT ${COLUMNS} FROM ${FROM} WHERE p.id = $1`, [id])).rows[0]
@@ -201,6 +217,7 @@ const paiementRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => 
         [p.sejour_id, p.date_paiement, p.mois, p.loyer, p.provision, p.regularisation_id, p.regularisation, p.mode, p.note,
           p.mouvement_id],
       )
+      await categoriserMouvement(db, p)
       return reply.code(201).send(await load(created!.id))
     } catch (error) {
       return sendError(reply, error)
@@ -233,6 +250,7 @@ const paiementRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => 
         [id, p.sejour_id, p.date_paiement, p.mois, p.loyer, p.provision, p.regularisation_id, p.regularisation, p.mode, p.note,
           p.mouvement_id],
       )
+      await categoriserMouvement(db, p)
       return load(id)
     } catch (error) {
       return sendError(reply, error)

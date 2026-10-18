@@ -44,9 +44,13 @@ async function readTravaux(db: Pool, raw: Record<string, unknown>) {
   // Paid as seen on a bank statement (ADR 0018): a debit of at least this amount
   const mouvement = raw.mouvement_id ? requiredId(raw.mouvement_id, 'Mouvement') : null
   if (mouvement !== null) {
-    const { rows: [m] } = await db.query<{ montant: string }>('SELECT montant::text FROM mouvement WHERE id = $1', [mouvement])
+    const { rows: [m] } = await db.query<{ montant: string, categorie: string | null }>(
+      'SELECT montant::text, categorie FROM mouvement WHERE id = $1', [mouvement])
     if (!m || Number(m.montant) >= 0) {
       throw new InputError('Des travaux se rattachent à un débit du relevé')
+    }
+    if (m.categorie && m.categorie !== 'travaux') {
+      throw new InputError('Ce mouvement a une autre catégorie : la retirer d\'abord')
     }
   }
   return [immeuble, lot, requiredText(raw.fournisseur, 'Fournisseur'), requiredText(raw.description, 'Description'),
@@ -82,6 +86,9 @@ const travauxRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = asyn
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
         await readTravaux(db, body(request)),
       )
+      await db.query(
+        `UPDATE mouvement SET categorie = 'travaux'
+         WHERE id = (SELECT mouvement_id FROM travaux WHERE id = $1) AND categorie IS NULL`, [created!.id])
       return reply.code(201).send(await load(created!.id))
     } catch (error) {
       return sendError(reply, error)
