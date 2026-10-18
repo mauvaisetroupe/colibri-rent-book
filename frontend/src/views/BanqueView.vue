@@ -19,10 +19,10 @@ import { RouterLink, useRoute } from 'vue-router'
 
 import {
   api, AVEC_DETAIL, CATEGORIES_MOUVEMENT, type CategorieMouvement, type Echeance,
-  type Immeuble, type Lot, type Mouvement, type Paiement, type PaiementSaisi, type Regularisation, type ReleveResume,
+  type Immeuble, type Lot, type Mouvement, type Paiement, type Regularisation, type ReleveResume,
   type Sejour, type StatutMouvement, type Travaux,
 } from '../api'
-import FormulairePaiement, { type Brouillon } from '../components/FormulairePaiement.vue'
+import FormulairePaiement, { type Brouillon, enregistrerBrouillon, saisies } from '../components/FormulairePaiement.vue'
 import FormulaireTravaux, { type BrouillonTravaux } from '../components/FormulaireTravaux.vue'
 import { dateFr, euros, nombreApi, nombreFr } from '../format'
 import { categoriePropose, proposer } from '../rapprochement'
@@ -417,8 +417,10 @@ function nouveauPaiement(m: Mouvement) {
       montant: nombreFr(`${credit ? '' : '-'}${new Big(reste(m)).toFixed(2)}`),
       loyer: credit && !dejaPaye ? nombreFr(new Big(p.loyer).toFixed(2)) : '',
       provision: credit && !dejaPaye ? nombreFr(new Big(p.provision).toFixed(2)) : '',
-      regularisation_id: p.regularisation_id, regularisation: p.regularisation_id ? nombreFr(p.regularisation) : '',
+      versements: p.regularisation_id ? [{ regularisation_id: p.regularisation_id, montant: nombreFr(p.regularisation) }] : [],
       mode: 'virement', note: '',
+      // The rest of the transfer not split: a deposit, most of the time
+      justification: m.note ?? (/CAUTION|DEPOT|GARANTIE/i.test(`${m.libelle} ${m.detail ?? ''}`) ? 'Dépôt de garantie' : ''),
     },
   }
   erreurFormulaire.value = dejaPaye
@@ -432,36 +434,30 @@ function modifierPaiement(m: Mouvement, p: Paiement) {
     brouillon: {
       id: p.id, date: p.date_paiement, sejour_id: p.sejour_id, mois: p.mois?.slice(0, 7) ?? '',
       montant: nombreFr(new Big(totalPaiement(p)).toFixed(2)), loyer: nombreFr(p.loyer), provision: nombreFr(p.provision),
-      regularisation_id: p.regularisation_id, regularisation: p.regularisation_id ? nombreFr(p.regularisation) : '',
-      mode: p.mode ?? '', note: p.note ?? '',
+      versements: p.regularisation_id ? [{ regularisation_id: p.regularisation_id, montant: nombreFr(p.regularisation) }] : [],
+      mode: p.mode ?? '', note: p.note ?? '', justification: m.note ?? '',
     },
   }
   erreurFormulaire.value = null
 }
 
-const zero = (texte: string) => (nombreApi(texte) ?? '0') === '0'
-
 async function enregistrerPaiement(suivant: boolean) {
   const f = formulairePaiement.value!
   const b = f.brouillon
-  const saisie: PaiementSaisi = {
-    sejour_id: b.sejour_id!, date_paiement: b.date, mois: zero(b.loyer) && zero(b.provision) ? null : b.mois || null,
-    loyer: nombreApi(b.loyer) ?? '0', provision: nombreApi(b.provision) ?? '0', regularisation_id: b.regularisation_id,
-    regularisation: b.regularisation_id ? nombreApi(b.regularisation) ?? '0' : '0', mode: b.mode || null,
-    note: b.note.trim() || null, montant: nombreApi(b.montant), mouvement_id: f.mouvement.id,
-  }
+  const reparti = saisies(b).reduce((t, x) => t.plus(x.montant!), new Big(0))
+  const nonReparti = new Big(nombreApi(b.montant) ?? '0').minus(reparti)
   occupe.value = true
   try {
-    if (b.id === null) {
-      await api.creerPaiement(saisie)
-    } else {
-      await api.modifierPaiement(b.id, saisie)
+    await enregistrerBrouillon(b, f.mouvement.id)
+    // The rest of the transfer, justified in the form: the note of the movement
+    if (nonReparti.gt(0) && b.justification?.trim()) {
+      await api.categoriserMouvement(f.mouvement.id, 'locataire', b.justification.trim())
     }
     await recharger()
     const m = mouvements.value.find((x) => x.id === f.mouvement.id)!
     formulairePaiement.value = null
     // « Ajouter et en saisir un autre »: the next one on what remains of the transfer
-    if (suivant && new Big(reste(m)).gt(0)) {
+    if (suivant && new Big(reste(m)).gt(0) && m.statut === 'incomplet') {
       nouveauPaiement(m)
     }
     ok('Paiement enregistré')

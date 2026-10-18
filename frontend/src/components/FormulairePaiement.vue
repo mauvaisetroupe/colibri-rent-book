@@ -1,8 +1,15 @@
 <script lang="ts">
-import type { ModePaiement } from '../api'
+import Big from 'big.js'
+
+import { api, type ModePaiement, type PaiementSaisi } from '../api'
+import { nombreApi } from '../format'
 
 // One payment received (new or edited), in a modal form: the amount of the bank statement, split into rent,
-// provision and regularisation; the split must add up to the amount (checked again by the API).
+// provision and regularisations; the split must add up to the amount (checked again by the API). Opened from a bank
+// movement, a rest may be left, justified by a note (a deposit paid with the rent…) that goes on the movement.
+
+// Toward one regularisation; negative: refund paid by the owner
+export type Versement = { regularisation_id: number, montant: string }
 
 export type Brouillon = {
   id: number | null
@@ -13,20 +20,57 @@ export type Brouillon = {
   montant: string
   loyer: string
   provision: string
-  regularisation_id: number | null
-  regularisation: string
+  // A payment carries one regularisation: the first goes with the rent, each other one is a payment of its own
+  versements: Versement[]
   mode: ModePaiement | ''
   note: string
+  // Opened from a bank movement: what justifies the rest of the transfer not split here
+  justification?: string
+}
+
+const zero = (texte: string) => (nombreApi(texte) ?? '0') === '0'
+
+/** The payments a draft makes: rent, provision and the first regularisation, then one per other regularisation. */
+export function saisies(b: Brouillon, mouvement_id: number | null = null): PaiementSaisi[] {
+  const commun = { sejour_id: b.sejour_id!, date_paiement: b.date, mode: b.mode || null, note: b.note.trim() || null }
+  const avecMouvement = mouvement_id === null ? {} : { mouvement_id }
+  const loyerSeul = !zero(b.loyer) || !zero(b.provision)
+  const [premier, ...autres] = loyerSeul || !b.versements.length ? [null, ...b.versements] : b.versements
+  const ligne = (loyer: string, provision: string, v: Versement | null, mois: string | null): PaiementSaisi => {
+    const regularisation = v ? nombreApi(v.montant) ?? '0' : '0'
+    return {
+      ...commun, ...avecMouvement, mois, loyer, provision, regularisation_id: v?.regularisation_id ?? null, regularisation,
+      // Checked again by the API: this payment's own split
+      montant: new Big(loyer).plus(provision).plus(regularisation).toString(),
+    }
+  }
+  return [
+    // A regularisation payment alone covers no month of rent
+    ligne(nombreApi(b.loyer) ?? '0', nombreApi(b.provision) ?? '0', premier ?? null, loyerSeul ? b.mois || null : null),
+    ...autres.map((v) => ligne('0', '0', v, null)),
+  ]
+}
+
+/** Saves a draft: the payment itself (created or changed), then those of the other regularisations. */
+export async function enregistrerBrouillon(b: Brouillon, mouvement_id: number | null = null) {
+  const [premier, ...autres] = saisies(b, mouvement_id)
+  if (b.id === null) {
+    await api.creerPaiement(premier!)
+  } else {
+    await api.modifierPaiement(b.id, premier!)
+  }
+  for (const s of autres) {
+    await api.creerPaiement(s)
+  }
 }
 </script>
 
 <script setup lang="ts">
-import Big from 'big.js'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
-import { aEncaisser, api, MODES_PAIEMENT, type Echeance, type Paiement, type Regularisation, type Sejour } from '../api'
+import { aEncaisser, MODES_PAIEMENT, type Echeance, type Paiement, type Regularisation, type Sejour } from '../api'
 import { attendu } from '../echeances'
-import { dateFr, euros, exerciceCourt, nombreApi, nombreFr } from '../format'
+import { dateFr, euros, exerciceCourt, nombreFr } from '../format'
 import ChoixMois from './ChoixMois.vue'
 
 const props = defineProps<{
@@ -64,13 +108,13 @@ const reste = (r: Regularisation) => new Big(r.solde).minus(r.montant_recu)
 // Regularisations still to be paid (or refunded) by this tenant, and the one already chosen when editing
 const regulsOuvertes = computed(() =>
   props.regularisations.filter((r) => r.sejour_id === b.value.sejour_id && !r.remplacee_par
-    && (aEncaisser(r) || r.id === b.value.regularisation_id)),
+    && (aEncaisser(r) || b.value.versements.some((v) => v.regularisation_id === r.id))),
 )
 
 const parse = (texte: string) => nombreApi(texte) ?? (texte.trim() === '' ? '0' : null)
 
 const repartition = computed(() => {
-  const parts = [b.value.loyer, b.value.provision, b.value.regularisation_id ? b.value.regularisation : ''].map(parse)
+  const parts = [b.value.loyer, b.value.provision, ...b.value.versements.map((v) => v.montant)].map(parse)
   const montant = nombreApi(b.value.montant)
   if (parts.some((p) => p === null) || (b.value.montant.trim() && montant === null)) {
     return { ok: false, texte: 'Un montant est illisible' }
@@ -80,16 +124,30 @@ const repartition = computed(() => {
     return { ok: false, texte: `Réparti : ${euros(total.toString())} · indiquer le montant reçu` }
   }
   const ecart = new Big(montant).minus(total)
-  return ecart.eq(0)
-    ? { ok: true, texte: `✓ ${euros(total.toString())} répartis sur ${euros(montant)} reçus` }
-    : { ok: false, texte: `✗ Réparti ${euros(total.toString())} sur ${euros(montant)} reçus : écart de ${euros(ecart.toString())}` }
+  if (ecart.eq(0)) {
+    return { ok: true, texte: `✓ ${euros(total.toString())} répartis sur ${euros(montant)} reçus` }
+  }
+  // From a bank movement, less than received: the rest justified on the movement
+  if (props.mouvement && ecart.gt(0) && total.gt(0)) {
+    return (b.value.justification ?? '').trim()
+      ? { ok: true, texte: `✓ ${euros(total.toString())} répartis, reste de ${euros(ecart.toString())} justifié sur le mouvement`, reste: ecart }
+      : { ok: false, texte: `Reste ${euros(ecart.toString())} non réparti : le justifier ci-dessous, ou le répartir`, reste: ecart }
+  }
+  return { ok: false, texte: `✗ Réparti ${euros(total.toString())} sur ${euros(montant)} reçus : écart de ${euros(ecart.toString())}` }
 })
+const resteAJustifier = computed(() => ('reste' in repartition.value ? repartition.value.reste : null))
 
 const pret = computed(() => repartition.value.ok && b.value.sejour_id !== null && Boolean(b.value.date))
 
 async function choisirSejour() {
-  b.value.regularisation_id = null
-  b.value.regularisation = ''
+  b.value.versements = []
+  await montantsAppeles()
+}
+
+// The rent and provision of a new payment follow the stay and the month chosen
+watch(() => b.value.mois, montantsAppeles)
+
+async function montantsAppeles() {
   if (!nouveau.value || b.value.sejour_id === null) {
     return
   }
@@ -111,17 +169,22 @@ async function choisirSejour() {
   }
 }
 
-function choisirRegul(r: Regularisation | null) {
-  b.value.regularisation_id = r?.id ?? null
-  if (!r) {
-    b.value.regularisation = ''
+const versement = (r: Regularisation) => b.value.versements.find((v) => v.regularisation_id === r.id)
+
+function basculerRegul(r: Regularisation, coche: boolean) {
+  if (!coche) {
+    b.value.versements = b.value.versements.filter((v) => v.regularisation_id !== r.id)
     return
   }
-  if (!b.value.regularisation.trim()) {
-    // Last payment toward it (the instalment of a spread one), else what remains
-    const dernier = props.paiements.filter((p) => p.regularisation_id === r.id).at(-1)
-    b.value.regularisation = nombreFr(dernier?.regularisation ?? reste(r).toString())
-  }
+  // What the transfer still leaves unsplit (no more than its rest), else the last payment toward it (the instalment of
+  // a spread one), else its rest
+  const recu = parse(b.value.montant)
+  const reparti = [b.value.loyer, b.value.provision, ...b.value.versements.map((v) => v.montant)]
+    .reduce((t, x) => t.plus(parse(x) ?? '0'), new Big(0))
+  const libre = recu === null ? null : new Big(recu).minus(reparti)
+  const dernier = props.paiements.filter((p) => p.regularisation_id === r.id).at(-1)
+  const montant = libre?.gt(0) ? (libre.gt(reste(r)) ? reste(r) : libre).toString() : dernier?.regularisation ?? reste(r).toString()
+  b.value.versements = [...b.value.versements, { regularisation_id: r.id, montant: nombreFr(montant) }]
 }
 
 // A new payment follows its date for the month of rent, until the month is chosen by hand
@@ -181,28 +244,30 @@ function changerDate(event: Event) {
         <p v-if="b.sejour_id === null" class="discret">Choisir d'abord le locataire.</p>
         <p v-else-if="!regulsOuvertes.length" class="discret">Aucune régularisation en attente pour ce locataire.</p>
         <template v-else>
-          <label class="choix">
-            <input type="radio" :checked="b.regularisation_id === null" @change="choisirRegul(null)">
-            Aucune
-          </label>
-          <label v-for="r in regulsOuvertes" :key="r.id" class="choix">
-            <input type="radio" :checked="b.regularisation_id === r.id" @change="choisirRegul(r)">
-            <span>
-              <strong>Exercice {{ exerciceCourt(r.debut, r.fin) }}</strong>
-              · envoyée le {{ dateFr(r.date_envoi) }}
-              · solde {{ euros(r.solde) }} · déjà reçu {{ euros(r.montant_recu) }}
-              · <strong>reste {{ euros(reste(r).toString()) }}</strong>
-            </span>
-          </label>
-          <div v-if="b.regularisation_id" class="rangee">
-            <label>Versement (négatif : remboursement au locataire)
-              <input v-model="b.regularisation" class="nombre" size="9">
+          <p class="discret">Cocher la ou les régularisations payées ; un paiement est enregistré pour chacune.</p>
+          <div v-for="r in regulsOuvertes" :key="r.id" class="regul">
+            <label class="choix">
+              <input type="checkbox" :checked="Boolean(versement(r))" @change="basculerRegul(r, ($event.target as HTMLInputElement).checked)">
+              <span>
+                <strong>Exercice {{ exerciceCourt(r.debut, r.fin) }}</strong>
+                · envoyée le {{ dateFr(r.date_envoi) }}
+                · solde {{ euros(r.solde) }} · déjà reçu {{ euros(r.montant_recu) }}
+                · <strong>reste {{ euros(reste(r).toString()) }}</strong>
+              </span>
+            </label>
+            <label v-if="versement(r)" class="versement">Versement (négatif : remboursement au locataire)
+              <input v-model="versement(r)!.montant" class="nombre" size="9">
             </label>
           </div>
         </template>
       </fieldset>
 
-      <label class="large">Note <input v-model="b.note"></label>
+      <label class="large">Note du paiement <input v-model="b.note"></label>
+
+      <label v-if="mouvement && resteAJustifier" class="large justification">
+        Justification du reste de {{ euros(resteAJustifier.toString()) }} (portée sur le mouvement)
+        <input v-model="b.justification" placeholder="ex. Dépôt de garantie">
+      </label>
 
       <p class="controle" :class="repartition.ok ? 'ok' : 'ko'">{{ repartition.texte }}</p>
       <p v-if="erreur" class="message erreur">{{ erreur }}</p>
@@ -234,6 +299,22 @@ label.choix {
 
 .mouvement {
   margin: 0;
+  padding: 0.5rem 0.8rem;
+  border-radius: 6px;
+  background: var(--fond-avertissement);
+}
+
+.regul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.versement {
+  margin-left: 1.6rem;
+}
+
+.justification {
   padding: 0.5rem 0.8rem;
   border-radius: 6px;
   background: var(--fond-avertissement);

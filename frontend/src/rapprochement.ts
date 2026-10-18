@@ -71,8 +71,11 @@ export type Proposition = {
 }
 
 /**
- * A credit split as a payment: the amount called for the month when it matches; the rest of a sent regularisation
- * when it matches that; else rent = amount − provision called (the difference shown).
+ * A credit split as a payment: the rest of a sent regularisation when it matches that; else the rent and provision
+ * called for the month (those of the stay, ADR 0009), less what is already paid for it. A transfer of more goes, for the
+ * excess, to the regularisation still to be paid when there is one (the one paid in instalments of that amount, else the
+ * oldest); a transfer of less pays the rent first. Any other
+ * difference is shown, never put in the rent.
  */
 export function proposer(
   m: Mouvement, sejours: Sejour[], echeances: Echeance[], regularisations: Regularisation[], paiements: Paiement[] = [],
@@ -107,12 +110,22 @@ export function proposer(
   if (new Big(appele.total).eq(montant)) {
     return { ...vide, loyer: appele.loyer, provision: appele.provision }
   }
-  const loyer = montant.minus(appele.provision)
+  const ecart = `${duMois.length ? 'reste dû' : 'appelé'} ${new Big(appele.total).toFixed(2)} €, reçu ${montant.toFixed(2)} €`
+  if (montant.lt(appele.total)) {
+    // Paid in part: the rent first, then the provision
+    const loyer = montant.lt(loyerDu) ? montant : loyerDu
+    return { ...vide, loyer: loyer.toString(), provision: montant.minus(loyer).toString(), ecart }
+  }
+  const surplus = montant.minus(appele.total)
+  // The regularisation paid in instalments of this amount, else the oldest one still to pay
+  const ouvertes = regularisations.filter((r) => r.sejour_id === sejour.id && r.etat === 'en_attente'
+    && new Big(r.solde).minus(r.montant_recu).gt(0)).sort((a, b) => a.debut.localeCompare(b.debut))
+  const ouverte = ouvertes.find((r) => paiements.some((p) => p.regularisation_id === r.id && new Big(p.regularisation).eq(surplus)))
+    ?? ouvertes[0]
   return {
-    ...vide,
-    loyer: (loyer.lt(0) ? montant : loyer).toString(),
-    provision: loyer.lt(0) ? '0' : appele.provision,
-    ecart: `${duMois.length ? 'reste dû' : 'appelé'} ${new Big(appele.total).toFixed(2)} €, reçu ${montant.toFixed(2)} €`,
+    ...vide, loyer: appele.loyer, provision: appele.provision,
+    ...(ouverte ? { regularisation_id: ouverte.id, regularisation: surplus.toString() } : {}),
+    ecart: ouverte ? `${ecart} : le surplus de ${surplus.toFixed(2)} € va à la régularisation en attente` : ecart,
   }
 }
 

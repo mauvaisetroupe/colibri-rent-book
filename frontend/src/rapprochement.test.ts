@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import type { Echeance, Mouvement, Paiement, Sejour } from './api'
+import type { Echeance, Mouvement, Paiement, Regularisation, Sejour } from './api'
 import { categoriePropose, moisDuMouvement, motsDuNom, proposer, sejourDuMouvement } from './rapprochement'
 
 // Proposals of the « Banque » screen (ADR 0018), on made-up tenants.
@@ -37,9 +37,24 @@ test('a credit is split as called, or shows the difference', () => {
   const echeances: Echeance[] = [{ id: 1, sejour_id: 1, a_partir_du: '2024-01-01', loyer: '500', provision: '100', note: null }]
   const juste = proposer(mouvement('VIR DE ALICE MARTIN', '600'), sejours, echeances, [])
   assert.deepEqual([juste.sejour?.id, juste.mois, juste.loyer, juste.provision, juste.ecart], [1, '2026-02', '500', '100', null])
+  // Less: the rent first, then the provision; never more rent than the stay's
   const ecart = proposer(mouvement('VIR DE ALICE MARTIN', '580'), sejours, echeances, [])
-  assert.deepEqual([ecart.loyer, ecart.provision], ['480', '100'])
+  assert.deepEqual([ecart.loyer, ecart.provision], ['500', '80'])
   assert.match(ecart.ecart!, /appelé 600\.00 €, reçu 580\.00 €/)
+  // More, no regularisation to pay: the amounts called, the difference shown
+  const plus = proposer(mouvement('LOYER ET RAPPEL DE CHARGES MARTIN', '910.25'), sejours, echeances, [])
+  assert.deepEqual([plus.loyer, plus.provision, plus.regularisation_id], ['500', '100', null])
+  assert.match(plus.ecart!, /reçu 910\.25 €/)
+  // More, a regularisation still to pay: the excess goes to it
+  const regul = { id: 4, sejour_id: 1, etat: 'en_attente', debut: '2025-01-01', solde: '640.50', montant_recu: '0' } as Regularisation
+  const avecRegul = proposer(mouvement('LOYER ET RAPPEL DE CHARGES MARTIN', '910.25'), sejours, echeances, [regul])
+  assert.deepEqual([avecRegul.loyer, avecRegul.provision, avecRegul.regularisation_id, avecRegul.regularisation], ['500', '100', 4, '310.25'])
+  // Two to pay: the one already paid in instalments of that amount
+  const autre = { id: 5, sejour_id: 1, etat: 'en_attente', debut: '2024-01-01', solde: '755', montant_recu: '310.25' } as Regularisation
+  const versement = [{ id: 8, sejour_id: 1, mois: null, regularisation_id: 5, regularisation: '310.25' }] as unknown as Paiement[]
+  const deux = proposer(mouvement('LOYER ET RAPPEL DE CHARGES MARTIN', '910.25'), sejours, echeances,
+    [{ ...regul, debut: '2025-01-01' }, autre], versement)
+  assert.equal(deux.regularisation_id, 5)
 })
 
 test('the category: words of the label, else the tenant named in it', () => {

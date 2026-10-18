@@ -4,10 +4,10 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import {
-  api, MODES_PAIEMENT, type Echeance, type Paiement, type PaiementSaisi, type Regularisation, type Sejour,
+  api, MODES_PAIEMENT, type Echeance, type Paiement, type Regularisation, type Sejour,
 } from '../api'
-import FormulairePaiement, { type Brouillon } from '../components/FormulairePaiement.vue'
-import { dateFr, euros, exerciceCourt, nombreApi, nombreFr } from '../format'
+import FormulairePaiement, { type Brouillon, enregistrerBrouillon } from '../components/FormulairePaiement.vue'
+import { dateFr, euros, exerciceCourt, nombreFr } from '../format'
 import { useImmeuble } from '../immeuble'
 
 // Payments received (ADR 0008), one row per payment (a bank transfer, a cheque), entered in a modal form: amount
@@ -89,7 +89,7 @@ const MOIS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août'
 
 const vide = (date = aujourdhui, mode: Brouillon['mode'] = 'virement'): Brouillon => ({
   id: null, date, sejour_id: null, mois: date.slice(0, 7), montant: '', loyer: '', provision: '',
-  regularisation_id: null, regularisation: '', mode, note: '',
+  versements: [], mode, note: '',
 })
 
 // Payment open in the modal form (new or edited), and the error the API gave for it
@@ -105,36 +105,16 @@ function modifier(p: Paiement) {
   ouvrir({
     id: p.id, date: p.date_paiement, sejour_id: p.sejour_id, mois: p.mois?.slice(0, 7) ?? '',
     montant: nombreFr(new Big(total(p)).toFixed(2)), loyer: nombreFr(p.loyer), provision: nombreFr(p.provision),
-    regularisation_id: p.regularisation_id, regularisation: p.regularisation_id ? nombreFr(p.regularisation) : '',
+    versements: p.regularisation_id ? [{ regularisation_id: p.regularisation_id, montant: nombreFr(p.regularisation) }] : [],
     mode: p.mode ?? '', note: p.note ?? '',
   })
 }
-
-const zero = (texte: string) => (nombreApi(texte) ?? '0') === '0'
-
-const versApi = (b: Brouillon): PaiementSaisi => ({
-  sejour_id: b.sejour_id!,
-  date_paiement: b.date,
-  // A regularisation payment alone covers no month of rent
-  mois: zero(b.loyer) && zero(b.provision) ? null : b.mois || null,
-  loyer: nombreApi(b.loyer) ?? '0',
-  provision: nombreApi(b.provision) ?? '0',
-  regularisation_id: b.regularisation_id,
-  regularisation: b.regularisation_id ? nombreApi(b.regularisation) ?? '0' : '0',
-  mode: b.mode || null,
-  note: b.note.trim() || null,
-  montant: nombreApi(b.montant),
-})
 
 async function enregistrer(suivant: boolean) {
   const b = formulaire.value!
   occupe.value = true
   try {
-    if (b.id === null) {
-      await api.creerPaiement(versApi(b))
-    } else {
-      await api.modifierPaiement(b.id, versApi(b))
-    }
+    await enregistrerBrouillon(b)
     // « Ajouter et en saisir un autre » keeps the date and the mode: several payments of one bank statement
     formulaire.value = suivant ? vide(b.date, b.mode) : null
     erreurFormulaire.value = null
