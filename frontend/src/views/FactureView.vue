@@ -423,6 +423,7 @@ onBeforeUnmount(() => {
             :columns="colonnes"
             :readonly="figee"
             :range="true"
+            :apply-on-close="true"
             :resize="true"
             :row-headers="true"
             row-class="_classe"
