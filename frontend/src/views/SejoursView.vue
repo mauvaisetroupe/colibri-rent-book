@@ -59,6 +59,12 @@ const pistes = computed<Piste[]>(() =>
   })),
 )
 
+// The list shows the current and coming stays; the past ones on demand (the timeline always shows them all)
+const avecAnciens = ref(false)
+const termine = (s: Sejour) => s.sortie !== null && s.sortie < aujourdhui
+const nbAnciens = computed(() => sejours.value.filter(termine).length)
+const affiches = computed(() => (avecAnciens.value ? sejours.value : sejours.value.filter((s) => !termine(s))))
+
 const locataireDe = (s: Sejour) => locataires.value.find((l) => l.id === s.locataire_id)
 
 // ---------------------------------------------------------------- modal form
@@ -200,6 +206,10 @@ async function supprimer() {
     modifier le locataire et son séjour.
   </p>
 
+  <label v-if="nbAnciens" class="filtre-anciens">
+    <input v-model="avecAnciens" type="checkbox"> Afficher aussi les anciens locataires ({{ nbAnciens }})
+  </label>
+
   <table class="liste">
     <thead>
       <tr>
@@ -208,7 +218,7 @@ async function supprimer() {
       </tr>
     </thead>
     <tbody>
-      <tr v-for="s in sejours" :key="s.id" @click="modifier(s)">
+      <tr v-for="s in affiches" :key="s.id" :class="{ ancien: termine(s) }" @click="modifier(s)">
         <td>{{ s.lot }}</td>
         <td>{{ s.locataire }}</td>
         <td>{{ dateFr(s.entree) }}</td>
@@ -243,3 +253,16 @@ async function supprimer() {
     @supprimer="supprimer"
   />
 </template>
+
+<style scoped>
+.filtre-anciens {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.3rem 0 0.5rem;
+}
+
+.ancien td {
+  color: var(--discret);
+}
+</style>
