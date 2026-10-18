@@ -70,19 +70,23 @@ CREATE TABLE fournisseur (
 );
 
 -- ADR 0013 : extracteurs de factures, code TypeScript écrit dans l'application et exécuté dans le navigateur ;
--- jamais modifiés ni supprimés : corriger un extracteur, c'est créer la version suivante.
+-- jamais modifiés ni supprimés : corriger un extracteur, c'est créer la version suivante. ADR 0018 : extracteurs de
+-- relevés bancaires (type releve, sans énergie), même principe.
+CREATE TYPE type_extracteur AS ENUM ('facture', 'releve');
 CREATE TABLE extracteur (
   id             serial PRIMARY KEY,
   fournisseur_id int  NOT NULL REFERENCES fournisseur(id),
   version        int  NOT NULL CHECK (version > 0),
-  energie        energie NOT NULL,
+  type           type_extracteur NOT NULL DEFAULT 'facture',
+  energie        energie,
   reglages       jsonb NOT NULL,                  -- regroupement des morceaux en lignes, toujours écrit
   source         text NOT NULL,                   -- TypeScript, tel qu'édité
   code           text NOT NULL,                   -- JavaScript produit, celui qui s'exécute
   moteur         int  NOT NULL,                   -- version du contrat (pdf.js, aides)
   note           text,
   cree_le        timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (fournisseur_id, version)
+  UNIQUE (fournisseur_id, version),
+  CONSTRAINT extracteur_energie CHECK ((type = 'facture') = (energie IS NOT NULL))
 );
 
 CREATE FUNCTION extracteur_fige() RETURNS trigger
@@ -94,6 +98,35 @@ END $$;
 CREATE TRIGGER extracteur_fige BEFORE UPDATE OR DELETE ON extracteur
   FOR EACH ROW EXECUTE FUNCTION extracteur_fige();
 
+-- ---------------------------------------------------------------- relevés bancaires (ADR 0018)
+-- Un relevé de la banque (fournisseur), lu par un extracteur ; ses mouvements : crédit positif, débit négatif. Ce qu'un
+-- mouvement est devenu est de l'autre côté (paiement.mouvement_id, travaux.mouvement_id) ; ignoré : avec un motif.
+CREATE TABLE releve_bancaire (
+  id               serial PRIMARY KEY,
+  fournisseur_id   int  NOT NULL REFERENCES fournisseur(id),
+  compte           text NOT NULL,
+  date_releve      date NOT NULL,
+  solde_precedent  numeric(14,2) NOT NULL,
+  nouveau_solde    numeric(14,2) NOT NULL,
+  fichier_pdf      text,                            -- chemin dans le stockage : releves/<empreinte>.pdf
+  extracteur_id    int REFERENCES extracteur(id),
+  importe_le       timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (compte, date_releve)
+);
+
+CREATE TABLE mouvement (
+  id              serial PRIMARY KEY,
+  releve_id       int  NOT NULL REFERENCES releve_bancaire(id) ON DELETE CASCADE,
+  ordre           int  NOT NULL,
+  date_operation  date NOT NULL,
+  date_valeur     date,
+  libelle         text NOT NULL,
+  detail          text,
+  montant         numeric(12,2) NOT NULL CHECK (montant <> 0),
+  motif_ignore    text
+);
+CREATE INDEX ON mouvement (date_operation);
+
 CREATE TABLE facture (
   id             serial PRIMARY KEY,
   immeuble_id    int  NOT NULL REFERENCES immeuble(id),
@@ -102,7 +135,7 @@ CREATE TABLE facture (
   numero         text NOT NULL,
   date_facture   date,
   montant_ttc    numeric(12,2),                   -- total imprimé (contrôle) ; vide sur un brouillon s'il est à saisir
-  fichier_pdf    text,                            -- chemin du PDF archivé
+  fichier_pdf    text,                            -- PDF archivé : factures/<empreinte>.pdf
   statut         statut_facture NOT NULL DEFAULT 'a_verifier',
   note           text,
   extracteur_id  int REFERENCES extracteur(id),   -- version qui a lu la facture (vide : saisie à la main)
@@ -186,11 +219,13 @@ CREATE TABLE paiement (
   regularisation     numeric(12,2) NOT NULL DEFAULT 0,
   mode               text CHECK (mode IN ('virement', 'prelevement', 'cheque', 'especes', 'autre')),
   note               text,
+  mouvement_id       int REFERENCES mouvement(id) ON DELETE SET NULL,   -- mouvement du relevé bancaire (ADR 0018)
   CHECK (mois IS NOT NULL OR (loyer = 0 AND provision = 0)),
   CHECK (regularisation_id IS NOT NULL OR regularisation = 0)
 );
 CREATE INDEX ON paiement (sejour_id, mois);
 CREATE INDEX ON paiement (regularisation_id);
+CREATE INDEX ON paiement (mouvement_id);
 
 -- Rent and provision called each month from a given month on, until the next row of the stay (ADR 0009: revision of
 -- the rent, new provision after a regularisation). A month of presence that is not complete is called pro rata of its
@@ -265,10 +300,12 @@ CREATE TABLE travaux (
   date_facture   date NOT NULL,
   date_paiement  date,                                   -- année fiscale ; vide tant que la facture n'est pas payée
   montant_ttc    numeric(12,2) NOT NULL,
-  fichier_pdf    text,                                   -- PDF archivé, même stockage que les factures
-  note           text
+  fichier_pdf    text,                                   -- PDF archivé : travaux/<empreinte>.pdf
+  note           text,
+  mouvement_id   int REFERENCES mouvement(id) ON DELETE SET NULL      -- paiement vu sur le relevé (ADR 0018)
 );
 CREATE INDEX ON travaux (immeuble_id, date_paiement);
+CREATE INDEX ON travaux (mouvement_id);
 
 -- ADR 0016 : la société (SCI), ses associés et leurs parts, ses assemblées générales et leurs procès-verbaux ;
 -- une assemblée close est numérotée dans le registre et figée.

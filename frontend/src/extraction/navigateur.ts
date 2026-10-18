@@ -4,6 +4,9 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { Brouillon, ExtracteurEnregistre } from '../api'
 import type { ClasseExtracteur, Morceau } from './contrat'
 import { charger, documentDe, extraire, reconnait, type Extraction } from './moteur'
+import {
+  chargerReleve, documentReleve, extraireReleve, reconnaitReleve, type ClasseExtracteurReleve, type ExtractionReleve,
+} from './moteurReleve'
 import { morceaux } from './pdf'
 
 // Reading an invoice PDF in the browser (ADR 0013): pdf.js, then the last version of each supplier's extractor.
@@ -35,7 +38,7 @@ export function extracteurDe(enregistre: ExtracteurEnregistre): ClasseExtracteur
 
 /** The last versions that recognise the PDF; each one reads it with its own grouping settings. */
 export function candidats(pages: Morceau[][], enregistres: ExtracteurEnregistre[]): Candidat[] {
-  return enregistres.filter((e) => e.derniere).flatMap((enregistre) => {
+  return enregistres.filter((e) => e.derniere && (e.type ?? 'facture') === 'facture').flatMap((enregistre) => {
     try {
       const extracteur = extracteurDe(enregistre)
       return reconnait(extracteur, documentDe(pages, enregistre.reglages)) ? [{ enregistre, extracteur }] : []
@@ -68,3 +71,33 @@ export function brouillonDe(extraction: Extraction, extracteurId: number): { bro
     probleme: null,
   }
 }
+
+// ---------------------------------------------------------------- bank statements (ADR 0018)
+
+export type CandidatReleve = { enregistre: ExtracteurEnregistre, extracteur: ClasseExtracteurReleve }
+
+const chargesReleve = new Map<number, ClasseExtracteurReleve>()
+
+export function extracteurReleveDe(enregistre: ExtracteurEnregistre): ClasseExtracteurReleve {
+  let extracteur = chargesReleve.get(enregistre.id)
+  if (!extracteur) {
+    extracteur = chargerReleve(enregistre.code)
+    chargesReleve.set(enregistre.id, extracteur)
+  }
+  return extracteur
+}
+
+/** The last versions of the statement extractors that recognise the PDF. */
+export function candidatsReleve(pages: Morceau[][], enregistres: ExtracteurEnregistre[]): CandidatReleve[] {
+  return enregistres.filter((e) => e.derniere && e.type === 'releve').flatMap((enregistre) => {
+    try {
+      const extracteur = extracteurReleveDe(enregistre)
+      return reconnaitReleve(extracteur, documentReleve(pages, enregistre.reglages)) ? [{ enregistre, extracteur }] : []
+    } catch {
+      return []
+    }
+  })
+}
+
+export const lireReleve = (pages: Morceau[][], { enregistre, extracteur }: CandidatReleve): ExtractionReleve =>
+  extraireReleve(extracteur, documentReleve(pages, enregistre.reglages))

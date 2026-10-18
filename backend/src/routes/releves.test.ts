@@ -1,0 +1,188 @@
+import assert from 'node:assert/strict'
+import { access, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { after, before, describe, test } from 'node:test'
+
+import { PDFDocument } from 'pdf-lib'
+import type pg from 'pg'
+
+import { buildApp } from '../app.js'
+import { rangerStockage } from '../pdfStorage.js'
+import { createTestPool, resetDatabase, skipWithoutDatabase } from '../test/database.js'
+
+// Bank statements (ADR 0018) of a made-up bank: balances checked, duplicates refused, a missing statement seen, then
+// movements matched with payments, ignored, or linked to a payment recorded by hand. PDFs stored by kind.
+
+describe('bank statements', { skip: skipWithoutDatabase }, () => {
+  let pool: pg.Pool
+  let app: Awaited<ReturnType<typeof buildApp>>
+  let storageDir: string
+  let extracteur: number
+  let sejour: number
+  let pdfNumero = 0
+
+  // A different PDF each time (its content gives its name in the storage)
+  async function pdf() {
+    const doc = await PDFDocument.create()
+    doc.addPage().drawText(`releve ${++pdfNumero}`)
+    return Buffer.from(await doc.save())
+  }
+
+  async function importer(releve: object) {
+    const boundary = 'b'
+    return app.inject({
+      method: 'POST', url: '/api/releves/import',
+      payload: Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="releve"\r\n\r\n${JSON.stringify(releve)}\r\n`),
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="r.pdf"\r\nContent-Type: application/pdf\r\n\r\n`),
+        await pdf(), Buffer.from(`\r\n--${boundary}--\r\n`),
+      ]),
+      headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+    })
+  }
+
+  const releve = (date: string, precedent: string, nouveau: string, mouvements: object[]) => ({
+    extracteur_id: extracteur, compte: '00012345601', date_releve: date, solde_precedent: precedent, nouveau_solde: nouveau,
+    totaux: null, mouvements,
+  })
+  const mvt = (date: string, libelle: string, montant: string, detail: string | null = null) =>
+    ({ date_operation: date, date_valeur: date, libelle, detail, montant })
+
+  before(async () => {
+    pool = createTestPool()
+    await resetDatabase(pool)
+    storageDir = await mkdtemp(join(tmpdir(), 'crb-pdf-'))
+    app = await buildApp({ db: pool, storageDir })
+    await pool.query('INSERT INTO fournisseur (nom) VALUES (\'Banque Exemple\')')
+    extracteur = (await pool.query<{ id: number }>(
+      `INSERT INTO extracteur (fournisseur_id, version, type, energie, reglages, source, code, moteur)
+       SELECT id, 1, 'releve', NULL, '{}', 'source', 'code', 2 FROM fournisseur WHERE nom = 'Banque Exemple' RETURNING id`)).rows[0]!.id
+    const immeuble = (await pool.query<{ id: number }>(
+      'INSERT INTO immeuble (code, nom) VALUES (\'IMM1\', \'Immeuble fictif\') RETURNING id')).rows[0]!.id
+    const lot = (await pool.query<{ id: number }>(
+      'INSERT INTO lot (immeuble_id, code, tantiemes) VALUES ($1, \'L1\', 100) RETURNING id', [immeuble])).rows[0]!.id
+    const locataire = (await pool.query<{ id: number }>(
+      'INSERT INTO locataire (nom) VALUES (\'Alice Exemple\') RETURNING id')).rows[0]!.id
+    sejour = (await pool.query<{ id: number }>(
+      `INSERT INTO sejour (lot_id, locataire_id, periode) VALUES ($1, $2, '[2026-01-01,)') RETURNING id`,
+      [lot, locataire])).rows[0]!.id
+  })
+
+  after(async () => {
+    await app.close()
+    await pool.end()
+    await rm(storageDir, { recursive: true, force: true })
+  })
+
+  test('a statement whose balances do not add up is refused', async () => {
+    const r = await importer(releve('2026-01-16', '1000', '1500', [mvt('2026-01-05', 'VIR DE ALICE EXEMPLE', '600')]))
+    assert.equal(r.statusCode, 400)
+    assert.match(r.json().message, /Solde précédent \+ crédits − débits = 1600\.00, le relevé dit 1500\.00/)
+    const totaux = await importer({ ...releve('2026-01-16', '1000', '1600', [mvt('2026-01-05', 'VIR', '600')]), totaux: { debit: '0', credit: '500' } })
+    assert.match(totaux.json().message, /Crédits lus 600\.00, total imprimé 500\.00/)
+  })
+
+  test('statements are stored with their movements, their PDF in releves/, a duplicate refused', async () => {
+    const r = await importer(releve('2026-01-16', '1000', '1450.50', [
+      mvt('2026-01-05', 'VIR DE ALICE EXEMPLE', '600', 'LOYER 01/26'),
+      mvt('2026-01-06', 'ECH PRET', '-149.50'),
+    ]))
+    assert.equal(r.statusCode, 201, r.body)
+    assert.deepEqual(r.json().mouvements.map((m: { montant: string, statut: string }) => [m.montant, m.statut]),
+      [['600.00', 'a_traiter'], ['-149.50', 'a_traiter']])
+    assert.deepEqual(await readdir(join(storageDir, 'releves')).then((f) => f.length), 1)
+    assert.equal((await importer(releve('2026-01-16', '1000', '1000', []))).statusCode, 409)
+
+    // The next one follows; the one after a gap does not
+    assert.equal((await importer(releve('2026-02-02', '1450.50', '2050.50', [mvt('2026-02-04', 'VIR DE ALICE EXEMPLE', '600')]))).statusCode, 201)
+    assert.equal((await importer(releve('2026-03-02', '9999', '9999', []))).statusCode, 201)
+    const suites = (await app.inject('/api/releves')).json().map((x: { date_releve: string, suite: boolean | null }) => [x.date_releve, x.suite])
+    assert.deepEqual(suites, [['2026-03-02', false], ['2026-02-02', true], ['2026-01-16', null]])
+  })
+
+  test('a credit becomes payments, up to its amount; deleting the payment puts it back', async () => {
+    const [credit] = (await app.inject('/api/mouvements?statut=a_traiter')).json()
+    assert.equal(credit.libelle, 'VIR DE ALICE EXEMPLE')
+    const payer = (montant: string, mois: string) => app.inject({
+      method: 'POST', url: '/api/paiements',
+      payload: { sejour_id: sejour, date_paiement: credit.date_operation, mois, loyer: montant, provision: '0', mode: 'virement', mouvement_id: credit.id },
+    })
+    const p1 = await payer('400', '2026-01')
+    assert.equal(p1.statusCode, 201, p1.body)
+    let m = (await app.inject('/api/mouvements')).json().find((x: { id: number }) => x.id === credit.id)
+    assert.deepEqual([m.statut, m.couvert], ['partiel', '400.00'])
+    assert.equal((await payer('300', '2026-02')).statusCode, 400)
+    assert.equal((await payer('200', '2026-02')).statusCode, 201)
+    m = (await app.inject('/api/mouvements?statut=rapproche')).json()
+    assert.deepEqual(m.map((x: { id: number }) => x.id), [credit.id])
+    assert.equal(m[0].paiements.length, 2)
+
+    // A change from the Paiements screen (without mouvement_id) keeps the link
+    await app.inject({ method: 'PUT', url: `/api/paiements/${p1.json().id}`, payload: { ...(p1.json() as object), mouvement_id: undefined, note: 'vu' } })
+    assert.equal((await pool.query('SELECT mouvement_id FROM paiement WHERE id = $1', [p1.json().id])).rows[0].mouvement_id, credit.id)
+
+    // A debit is never a payment received; a statement with matched movements is kept
+    const [debit] = (await app.inject('/api/mouvements?statut=a_traiter')).json()
+    assert.equal((await app.inject({
+      method: 'POST', url: '/api/paiements', payload: { sejour_id: sejour, date_paiement: '2026-01-06', mois: '2026-01', loyer: '1', mouvement_id: debit.id },
+    })).statusCode, 400)
+    assert.equal((await app.inject({ method: 'DELETE', url: `/api/releves/${credit.releve_id}` })).statusCode, 409)
+
+    await app.inject({ method: 'DELETE', url: `/api/paiements/${p1.json().id}` })
+    m = (await app.inject('/api/mouvements')).json().find((x: { id: number }) => x.id === credit.id)
+    assert.equal(m.statut, 'partiel')
+    // The rest justified (a deposit paid with the rent): matched
+    const justifie = await app.inject({ method: 'POST', url: `/api/mouvements/${credit.id}/ignorer`, payload: { motif: 'Dépôt de garantie' } })
+    assert.equal(justifie.json().statut, 'rapproche')
+    await app.inject({ method: 'DELETE', url: `/api/mouvements/${credit.id}/ignorer` })
+  })
+
+  test('a debit is ignored with a reason, then put back; a payment typed by hand is linked', async () => {
+    const debit = (await app.inject('/api/mouvements?statut=a_traiter')).json().find((x: { montant: string }) => x.montant.startsWith('-'))
+    assert.equal((await app.inject({ method: 'POST', url: `/api/mouvements/${debit.id}/ignorer`, payload: {} })).statusCode, 400)
+    const ignore = await app.inject({ method: 'POST', url: `/api/mouvements/${debit.id}/ignorer`, payload: { motif: 'Emprunt' } })
+    assert.deepEqual([ignore.json().statut, ignore.json().motif_ignore], ['ignore', 'Emprunt'])
+    assert.equal((await app.inject({ method: 'DELETE', url: `/api/mouvements/${debit.id}/ignorer` })).json().statut, 'a_traiter')
+
+    const fevrier = (await app.inject('/api/mouvements?statut=a_traiter')).json().find((x: { date_operation: string }) => x.date_operation === '2026-02-04')
+    const main = await app.inject({
+      method: 'POST', url: '/api/paiements', payload: { sejour_id: sejour, date_paiement: '2026-02-04', mois: '2026-03', loyer: '600', mode: 'virement' },
+    })
+    const propose = (await app.inject('/api/mouvements?statut=a_traiter')).json().find((x: { id: number }) => x.id === fevrier.id)
+    assert.deepEqual(propose.possibles.map((x: { type: string, id: number }) => [x.type, x.id]), [['paiement', main.json().id]])
+    const lie = await app.inject({ method: 'POST', url: `/api/mouvements/${fevrier.id}/lier`, payload: { paiement_id: main.json().id } })
+    assert.equal(lie.json().statut, 'rapproche')
+    const delie = await app.inject({ method: 'POST', url: `/api/mouvements/${fevrier.id}/delier`, payload: { paiement_id: main.json().id } })
+    assert.equal(delie.json().statut, 'a_traiter')
+
+    // Two months typed as two payments, paid by one transfer: proposed together
+    const second = await app.inject({
+      method: 'POST', url: '/api/paiements', payload: { sejour_id: sejour, date_paiement: '2026-02-05', mois: '2026-04', loyer: '0.5', mode: 'virement' },
+    })
+    await app.inject({ method: 'PUT', url: `/api/paiements/${main.json().id}`, payload: { ...(main.json() as object), loyer: '599.5', mouvement_id: null } })
+    const groupe = (await app.inject('/api/mouvements?statut=a_traiter')).json().find((x: { id: number }) => x.id === fevrier.id).possibles
+    assert.deepEqual(groupe.map((x: { type: string, ids: number[] }) => [x.type, x.ids]), [['groupe', [main.json().id, second.json().id]]])
+    const tous = await app.inject({ method: 'POST', url: `/api/mouvements/${fevrier.id}/lier`, payload: { paiement_ids: groupe[0].ids } })
+    assert.deepEqual([tous.json().statut, tous.json().paiements.length], ['rapproche', 2])
+  })
+
+  test('a storage written before the folders is put in order at start-up', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'crb-rangement-'))
+    try {
+      await writeFile(join(dir, 'aaa.pdf'), '%PDF-1')
+      await writeFile(join(dir, 'inconnu.pdf'), '%PDF-1')
+      const facture = (await pool.query<{ id: number }>(
+        `INSERT INTO facture (immeuble_id, fournisseur_id, energie, numero, fichier_pdf)
+         SELECT (SELECT id FROM immeuble LIMIT 1), id, 'eau', 'R1', 'factures/aaa.pdf' FROM fournisseur WHERE nom = 'Banque Exemple'
+         RETURNING id`)).rows[0]!.id
+      assert.equal(await rangerStockage(pool, dir), 1)
+      await access(join(dir, 'factures', 'aaa.pdf'))
+      assert.deepEqual((await readdir(dir)).sort(), ['factures', 'inconnu.pdf'])
+      assert.equal(await rangerStockage(pool, dir), 0)
+      await pool.query('DELETE FROM facture WHERE id = $1', [facture])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})

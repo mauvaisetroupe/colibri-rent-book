@@ -14,6 +14,7 @@ import healthRoutes from './routes/health.js'
 import immeubleRoutes from './routes/immeubles.js'
 import paiementRoutes from './routes/paiements.js'
 import regularisationRoutes from './routes/regularisations.js'
+import releveRoutes from './routes/releves.js'
 import sejourRoutes from './routes/sejours.js'
 import travauxRoutes from './routes/travaux.js'
 
@@ -42,6 +43,7 @@ export async function buildApp({ db, storageDir, frontendDir }: AppOptions, opti
   await app.register(fiscalRoutes, { prefix: '/api', db })
   await app.register(travauxRoutes, { prefix: '/api', db, storageDir })
   await app.register(assembleeRoutes, { prefix: '/api', db, storageDir })
+  await app.register(releveRoutes, { prefix: '/api', db, storageDir })
 
   if (frontendDir) {
     // Hashed assets kept a year by the browser; index.html never, so that a deployment shows at once

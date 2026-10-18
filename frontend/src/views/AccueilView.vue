@@ -268,8 +268,26 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
       <li>Un versement de régularisation (ou un remboursement, montant négatif) se saisit dans le même formulaire, en
         choisissant la régularisation concernée, ou seul avec loyer et provision vides. Cliquer une ligne pour la
         modifier ou la supprimer ; filtres par année, locataire, type.</li>
+      <li>La colonne <strong>Banque</strong> coche un paiement vu sur un relevé (écran Banque) ; la coche ouvre son
+        mouvement. Le filtre « Rapprochés / Non rapprochés » montre ceux qui manquent sur les relevés.</li>
       <li>Les provisions d'une année sont la somme de ses paiements. Pour les années d'avant (2024, 2025…), le total
         annuel se saisit dans « totaux annuels (historique) ».</li>
+    </ol>
+  </details>
+
+  <details>
+    <summary><strong>Banque</strong> (tenue des comptes) : relevés, paiements reçus et dépenses</summary>
+    <ol>
+      <li>Déposer les relevés PDF de la banque sur l'écran Banque : l'extracteur de la banque (voir
+        <strong>Fournisseurs</strong>) les lit dans le navigateur ; un relevé n'est enregistré que si solde précédent
+        + crédits − débits retombe sur le nouveau solde. L'onglet « Relevés » signale un relevé manquant.</li>
+      <li>Onglet « À traiter » : chaque mouvement avec une proposition. Un crédit : le paiement du locataire nommé dans
+        le libellé, pour le mois écrit (« LOYER 02/25 ») ou celui de l'opération, réparti en loyer et provision comme
+        appelés ; « Paiement… » ouvre le formulaire prérempli. Un débit : « Ignorer » avec le motif proposé (emprunt,
+        assurance, énergie…), ou « Travaux… » (facture de travaux préremplie).</li>
+      <li>Un paiement saisi à la main avant les relevés se <strong>rattache</strong> (même montant, à dix jours près)
+        au lieu d'être saisi de nouveau ; « Rattacher les N déjà saisis » le fait pour tout l'historique.</li>
+      <li>Supprimer un paiement remet son mouvement « à traiter » ; « Détacher » garde le paiement.</li>
     </ol>
   </details>
 

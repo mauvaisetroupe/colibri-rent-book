@@ -9,15 +9,22 @@ import { body, idParam, InputError, optionalText, requiredText, sendError } from
 
 const ENERGIES = ['gaz', 'electricite', 'eau', 'ordures_menageres', 'autre']
 
-const COLUMNS = `e.id, fo.nom AS fournisseur, e.version, e.energie, e.reglages, e.source, e.code, e.moteur, e.note,
+const COLUMNS = `e.id, fo.nom AS fournisseur, e.version, e.type, e.energie, e.reglages, e.source, e.code, e.moteur, e.note,
   e.cree_le, e.version = max(e.version) OVER (PARTITION BY e.fournisseur_id) AS derniere,
-  (SELECT count(*)::int FROM facture f WHERE f.extracteur_id = e.id) AS nb_factures`
+  (SELECT count(*)::int FROM facture f WHERE f.extracteur_id = e.id) AS nb_factures,
+  (SELECT count(*)::int FROM releve_bancaire r WHERE r.extracteur_id = e.id) AS nb_releves`
 
 function readReglages(value: unknown) {
   const r = (value ?? {}) as Record<string, unknown>
-  const reglages = { toleranceHauteur: Number(r.toleranceHauteur), collage: Number(r.collage), colonne: Number(r.colonne) }
+  const reglages: Record<string, number> = {
+    toleranceHauteur: Number(r.toleranceHauteur), collage: Number(r.collage), colonne: Number(r.colonne),
+  }
+  // Bank statements (ADR 0018): pieces left of this abscissa are ignored (code printed in the margin)
+  if (r.marge !== undefined) {
+    reglages.marge = Number(r.marge)
+  }
   if (!Object.values(reglages).every((v) => Number.isFinite(v) && v >= 0)) {
-    throw new InputError('Réglages du regroupement : toleranceHauteur, collage et colonne, nombres positifs')
+    throw new InputError('Réglages du regroupement : toleranceHauteur, collage, colonne (et marge), nombres positifs')
   }
   return reglages
 }
@@ -28,6 +35,21 @@ const extracteurRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) =
     const { rows } = await db.query(
       `SELECT ${COLUMNS} FROM extracteur e JOIN fournisseur fo ON fo.id = e.fournisseur_id
        ORDER BY fo.nom, e.version DESC`,
+    )
+    return rows
+  })
+
+  // Statements of a bank that have a PDF: the editor of a statement extractor reads them again (ADR 0018)
+  app.get('/extracteurs/releves', async (request, reply) => {
+    const fournisseur = String((request.query as { fournisseur?: string }).fournisseur ?? '')
+    if (!fournisseur) {
+      return reply.code(400).send({ message: 'Paramètre « fournisseur » manquant' })
+    }
+    const { rows } = await db.query(
+      `SELECT r.id, r.compte, r.date_releve::text, r.solde_precedent::text, r.nouveau_solde::text, r.extracteur_id
+       FROM releve_bancaire r JOIN fournisseur fo ON fo.id = r.fournisseur_id
+       WHERE fo.nom = $1 AND r.fichier_pdf IS NOT NULL ORDER BY r.date_releve DESC, r.compte`,
+      [fournisseur],
     )
     return rows
   })
@@ -62,8 +84,13 @@ const extracteurRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) =
     const raw = body(request)
     try {
       const fournisseur = requiredText(raw.fournisseur, 'Fournisseur')
-      const energie = String(raw.energie ?? '')
-      if (!ENERGIES.includes(energie)) {
+      const type = String(raw.type ?? 'facture')
+      if (type !== 'facture' && type !== 'releve') {
+        throw new InputError('Type d\'extracteur : facture ou releve')
+      }
+      // A statement extractor has no energy
+      const energie = type === 'releve' ? null : String(raw.energie ?? '')
+      if (energie !== null && !ENERGIES.includes(energie)) {
         throw new InputError('Énergie inconnue')
       }
       const moteur = Number(raw.moteur)
@@ -72,17 +99,23 @@ const extracteurRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) =
       }
       const values = [
         fournisseur, energie, JSON.stringify(readReglages(raw.reglages)), requiredText(raw.source, 'Source'),
-        requiredText(raw.code, 'Code'), moteur, optionalText(raw.note),
+        requiredText(raw.code, 'Code'), moteur, optionalText(raw.note), type,
       ]
       const client = await db.connect()
       try {
         await client.query('BEGIN')
         await client.query('INSERT INTO fournisseur (nom) VALUES ($1) ON CONFLICT (nom) DO NOTHING', [fournisseur])
-        // One new version at a time per supplier
+        // One new version at a time per supplier, of one type: a supplier has invoices or statements
         await client.query('SELECT id FROM fournisseur WHERE nom = $1 FOR UPDATE', [fournisseur])
+        const { rows: [autre] } = await client.query(
+          `SELECT 1 FROM extracteur e JOIN fournisseur fo ON fo.id = e.fournisseur_id WHERE fo.nom = $1 AND e.type <> $2`,
+          [fournisseur, type])
+        if (autre) {
+          throw new InputError(`${fournisseur} a déjà des extracteurs d'un autre type`)
+        }
         const { rows: [created] } = await client.query<{ id: number }>(
-          `INSERT INTO extracteur (fournisseur_id, version, energie, reglages, source, code, moteur, note)
-           SELECT fo.id, coalesce(max(e.version), 0) + 1, $2, $3, $4, $5, $6, $7
+          `INSERT INTO extracteur (fournisseur_id, version, energie, reglages, source, code, moteur, note, type)
+           SELECT fo.id, coalesce(max(e.version), 0) + 1, $2, $3, $4, $5, $6, $7, $8
            FROM fournisseur fo LEFT JOIN extracteur e ON e.fournisseur_id = fo.id
            WHERE fo.nom = $1 GROUP BY fo.id RETURNING id`,
           values,

@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url'
 
 import { buildApp } from './app.js'
 import { pool } from './db.js'
+import { rangerStockage } from './pdfStorage.js'
 
 // Default: backend/storage/pdf (gitignored), from src/ in development and dist/ in production
 const storageDir = process.env.STORAGE_DIR ?? fileURLToPath(new URL('../storage/pdf', import.meta.url))
@@ -10,6 +11,12 @@ const storageDir = process.env.STORAGE_DIR ?? fileURLToPath(new URL('../storage/
 const frontendDir = process.env.FRONTEND_DIR || undefined
 
 const app = await buildApp({ db: pool, storageDir, frontendDir }, { logger: true })
+
+// PDFs of a storage written before the folders by kind (migration 014): moved into their folder, once
+const ranges = await rangerStockage(pool, storageDir)
+if (ranges) {
+  app.log.info(`${ranges} PDF rangés dans leur dossier (factures/, travaux/…)`)
+}
 
 try {
   await app.listen({

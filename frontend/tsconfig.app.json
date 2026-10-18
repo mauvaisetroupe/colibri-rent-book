@@ -4,8 +4,11 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "types": ["vite/client"],
     "allowArbitraryExtensions": true,
-    /* Extractors (ADR 0013) import their base class and helpers from 'extractor' */
-    "paths": { "extractor": ["./src/extraction/extractor.ts"] },
+    /* Extractors import their base class and helpers from 'extractor' (invoices, ADR 0013), 'bank-extractor' (ADR 0018) */
+    "paths": {
+      "extractor": ["./src/extraction/extractor.ts"],
+      "bank-extractor": ["./src/extraction/bank-extractor.ts"]
+    },
 
     /* Linting */
     "noUnusedLocals": true,

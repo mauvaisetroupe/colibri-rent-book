@@ -24,5 +24,6 @@ seed cités ici sont dans ce dépôt-là, qui lance aussi les tests sur ces donn
 | 0015 | [Factures de travaux du propriétaire](0015-travaux-du-proprietaire.md) | Accepté |
 | 0016 | [Assemblées générales de la SCI, procès-verbaux](0016-assemblees-generales-de-la-sci.md) | Accepté |
 | 0017 | [Remplacer une facture validée](0017-remplacer-une-facture-validee.md) | Accepté (complète 0003) |
+| 0018 | [Relevés bancaires : extracteurs, mouvements, rapprochement](0018-releves-bancaires.md) | Accepté |
 
-La prochaine décision du logiciel prend le numéro 0018.
+La prochaine décision du logiciel prend le numéro 0019.

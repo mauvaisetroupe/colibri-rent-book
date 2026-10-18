@@ -19,7 +19,8 @@ const message = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
 const occupe = ref(false)
 const aujourdhui = new Date().toISOString().slice(0, 10)
 
-const annee = ref(new Date().getFullYear())
+// null: every year (the year of a payment is that of the month it pays)
+const annee = ref<number | null>(new Date().getFullYear())
 const paiements = ref<Paiement[]>([])
 const sejours = ref<Sejour[]>([])
 const regularisations = ref<Regularisation[]>([])
@@ -27,6 +28,8 @@ const echeances = ref<Echeance[]>([])
 
 const filtreSejour = ref<number | ''>('')
 const filtreType = ref<'' | 'loyers' | 'regularisations'>('')
+// Seen on a bank statement or not (ADR 0018)
+const filtreBanque = ref<'' | 'rapproches' | 'non_rapproches'>('')
 
 async function charger() {
   if (immeubleId.value === null) {
@@ -49,8 +52,9 @@ onMounted(async () => {
 watch([immeubleId, annee], charger)
 
 const annees = computed(() => {
-  const premiere = Math.min(...sejours.value.map((s) => Number(s.entree.slice(0, 4))), annee.value)
-  const derniere = Math.max(new Date().getFullYear(), annee.value)
+  const choisie = annee.value ?? new Date().getFullYear()
+  const premiere = Math.min(...sejours.value.map((s) => Number(s.entree.slice(0, 4))), choisie)
+  const derniere = Math.max(new Date().getFullYear(), choisie)
   return Array.from({ length: derniere - premiere + 1 }, (_, i) => derniere - i)
 })
 
@@ -67,6 +71,7 @@ const affiches = computed(() =>
     .filter((p) => filtreSejour.value === '' || p.sejour_id === filtreSejour.value)
     .filter((p) => filtreType.value === ''
       || (filtreType.value === 'loyers' ? p.mois !== null : p.regularisation_id !== null))
+    .filter((p) => filtreBanque.value === '' || (filtreBanque.value === 'rapproches') === Boolean(p.mouvement_id))
     .sort((x, y) => y.date_paiement.localeCompare(x.date_paiement) || y.id - x.id),
 )
 
@@ -173,6 +178,7 @@ async function supprimer(id: number) {
 
   <section class="filtres">
     <select v-model="annee" aria-label="Année">
+      <option :value="null">Toutes les années</option>
       <option v-for="a in annees" :key="a" :value="a">{{ a }}</option>
     </select>
     <select v-model="filtreSejour" aria-label="Locataire">
@@ -184,6 +190,11 @@ async function supprimer(id: number) {
       <option value="loyers">Loyers et provisions</option>
       <option value="regularisations">Régularisations</option>
     </select>
+    <select v-model="filtreBanque" aria-label="Banque">
+      <option value="">Rapprochés ou non</option>
+      <option value="rapproches">Rapprochés avec la banque</option>
+      <option value="non_rapproches">Non rapprochés</option>
+    </select>
     <span class="discret">{{ affiches.length }} paiement(s)</span>
   </section>
 
@@ -191,7 +202,7 @@ async function supprimer(id: number) {
     <table class="liste paiements">
       <thead>
         <tr>
-          <th>Date</th><th>Locataire</th><th>Mois couvert</th><th class="nombre">Montant reçu</th>
+          <th>Date</th><th>Locataire</th><th>Mois couvert</th><th class="nombre">Montant reçu</th><th title="Vu sur un relevé de la banque">Banque</th>
           <th class="nombre">Loyer</th><th class="nombre">Provision</th><th>Régularisation</th><th>Mode</th>
           <th>Note</th>
         </tr>
@@ -202,6 +213,10 @@ async function supprimer(id: number) {
           <td>{{ p.lot }} – {{ p.locataire }}</td>
           <td>{{ moisFr(p.mois) }}</td>
           <td class="nombre"><strong>{{ euros(total(p)) }}</strong></td>
+          <td @click.stop>
+            <RouterLink v-if="p.mouvement_id" :to="{ name: 'banque', query: { mouvement: p.mouvement_id } }" class="ok"
+              title="Vu sur un relevé de la banque : ouvrir le mouvement">✓</RouterLink>
+          </td>
           <td class="nombre">{{ p.mois ? euros(p.loyer) : '' }}</td>
           <td class="nombre">{{ p.mois ? euros(p.provision) : '' }}</td>
           <td>
@@ -217,6 +232,7 @@ async function supprimer(id: number) {
         <tr>
           <td colspan="3"><strong>Total</strong></td>
           <td class="nombre"><strong>{{ euros(totaux.montant) }}</strong></td>
+          <td />
           <td class="nombre">{{ euros(totaux.loyer) }}</td>
           <td class="nombre">{{ euros(totaux.provision) }}</td>
           <td>{{ euros(totaux.regularisation) }}</td>

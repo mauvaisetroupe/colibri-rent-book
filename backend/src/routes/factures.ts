@@ -218,7 +218,7 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
       })
     }
 
-    const { fileName } = await storePdf(storageDir, content)
+    const { fileName } = await storePdf(storageDir, content, 'factures')
     const client = await db.connect()
     try {
       await client.query('BEGIN')
@@ -291,7 +291,7 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
       if (!isPdf(content)) {
         return reply.code(415).send({ message: 'Le fichier joint n\'est pas un PDF' })
       }
-      fileName = (await storePdf(storageDir, content)).fileName
+      fileName = (await storePdf(storageDir, content, 'factures')).fileName
     }
 
     const client = await db.connect()
@@ -568,7 +568,7 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     if (!isPdf(content)) {
       return reply.code(415).send({ message: `${file.filename} n'est pas un PDF` })
     }
-    const { fileName } = await storePdf(storageDir, content)
+    const { fileName } = await storePdf(storageDir, content, 'factures')
     await db.query('UPDATE facture SET fichier_pdf = $2 WHERE id = $1', [id, fileName])
     if (facture.fichier_pdf && facture.fichier_pdf !== fileName) {
       await removeIfUnused(facture.fichier_pdf)

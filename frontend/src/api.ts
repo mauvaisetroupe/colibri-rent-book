@@ -2,7 +2,7 @@
 // Types mirror backend/src/invoices/types.ts and checks.ts: amounts are decimal strings, dates ISO with
 // inclusive bounds.
 
-import type { Affectation, Categorie, Energie } from './extraction/contrat'
+import type { Affectation, Categorie, Energie, Reglages } from './extraction/contrat'
 
 export type { Affectation, Categorie, Energie }
 // remplacee: a validated invoice replaced by another one, or corrected (ADR 0017); out of the statements
@@ -218,6 +218,8 @@ export type Paiement = {
   regularisation: string
   mode: ModePaiement | null
   note: string | null
+  // Movement of the bank statement it was seen on (ADR 0018)
+  mouvement_id?: number | null
 }
 
 export type PaiementSaisi = Omit<Paiement, 'id' | 'locataire' | 'lot'> & {
@@ -296,6 +298,8 @@ export type Travaux = {
   pdf: boolean
   note: string | null
   deductible: boolean
+  // Paid as seen on a bank statement (ADR 0018)
+  mouvement_id?: number | null
 }
 
 // The company, its partners, its general meetings (ADR 0016)
@@ -338,7 +342,66 @@ export type Assemblee = {
 export type AssembleeResumee = Pick<Assemblee, 'id' | 'numero' | 'type' | 'date' | 'statut' | 'pv_signe'> & { nb_resolutions: number }
 
 export type TravauxSaisie = Pick<Travaux, 'immeuble_id' | 'lot_id' | 'fournisseur' | 'description' | 'nature'
-  | 'date_facture' | 'date_paiement' | 'montant_ttc' | 'note'>
+  | 'date_facture' | 'date_paiement' | 'montant_ttc' | 'note'> & { mouvement_id?: number | null }
+
+// ---------------------------------------------------------------- bank statements (ADR 0018)
+
+export type Releve = {
+  id: number
+  banque: string
+  compte: string
+  date_releve: string
+  solde_precedent: string
+  nouveau_solde: string
+  pdf: boolean
+  extracteur_id: number | null
+  importe_le: string
+}
+
+// suite: the opening balance is the closing balance of the previous statement of the account (null: the first one)
+export type ReleveResume = Releve & { nb_mouvements: number, suite: boolean | null }
+
+// a_traiter: nothing linked; partiel: payments below the amount; rapproche; ignore (with a reason)
+export type StatutMouvement = 'a_traiter' | 'partiel' | 'rapproche' | 'ignore'
+
+export type Mouvement = {
+  id: number
+  releve_id: number
+  ordre: number
+  date_operation: string
+  date_valeur: string | null
+  libelle: string
+  detail: string | null
+  // Credit positive, debit negative
+  montant: string
+  motif_ignore: string | null
+  compte: string
+  date_releve: string
+  paiements: { id: number, locataire: string, lot: string, mois: string | null, total: string }[]
+  travaux: { id: number, description: string, fournisseur: string, total: string }[]
+  couvert: string
+  statut: StatutMouvement
+  // Recorded by hand, of the same amount and within ten days: to link
+  possibles: ({ type: 'paiement', id: number, locataire: string, lot: string, mois: string | null, date: string }
+    | { type: 'travaux', id: number, description: string, fournisseur: string, date: string | null }
+    // Several payments of one tenant whose sum is the amount (a transfer of several months); mois: « 10/2025, 11/2025 »
+    | { type: 'groupe', ids: number[], locataire: string, lot: string, mois: string })[]
+}
+
+export type ReleveDetail = Releve & { mouvements: Mouvement[] }
+
+// A statement read in the browser, as sent on import
+export type ReleveLu = {
+  extracteur_id: number
+  compte: string
+  date_releve: string
+  solde_precedent: string
+  nouveau_solde: string
+  totaux: { debit: string | null, credit: string | null } | null
+  mouvements: { date_operation: string, date_valeur: string | null, libelle: string, detail: string | null, montant: string }[]
+}
+
+export type ReleveAvecPdf = { id: number, compte: string, date_releve: string, solde_precedent: string, nouveau_solde: string, extracteur_id: number | null }
 
 export type DetailFiltre = { sejour?: number | 'proprietaire', energie?: Energie, groupe?: 'consommation' | 'autres' }
 
@@ -362,8 +425,10 @@ export type ExtracteurEnregistre = {
   id: number
   fournisseur: string
   version: number
-  energie: Energie
-  reglages: { toleranceHauteur: number, collage: number, colonne: number }
+  // ADR 0018: an extractor reads invoices or bank statements (no energy then)
+  type: 'facture' | 'releve'
+  energie: Energie | null
+  reglages: Reglages
   source: string
   code: string
   moteur: number
@@ -371,9 +436,11 @@ export type ExtracteurEnregistre = {
   cree_le: string
   derniere: boolean
   nb_factures: number
+  nb_releves: number
 }
 
 export type NouvelleVersion = Pick<ExtracteurEnregistre, 'fournisseur' | 'energie' | 'reglages' | 'source' | 'code' | 'moteur' | 'note'>
+  & { type?: 'facture' | 'releve' }
 
 // An invoice of a supplier with its PDF, every building: read again by a new version (non-regression)
 export type FactureAvecPdf = {
@@ -394,7 +461,9 @@ export type Fournisseur = {
   energies: Energie[] | null
   nb_factures: number
   nb_pdf: number
-  extracteur: { id: number, version: number } | null
+  // A bank (ADR 0018): its statements
+  nb_releves: number
+  extracteur: { id: number, version: number, type: 'facture' | 'releve' } | null
 }
 
 // What the browser read from a PDF, sent with it on import
@@ -556,7 +625,9 @@ export const api = {
   decisionRegularisation: (id: number, decision: Regularisation['decision']) =>
     request<Regularisation>('POST', `/regularisations/${id}/decision`, { decision }),
 
-  paiements: (immeuble: number, annee: number) => request<Paiement[]>('GET', `/paiements?immeuble=${immeuble}&annee=${annee}`),
+  // annee null: every year
+  paiements: (immeuble: number, annee: number | null) =>
+    request<Paiement[]>('GET', `/paiements?immeuble=${immeuble}${annee === null ? '' : `&annee=${annee}`}`),
   // Payments toward a regularisation, any year, previous regularisations of its corrective chain included
   paiementsRegularisation: (immeuble: number, regularisation: number) =>
     request<Paiement[]>('GET', `/paiements?immeuble=${immeuble}&regularisation=${regularisation}`),
@@ -596,6 +667,27 @@ export const api = {
     form.append('file', file)
     return answer<Assemblee>(await fetch(`/api/assemblees/${id}/pv-signe`, { method: 'POST', body: form }))
   },
+
+  releves: () => request<ReleveResume[]>('GET', '/releves'),
+  releve: (id: number) => request<ReleveDetail>('GET', `/releves/${id}`),
+  supprimerReleve: (id: number) => request<void>('DELETE', `/releves/${id}`),
+  relevePdfUrl: (id: number) => `/api/releves/${id}/pdf`,
+  async importerReleve(fichier: File, releve: ReleveLu) {
+    const form = new FormData()
+    form.append('releve', JSON.stringify(releve))
+    form.append('file', fichier)
+    return answer<ReleveDetail>(await fetch('/api/releves/import', { method: 'POST', body: form }))
+  },
+  relevesDeLaBanque: (fournisseur: string) =>
+    request<ReleveAvecPdf[]>('GET', `/extracteurs/releves?fournisseur=${encodeURIComponent(fournisseur)}`),
+  mouvements: (statut: 'tous' | 'a_traiter' | 'rapproche' | 'ignore', du?: string, au?: string) =>
+    request<Mouvement[]>('GET', `/mouvements?statut=${statut}${du ? `&du=${du}` : ''}${au ? `&au=${au}` : ''}`),
+  ignorerMouvement: (id: number, motif: string) => request<Mouvement>('POST', `/mouvements/${id}/ignorer`, { motif }),
+  retablirMouvement: (id: number) => request<Mouvement>('DELETE', `/mouvements/${id}/ignorer`),
+  lierMouvement: (id: number, lien: { paiement_id: number } | { travaux_id: number } | { paiement_ids: number[] }) =>
+    request<Mouvement>('POST', `/mouvements/${id}/lier`, lien),
+  delierMouvement: (id: number, lien: { paiement_id: number } | { travaux_id: number }) =>
+    request<Mouvement>('POST', `/mouvements/${id}/delier`, lien),
 
   fiscal: (immeuble: number, annee: number) => request<SyntheseFiscale>('GET', `/fiscal?immeuble=${immeuble}&annee=${annee}`),
 

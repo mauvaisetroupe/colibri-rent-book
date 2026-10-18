@@ -25,6 +25,8 @@ export type Reglages = {
   collage: number
   // A gap above this many points: a change of column, written as three spaces
   colonne: number
+  // Bank statements (ADR 0018): pieces left of this abscissa are ignored (a code printed in the margin)
+  marge?: number
 }
 
 // Version of the contract (pdf.js, grouping, module 'extractor'), stored with each extractor: to be raised when a
@@ -32,6 +34,7 @@ export type Reglages = {
 export const MOTEUR = 2
 
 export const REGLAGES_PAR_DEFAUT: Reglages = { toleranceHauteur: 2, collage: 0.8, colonne: 15 }
+export const REGLAGES_RELEVE_PAR_DEFAUT: Reglages = { ...REGLAGES_PAR_DEFAUT, marge: 40 }
 
 export type Document = ExtractionDocument
 export type LigneLue = ExtractedLine

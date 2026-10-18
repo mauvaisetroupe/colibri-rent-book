@@ -15,7 +15,7 @@ const MODES = ['virement', 'prelevement', 'cheque', 'especes', 'autre']
 
 const COLUMNS = `
   p.id, p.sejour_id, lo.nom AS locataire, lt.code AS lot, p.date_paiement::text, p.mois::text,
-  p.loyer::text, p.provision::text, p.regularisation_id, p.regularisation::text, p.mode, p.note`
+  p.loyer::text, p.provision::text, p.regularisation_id, p.regularisation::text, p.mode, p.note, p.mouvement_id`
 
 const FROM = `paiement p
   JOIN sejour s ON s.id = p.sejour_id
@@ -32,6 +32,7 @@ type Saisie = {
   regularisation: string
   mode: string | null
   note: string | null
+  mouvement_id: number | null
 }
 
 function readPaiement(raw: Record<string, unknown>): Saisie {
@@ -50,6 +51,7 @@ function readPaiement(raw: Record<string, unknown>): Saisie {
     regularisation: optionalDecimal(raw.regularisation, 'Versement de régularisation') ?? '0',
     mode,
     note: optionalText(raw.note),
+    mouvement_id: raw.mouvement_id ? requiredId(raw.mouvement_id, 'Mouvement') : null,
   }
   if (!mois && (Number(p.loyer) !== 0 || Number(p.provision) !== 0)) {
     throw new InputError('Indiquer le mois du loyer et de la provision')
@@ -90,10 +92,38 @@ async function checkRegularisation(db: Pool | PoolClient, p: Saisie) {
   }
 }
 
+/**
+ * A payment seen on a bank statement (ADR 0018): a credit, and the payments linked to it do not exceed it (a transfer
+ * may pay two months: two payments).
+ */
+async function checkMouvement(db: Pool | PoolClient, p: Saisie, id: number | null) {
+  if (!p.mouvement_id) {
+    return
+  }
+  const { rows: [m] } = await db.query<{ montant: string, couvert: string }>(
+    `SELECT m.montant::text,
+            (SELECT coalesce(sum(loyer + provision + regularisation), 0) FROM paiement
+             WHERE mouvement_id = m.id AND id IS DISTINCT FROM $2)::text AS couvert
+     FROM mouvement m WHERE m.id = $1`,
+    [p.mouvement_id, id],
+  )
+  if (!m) {
+    throw new InputError('Mouvement bancaire introuvable')
+  }
+  if (new Big(m.montant).lte(0)) {
+    throw new InputError('Un paiement reçu se rattache à un crédit du relevé, pas à un débit')
+  }
+  const total = new Big(m.couvert).plus(p.loyer).plus(p.provision).plus(p.regularisation)
+  if (total.gt(m.montant)) {
+    throw new InputError(`Les paiements rattachés (${total.toFixed(2)}) dépassent le montant reçu (${new Big(m.montant).toFixed(2)})`)
+  }
+}
+
 const paiementRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
   const load = async (id: number) => (await db.query(`SELECT ${COLUMNS} FROM ${FROM} WHERE p.id = $1`, [id])).rows[0]
 
-  // Payments of a calendar year: rent months of the year, and regularisation payments received during it.
+  // Payments of a calendar year: rent months of the year, and regularisation payments received during it; without
+  // « annee », every payment of the building.
   // With « regularisation »: the payments toward it, any year, previous regularisations of its corrective chain included.
   app.get('/paiements', async (request, reply) => {
     try {
@@ -113,14 +143,15 @@ const paiementRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => 
         )
         return rows
       }
-      const annee = Number(q.annee)
-      if (!Number.isInteger(annee)) {
+      const annee = q.annee ? Number(q.annee) : null
+      if (annee !== null && !Number.isInteger(annee)) {
         throw new InputError('Année invalide')
       }
       const { rows } = await db.query(
         `SELECT ${COLUMNS} FROM ${FROM}
          WHERE lt.immeuble_id = $1
-           AND (extract(year FROM p.mois) = $2 OR (p.mois IS NULL AND extract(year FROM p.date_paiement) = $2))
+           AND ($2::int IS NULL OR extract(year FROM p.mois) = $2
+                OR (p.mois IS NULL AND extract(year FROM p.date_paiement) = $2))
          ORDER BY p.date_paiement, p.id`,
         [immeuble, annee],
       )
@@ -162,10 +193,13 @@ const paiementRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => 
     try {
       const p = readPaiement(body(request))
       await checkRegularisation(db, p)
+      await checkMouvement(db, p, null)
       const { rows: [created] } = await db.query<{ id: number }>(
-        `INSERT INTO paiement (sejour_id, date_paiement, mois, loyer, provision, regularisation_id, regularisation, mode, note)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-        [p.sejour_id, p.date_paiement, p.mois, p.loyer, p.provision, p.regularisation_id, p.regularisation, p.mode, p.note],
+        `INSERT INTO paiement (sejour_id, date_paiement, mois, loyer, provision, regularisation_id, regularisation, mode, note,
+                               mouvement_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+        [p.sejour_id, p.date_paiement, p.mois, p.loyer, p.provision, p.regularisation_id, p.regularisation, p.mode, p.note,
+          p.mouvement_id],
       )
       return reply.code(201).send(await load(created!.id))
     } catch (error) {
@@ -176,8 +210,16 @@ const paiementRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => 
   app.put('/paiements/:id', async (request, reply) => {
     try {
       const id = idParam(request)
-      const p = readPaiement(body(request))
+      const raw = body(request)
+      const p = readPaiement(raw)
+      // Without « mouvement_id », a change keeps the link to the bank movement (Paiements screen)
+      const garderLien = !('mouvement_id' in raw)
+      if (garderLien) {
+        p.mouvement_id = (await db.query<{ mouvement_id: number | null }>(
+          'SELECT mouvement_id FROM paiement WHERE id = $1', [id])).rows[0]?.mouvement_id ?? null
+      }
       await checkRegularisation(db, p)
+      await checkMouvement(db, p, id)
       const { rows: [before] } = await db.query<{ regularisation_id: number | null }>(
         'SELECT regularisation_id FROM paiement WHERE id = $1',
         [id],
@@ -187,8 +229,9 @@ const paiementRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => 
       }
       await db.query(
         `UPDATE paiement SET sejour_id = $2, date_paiement = $3, mois = $4, loyer = $5, provision = $6,
-           regularisation_id = $7, regularisation = $8, mode = $9, note = $10 WHERE id = $1`,
-        [id, p.sejour_id, p.date_paiement, p.mois, p.loyer, p.provision, p.regularisation_id, p.regularisation, p.mode, p.note],
+           regularisation_id = $7, regularisation = $8, mode = $9, note = $10, mouvement_id = $11 WHERE id = $1`,
+        [id, p.sejour_id, p.date_paiement, p.mois, p.loyer, p.provision, p.regularisation_id, p.regularisation, p.mode, p.note,
+          p.mouvement_id],
       )
       return load(id)
     } catch (error) {

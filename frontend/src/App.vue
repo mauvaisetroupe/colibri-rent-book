@@ -65,6 +65,7 @@ onMounted(async () => {
         <RouterLink to="/factures">Factures</RouterLink>
         <RouterLink to="/paiements">Paiements</RouterLink>
         <RouterLink to="/travaux">Travaux</RouterLink>
+        <RouterLink to="/banque">Banque</RouterLink>
         <RouterLink to="/sejours">Locataires</RouterLink>
       </div>
       <div class="groupe">
@@ -86,7 +87,7 @@ onMounted(async () => {
       <button
         type="button" class="reglages-bouton" :class="{ actif: reglageActif }" :aria-expanded="ouvert"
         @click="ouvert = !ouvert"
-      >⚙ Réglages ▾</button>
+      >⚙<span class="reglages-texte"> Réglages</span> ▾</button>
       <div v-if="ouvert" class="reglages-menu" role="menu">
         <RouterLink v-for="r in REGLAGES" :key="r.to" :to="r.to" role="menuitem">{{ r.nom }}</RouterLink>
         <a

@@ -27,7 +27,8 @@ const energies = (f: Fournisseur) => (f.energies ?? []).map((e) => ENERGIES[e]).
     <h1>Fournisseurs</h1>
   </section>
   <p class="discret">
-    Un fournisseur qui a un extracteur voit ses factures PDF lues automatiquement à l'import. Les factures d'un
+    Un fournisseur qui a un extracteur voit ses factures PDF lues automatiquement à l'import ; une banque, ses relevés
+    (écran Banque). Les factures d'un
     fournisseur confidentiel ne sont jamais jointes au justificatif d'une régularisation (données fiscales…) : elles y
     sont seulement listées, « consultable sur demande ».
   </p>
@@ -36,6 +37,7 @@ const energies = (f: Fournisseur) => (f.energies ?? []).map((e) => ENERGIES[e]).
 
   <div class="actions-page">
     <RouterLink :to="{ name: 'nouvel-extracteur' }" class="bouton">+ Nouveau fournisseur (avec son extracteur)</RouterLink>
+    <RouterLink :to="{ name: 'nouvel-extracteur-releve' }" class="bouton">+ Nouvelle banque (extracteur de relevés)</RouterLink>
   </div>
 
   <table v-if="fournisseurs.length" class="liste">
@@ -48,7 +50,7 @@ const energies = (f: Fournisseur) => (f.energies ?? []).map((e) => ENERGIES[e]).
     <tbody>
       <tr v-for="f in fournisseurs" :key="f.id" @click="router.push({ name: 'fournisseur', params: { id: f.id } })">
         <td><strong>{{ f.nom }}</strong></td>
-        <td>{{ energies(f) }}</td>
+        <td>{{ f.extracteur?.type === 'releve' ? `banque, ${f.nb_releves} relevé(s)` : energies(f) }}</td>
         <td class="nombre">{{ f.nb_factures }}</td>
         <td class="nombre">{{ f.nb_pdf }}</td>
         <td>{{ f.extracteur ? `v${f.extracteur.version}` : '—' }}</td>

@@ -18,7 +18,7 @@ export const NATURES = ['entretien', 'amelioration', 'construction'] as const
 
 const COLUMNS = `t.id, t.immeuble_id, t.lot_id, lt.code AS lot, t.fournisseur, t.description, t.nature,
   t.date_facture::text, t.date_paiement::text, t.montant_ttc::text, t.fichier_pdf IS NOT NULL AS pdf, t.note,
-  t.nature <> 'construction' AS deductible`
+  t.nature <> 'construction' AS deductible, t.mouvement_id`
 
 const FROM = 'travaux t LEFT JOIN lot lt ON lt.id = t.lot_id'
 
@@ -40,8 +40,17 @@ async function readTravaux(db: Pool, raw: Record<string, unknown>) {
   if (datePaiement && datePaiement < dateFacture) {
     throw new InputError('Le paiement est antérieur à la facture')
   }
+  const montant = requiredDecimal(raw.montant_ttc, 'Montant TTC')
+  // Paid as seen on a bank statement (ADR 0018): a debit of at least this amount
+  const mouvement = raw.mouvement_id ? requiredId(raw.mouvement_id, 'Mouvement') : null
+  if (mouvement !== null) {
+    const { rows: [m] } = await db.query<{ montant: string }>('SELECT montant::text FROM mouvement WHERE id = $1', [mouvement])
+    if (!m || Number(m.montant) >= 0) {
+      throw new InputError('Des travaux se rattachent à un débit du relevé')
+    }
+  }
   return [immeuble, lot, requiredText(raw.fournisseur, 'Fournisseur'), requiredText(raw.description, 'Description'),
-    nature, dateFacture, datePaiement, requiredDecimal(raw.montant_ttc, 'Montant TTC'), optionalText(raw.note)]
+    nature, dateFacture, datePaiement, montant, optionalText(raw.note), mouvement]
 }
 
 const travauxRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async (app, { db, storageDir }) => {
@@ -69,8 +78,8 @@ const travauxRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = asyn
     try {
       const { rows: [created] } = await db.query<{ id: number }>(
         `INSERT INTO travaux (immeuble_id, lot_id, fournisseur, description, nature, date_facture, date_paiement,
-                              montant_ttc, note)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+                              montant_ttc, note, mouvement_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
         await readTravaux(db, body(request)),
       )
       return reply.code(201).send(await load(created!.id))
@@ -81,11 +90,14 @@ const travauxRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = asyn
 
   app.put('/travaux/:id', async (request, reply) => {
     try {
+      const raw = body(request)
+      // Without « mouvement_id », a change keeps the link to the bank movement (Travaux screen)
       const { rowCount } = await db.query(
         `UPDATE travaux SET immeuble_id = $2, lot_id = $3, fournisseur = $4, description = $5, nature = $6,
-                            date_facture = $7, date_paiement = $8, montant_ttc = $9, note = $10
+                            date_facture = $7, date_paiement = $8, montant_ttc = $9, note = $10,
+                            mouvement_id = CASE WHEN $12 THEN $11 ELSE mouvement_id END
          WHERE id = $1`,
-        [idParam(request), ...await readTravaux(db, body(request))],
+        [idParam(request), ...await readTravaux(db, raw), 'mouvement_id' in raw],
       )
       return rowCount ? load(idParam(request)) : reply.code(404).send({ message: 'Travaux introuvables' })
     } catch (error) {
@@ -125,7 +137,7 @@ const travauxRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = asyn
     if (!isPdf(content)) {
       return reply.code(415).send({ message: `${file.filename} n'est pas un PDF` })
     }
-    const { fileName } = await storePdf(storageDir, content)
+    const { fileName } = await storePdf(storageDir, content, 'travaux')
     await db.query('UPDATE travaux SET fichier_pdf = $2 WHERE id = $1', [id, fileName])
     if (travaux.fichier_pdf && travaux.fichier_pdf !== fileName) {
       await removeIfUnused(db, storageDir, travaux.fichier_pdf)

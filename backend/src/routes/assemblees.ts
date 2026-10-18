@@ -309,7 +309,7 @@ const assembleeRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = as
     if (!isPdf(content)) {
       return reply.code(415).send({ message: `${file.filename} n'est pas un PDF` })
     }
-    const { fileName } = await storePdf(storageDir, content)
+    const { fileName } = await storePdf(storageDir, content, 'assemblees')
     await db.query('UPDATE assemblee SET pv_signe = $2 WHERE id = $1', [id, fileName])
     if (a.pv_signe && a.pv_signe !== fileName) {
       await removeIfUnused(db, storageDir, a.pv_signe)

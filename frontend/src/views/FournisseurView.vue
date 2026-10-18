@@ -45,9 +45,13 @@ async function basculerConfidentiel(event: Event) {
   }
 }
 
-function ecrireExtracteur() {
-  router.push({ name: 'nouvel-extracteur', query: { fournisseur: fournisseur.value?.nom } })
+function ecrireExtracteur(type: 'facture' | 'releve') {
+  router.push({ name: type === 'releve' ? 'nouvel-extracteur-releve' : 'nouvel-extracteur', query: { fournisseur: fournisseur.value?.nom } })
 }
+
+// A bank: its extractor reads statements, edited in its own editor (ADR 0018)
+const releve = computed(() => derniere.value?.type === 'releve')
+const editeur = (id: number) => ({ name: releve.value ? 'extracteur-releve' : 'extracteur', params: { id } })
 </script>
 
 <template>
@@ -56,15 +60,16 @@ function ecrireExtracteur() {
     <section class="entete-page">
       <h1>{{ fournisseur.nom }}</h1>
     </section>
-    <p class="discret">
+    <p v-if="releve" class="discret">Banque · {{ fournisseur.nb_releves }} relevé(s) importé(s) (écran Banque)</p>
+    <p v-else class="discret">
       {{ energies || 'Énergie non connue' }} ·
       {{ fournisseur.nb_factures }} facture(s), dont {{ fournisseur.nb_pdf }} avec PDF
     </p>
 
     <p v-if="message" class="message" :class="message.type">{{ message.texte }}</p>
 
-    <h2>Justificatifs des régularisations</h2>
-    <label class="case">
+    <h2 v-if="!releve">Justificatifs des régularisations</h2>
+    <label v-if="!releve" class="case">
       <input type="checkbox" :checked="fournisseur.confidentiel" @change="basculerConfidentiel">
       Confidentiel : ne jamais joindre ses factures au justificatif d'une régularisation (elles y sont listées,
       « non jointe : document confidentiel, consultable sur demande »)
@@ -73,25 +78,25 @@ function ecrireExtracteur() {
     <h2>Extracteur</h2>
     <template v-if="derniere">
       <p class="discret">
-        La dernière version lit les PDF de ce fournisseur à l'import. Une version ne change plus : la modifier, c'est
-        enregistrer la suivante.
+        La dernière version lit les PDF de ce {{ releve ? 'banque (relevés)' : 'fournisseur' }} à l'import. Une version
+        ne change plus : la modifier, c'est enregistrer la suivante.
       </p>
       <div class="actions-page">
-        <RouterLink :to="{ name: 'extracteur', params: { id: derniere.id } }" class="bouton">
+        <RouterLink :to="editeur(derniere.id)" class="bouton">
           Modifier l'extracteur (à partir de la v{{ derniere.version }})
         </RouterLink>
       </div>
       <table class="liste">
         <thead>
-          <tr><th>Version</th><th>Créée le</th><th>Note</th><th class="nombre">Factures lues</th><th /></tr>
+          <tr><th>Version</th><th>Créée le</th><th>Note</th><th class="nombre">{{ releve ? 'Relevés lus' : 'Factures lues' }}</th><th /></tr>
         </thead>
         <tbody>
-          <tr v-for="v in versions" :key="v.id" @click="router.push({ name: 'extracteur', params: { id: v.id } })">
+          <tr v-for="v in versions" :key="v.id" @click="router.push(editeur(v.id))">
             <td>v{{ v.version }}{{ v.derniere ? ' (utilisée)' : '' }}</td>
             <td>{{ dateFr(v.cree_le.slice(0, 10)) }}</td>
             <td class="discret">{{ v.note }}</td>
-            <td class="nombre">{{ v.nb_factures }}</td>
-            <td><RouterLink :to="{ name: 'extracteur', params: { id: v.id } }">ouvrir</RouterLink></td>
+            <td class="nombre">{{ releve ? v.nb_releves : v.nb_factures }}</td>
+            <td><RouterLink :to="editeur(v.id)">ouvrir</RouterLink></td>
           </tr>
         </tbody>
       </table>
@@ -99,7 +104,8 @@ function ecrireExtracteur() {
     <template v-else>
       <p class="discret">Pas d'extracteur : ses factures se saisissent à la main.</p>
       <div class="actions-page">
-        <button type="button" @click="ecrireExtracteur">Écrire un extracteur</button>
+        <button type="button" @click="ecrireExtracteur('facture')">Écrire un extracteur de factures</button>
+        <button type="button" @click="ecrireExtracteur('releve')">Écrire un extracteur de relevés (banque)</button>
       </div>
     </template>
   </template>

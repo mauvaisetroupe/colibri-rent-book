@@ -2,6 +2,7 @@ import * as monaco from 'monaco-editor'
 import editorWorker from 'monaco-editor/editor/editor.worker?worker'
 import tsWorker from 'monaco-editor/languages/features/typescript/ts.worker?worker'
 
+import sourceBankExtractor from './bank-extractor.ts?raw'
 import sourceExtractor from './extractor.ts?raw'
 
 // Code editor of the « Extracteurs » screen (ADR 0013): Monaco, the editor of VS Code, with its TypeScript service.
@@ -25,6 +26,8 @@ ts.typescriptDefaults.setCompilerOptions({
 // The base class as a package of the virtual file system: « import { … } from 'extractor' » resolves to it
 ts.typescriptDefaults.setExtraLibs([
   { content: sourceExtractor, filePath: 'file:///node_modules/extractor/index.ts' },
+  // Bank statement extractors (ADR 0018)
+  { content: sourceBankExtractor, filePath: 'file:///node_modules/bank-extractor/index.ts' },
   { content: 'declare module \'big.js\' { const Big: any; export default Big }', filePath: 'file:///node_modules/big.js/index.d.ts' },
 ])
 
@@ -39,6 +42,16 @@ const METHODES: Record<string, string> = {
   findLine: 'methode-lignes',
   readLine: 'methode-lecture',
   after: 'methode-lecture',
+  // Bank statements
+  account: 'methode-numero',
+  statementDate: 'methode-date',
+  openingBalance: 'methode-total',
+  closingBalance: 'methode-total',
+  printedTotals: 'methode-total',
+  movementsZone: 'methode-zone',
+  findMovement: 'methode-lignes',
+  readMovement: 'methode-lecture',
+  ignoreRow: 'methode-lecture',
 }
 
 /** Lines of each method: from its declaration to the closing brace at its indentation. */

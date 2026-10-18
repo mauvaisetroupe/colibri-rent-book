@@ -25,15 +25,18 @@ première : `colibri`, privé), qui fixe la version de l'image et lance les test
 ## Ce qui existe
 
 - `backend/src/` : `app.ts` (routes), `routes/` (factures, contrôle, extracteurs, fournisseurs, immeubles, séjours,
-  décompte, régularisations, paiements, fiscal, travaux (ADR 0015), société et assemblées (ADR 0016), santé),
+  décompte, régularisations, paiements, fiscal, travaux (ADR 0015), société et assemblées (ADR 0016), relevés
+  bancaires et mouvements (ADR 0018), santé),
   `statements.ts` (lectures SQL du décompte), `justificatif.ts` (données) et `justificatifPdf.ts` (PDF), `mails.ts`,
   `fiscal.ts`, `assemblees.ts` (quorum, votes, modèle de l'assemblée annuelle) et `pvPdf.ts` (procès-verbal), `periods.ts` (**seule** conversion `daterange` ↔
-  dates incluses), `invoices/checks.ts` (contrôles du § 6, sans dépendance à Node), `pdfStorage.ts` (PDF par empreinte).
+  dates incluses), `invoices/checks.ts` (contrôles du § 6, sans dépendance à Node), `pdfStorage.ts` (PDF par empreinte, un dossier
+  par type : `factures/`, `releves/`, `travaux/`, `assemblees/` ; rangement au démarrage).
   Le moteur de répartition est en SQL (`repartition`, `decompte`, `synthese`) : ne pas le réimplémenter en TypeScript.
-- `backend/seed/extracteurs.sql` : extracteurs livrés (EDF, ENGIE), généré par `npm run extracteurs:sql` dans
+- `backend/seed/extracteurs.sql` : extracteurs livrés (EDF, ENGIE ; relevés du Crédit Mutuel, ADR 0018), généré par `npm run extracteurs:sql` dans
   `frontend/` depuis `frontend/src/extraction/modeles/` ; rejouable (une source déjà en base n'est pas ajoutée).
 - `frontend/src/` : `api.ts` (client et types), `format.ts` (seule conversion affichage ↔ API), un écran par fichier
-  dans `views/`, `extraction/` (`extractor.ts` = classe de base et aides, vue par le code des extracteurs ;
+  dans `views/`, `rapprochement.ts` (propositions de l'écran Banque), `extraction/` (`extractor.ts` = classe de base
+  et aides des extracteurs de factures, `bank-extractor.ts` celle des relevés, `moteurReleve.ts` leur moteur ;
   regroupement des morceaux pdf.js en lignes, moteur, surlignage, éditeur Monaco, test sur les factures en base).
   Navigation calquée sur le cycle d'un exercice ; tout nouvel écran ou changement de processus met à jour l'accueil
   (`AccueilView.vue`) et son mode d'emploi.
