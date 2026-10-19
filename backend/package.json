@@ -12,7 +12,7 @@
     "db:down": "docker compose -f docker-compose.dev.yml down",
     "db:local": "docker compose -f docker-compose.dev.yml up -d --wait dev-db adminer",
     "db:local:stop": "docker compose -f docker-compose.dev.yml stop dev-db adminer",
-    "db:local:reset": "docker compose -f docker-compose.dev.yml rm -sfv dev-db && docker volume rm -f colibri_dev-db-data && npm run db:local",
+    "db:local:reset": "node scripts/reset-dev-db.mjs",
     "test:local": "TEST_DATABASE_URL=postgres://postgres:test@localhost:55442/colibri_test npm test",
     "lien": "tsx --env-file=.env.local src/cli/lien.ts",
     "jeton": "tsx --env-file=.env.local src/cli/jeton.ts"
