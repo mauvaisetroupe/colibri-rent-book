@@ -1,6 +1,6 @@
 # 19. Travaux payés en plusieurs fois, dépôts de garantie, associés
 
-- Statut : Accepté (complète 0015 et 0018)
+- Statut : Accepté (complète 0015 et 0018) ; dépôts de garantie modifiés par 0021
 - Date : 2026-10-18
 
 ## Contexte
@@ -47,7 +47,8 @@ Le rapprochement des relevés (ADR 0018) a montré trois limites du modèle :
   mois) ou « dépôt de garantie » (seul), du même signe.
 - Dans la fenêtre de paiement ouverte depuis un virement, le reste non réparti se déclare **dépôt de garantie** (un
   versement est créé) ou reste à rattacher. La case est cochée d'office quand le libellé parle de caution ou de
-  garantie, ou quand le séjour commence moins d'un mois avant le virement.
+  garantie, ou quand le séjour commence moins d'un mois avant le virement. *Remplacé par l'ADR 0021 : le dépôt se
+  saisit depuis le séjour, la banque y renvoie ; `depot_retenu_charges` devient la retenue en paiements.*
 
 ### Catégories
 

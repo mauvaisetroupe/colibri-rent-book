@@ -259,9 +259,15 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
         à toute la répartition. Changer des tantièmes modifie aussi les décomptes passés.</li>
       <li><strong>Locataires</strong> : « + Nouveau locataire » ouvre la fiche : nom, e-mail (pour les mails de
         régularisation), téléphone, puis son séjour : lot, date d'entrée, date de sortie (vide tant que le locataire est
-        là), dépôt de garantie reçu, et le loyer et la provision appelés chaque mois (une ligne par changement, pour garder
-        l'historique). Deux séjours ne peuvent pas se chevaucher sur un même lot. Un ancien locataire qui revient se
-        choisit dans « Fiche » au lieu de « Nouveau locataire ».</li>
+        là), dépôt de garantie prévu au bail, et le loyer et la provision appelés chaque mois (une ligne par changement,
+        pour garder l'historique). Deux séjours ne peuvent pas se chevaucher sur un même lot. Un ancien locataire qui
+        revient se choisit dans « Fiche » au lieu de « Nouveau locataire ».</li>
+      <li><strong>Dépôt de garantie</strong> : le bouton « Dépôt… » d'un séjour ouvre son dépôt. « Dépôt reçu… » et
+        « Restitution… » : date, montant, virement de la banque (ou aucun : versé à l'agence, avant les relevés).
+        « Retenue… » : au départ, ce que le dépôt couvre de ce que le locataire doit encore (mois impayés, régularisations
+        envoyées), proposé du plus ancien au plus récent ; ces montants deviennent des paiements « retenue sur dépôt »,
+        verrouillés ailleurs, jamais attendus à la banque. Le reste d'une régularisation non couverte se clôt ensuite par
+        la décision « irrécouvrable ».</li>
     </ol>
   </details>
 
@@ -335,8 +341,8 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
       <li>Onglet « Catégorisés » : un <strong>paiement de locataire</strong>, des <strong>travaux</strong> et un
         <strong>dépôt de garantie</strong> ont un détail ; la flèche ▸ le déplie. « Ajouter un paiement du locataire… »
         ouvre la fenêtre de l'écran Paiements, préremplie (locataire, mois, loyer et provision du séjour encore dus,
-        montant restant) : un reste s'y déclare dépôt de garantie, ou reste à rattacher. « Ajouter un dépôt de
-        garantie… » enregistre un dépôt versé ou remboursé (négatif), visible dans la fiche du locataire. Des travaux :
+        montant restant) : un reste reste à rattacher. « Dépôt de garantie… » ouvre le dépôt du séjour (écran
+        Locataires), ce virement prérempli : le dépôt se saisit là, comme une facture dans son écran. Des travaux :
         la facture se saisit d'abord (écran Travaux), puis « Rattacher à une facture de travaux… » y accroche le virement
         (un acompte, puis le solde : deux virements pour une facture). « Rattacher… » reprend ce qui a été saisi (ce qui
         correspond est marqué ✓ et choisi d'office, une alerte signale un montant ou une date qui diffère). Un mouvement
@@ -407,8 +413,8 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
   <details>
     <summary><strong>8. Synthèse fiscale</strong> : pour la déclaration de revenus fonciers</summary>
     <p>Pour une année civile : charges de la vacance, charges restées impayées par les locataires partis dans l'année
-      (sur tout leur séjour, versements reçus au 31 décembre), dépôts de garantie conservés pour charges. Au départ d'un
-      locataire, saisir dans son séjour la part du dépôt conservée pour charges. Méthode à faire valider par
+      (sur tout leur séjour, versements reçus au 31 décembre), dépôts de garantie conservés pour charges : la part de la
+      retenue sur le dépôt qui couvre des régularisations (Locataires, « Dépôt… »). Méthode à faire valider par
       l'expert-comptable.</p>
   </details>
 

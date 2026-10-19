@@ -67,9 +67,9 @@ export type Sejour = {
   note: string | null
   // Deposit of the lease
   depot_garantie: string | null
-  // Part of the deposit kept at exit for unpaid charges (SPEC § 9)
-  depot_retenu_charges: string | null
-  // Held (ADR 0019): paid minus refunded; null without any payment recorded
+  // Kept (ADR 0021): the retention, toward unpaid months or regularisations; null without any
+  depot_retenu: string | null
+  // Held (ADR 0019, 0021): paid minus refunded minus kept; null without any deposit or retention recorded
   depot_detenu: string | null
 }
 
@@ -84,6 +84,9 @@ export type VersementDepot = {
   mouvement_id: number | null
   note: string | null
 }
+// A line of the retention on the deposit: an unpaid month, or a regularisation still open
+export type LigneRetenue = { mois: string, loyer: string, provision: string } | { regularisation_id: number, regularisation: string }
+
 export type VersementDepotSaisi = Omit<VersementDepot, 'id' | 'locataire' | 'lot' | 'mouvement_id'> & { mouvement_id?: number | null }
 
 export type Provision = {
@@ -215,11 +218,16 @@ export type OptionsMail = {
 
 export type Mail = { destinataire: string | null, objet: string, corps: string }
 
+// The modes a payment is typed with; « depot », a retention on the deposit, is made from the stay only (ADR 0021)
 export const MODES_PAIEMENT = {
   virement: 'Virement', prelevement: 'Prélèvement', cheque: 'Chèque', especes: 'Espèces', autre: 'Autre',
 } as const
+export const NOMS_MODES = { ...MODES_PAIEMENT, depot: 'Retenue sur dépôt' } as const
 
-export type ModePaiement = keyof typeof MODES_PAIEMENT
+export type ModePaiement = keyof typeof NOMS_MODES
+
+/** A retention on the deposit (ADR 0021): changed from the stay only, never seen at the bank. */
+export const estRetenue = (p: { mode: ModePaiement | null }) => p.mode === 'depot'
 
 export type Paiement = {
   id: number
@@ -676,8 +684,8 @@ export const api = {
   supprimerLocataire: (id: number) => request<void>('DELETE', `/locataires/${id}`),
 
   sejours: (immeuble: number) => request<Sejour[]>('GET', `/sejours?immeuble=${immeuble}`),
-  creerSejour: (s: Omit<Sejour, 'id' | 'lot' | 'locataire' | 'depot_detenu'>) => request<Sejour>('POST', '/sejours', s),
-  modifierSejour: (s: Omit<Sejour, 'lot' | 'locataire' | 'depot_detenu'>) => request<Sejour>('PUT', `/sejours/${s.id}`, s),
+  creerSejour: (s: Omit<Sejour, 'id' | 'lot' | 'locataire' | 'depot_detenu' | 'depot_retenu'>) => request<Sejour>('POST', '/sejours', s),
+  modifierSejour: (s: Omit<Sejour, 'lot' | 'locataire' | 'depot_detenu' | 'depot_retenu'>) => request<Sejour>('PUT', `/sejours/${s.id}`, s),
   supprimerSejour: (id: number) => request<void>('DELETE', `/sejours/${id}`),
 
   echeances: (immeuble: number) => request<Echeance[]>('GET', `/echeances?immeuble=${immeuble}`),
@@ -784,6 +792,9 @@ export const api = {
   creerDepot: (d: VersementDepotSaisi) => request<VersementDepot>('POST', '/depots', d),
   modifierDepot: (id: number, d: VersementDepotSaisi) => request<VersementDepot>('PUT', `/depots/${id}`, d),
   supprimerDepot: (id: number) => request<void>('DELETE', `/depots/${id}`),
+  // The retention of a stay, replaced as a whole (no line: removed)
+  retenue: (sejour: number, r: { date: string, lignes: LigneRetenue[] }) =>
+    request<unknown[]>('PUT', `/sejours/${sejour}/retenue`, r),
 
   fiscal: (immeuble: number, annee: number) => request<SyntheseFiscale>('GET', `/fiscal?immeuble=${immeuble}&annee=${annee}`),
 

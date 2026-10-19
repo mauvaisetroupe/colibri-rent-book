@@ -15,16 +15,16 @@ import Toast from 'openvue/toast'
 import { useConfirm } from 'openvue/useconfirm'
 import { useToast } from 'openvue/usetoast'
 import { computed, nextTick, onMounted, ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import {
-  api, AVEC_DETAIL, CATEGORIES_MOUVEMENT, type CategorieMouvement, type Echeance,
+  api, AVEC_DETAIL, estRetenue, CATEGORIES_MOUVEMENT, type CategorieMouvement, type Echeance,
   type Immeuble, type Lot, type Mouvement, type Paiement, type Regularisation, type ReleveResume,
   type Sejour, type StatutMouvement, type Travaux, type VersementDepot,
 } from '../api'
-import FormulairePaiement, { type Brouillon, enregistrerBrouillon, saisies } from '../components/FormulairePaiement.vue'
+import FormulairePaiement, { type Brouillon, enregistrerBrouillon } from '../components/FormulairePaiement.vue'
 import FormulaireTravaux, { type BrouillonTravaux, travauxVersApi } from '../components/FormulaireTravaux.vue'
-import { dateFr, euros, nombreApi, nombreFr } from '../format'
+import { dateFr, euros, nombreFr } from '../format'
 import { categoriePropose, proposer } from '../rapprochement'
 
 // Categorisation of the bank movements (ADR 0018; the statements are imported in RelevesView): each movement gets a
@@ -37,6 +37,7 @@ import { categoriePropose, proposer } from '../rapprochement'
 type Onglet = 'a_categoriser' | 'categorises'
 
 const route = useRoute()
+const router = useRouter()
 const confirm = useConfirm()
 const toast = useToast()
 
@@ -361,7 +362,7 @@ function ouvrirRattachement(m: Mouvement) {
     })
   } else {
     const sejour = proposer(m, sejours.value, echeances.value, regularisations.value).sejour
-    const libres = paiements.value.filter((p) => !p.mouvement_id && new Big(totalPaiement(p)).gt(0) === estCredit(m))
+    const libres = paiements.value.filter((p) => !p.mouvement_id && !estRetenue(p) && new Big(totalPaiement(p)).gt(0) === estCredit(m))
     const siens = sejour ? libres.filter((p) => p.sejour_id === sejour.id) : []
     choix = [
       // Several payments adding up to the transfer (several months)
@@ -446,9 +447,6 @@ function nouveauPaiement(m: Mouvement) {
       provision: credit && !dejaPaye ? nombreFr(new Big(p.provision).toFixed(2)) : '',
       versements: p.regularisation_id ? [{ regularisation_id: p.regularisation_id, montant: nombreFr(p.regularisation) }] : [],
       mode: 'virement', note: '',
-      // The rest of the transfer not split: a deposit when the label says so, or with the first rent of the stay
-      resteDepot: /CAUTION|DEPOT|GARANTIE/i.test(`${m.libelle} ${m.detail ?? ''}`)
-        || Boolean(p.sejour && ecartJours(m, p.sejour.entree)! <= 31),
     },
   }
   erreurFormulaire.value = dejaPaye
@@ -472,19 +470,10 @@ function modifierPaiement(m: Mouvement, p: Paiement) {
 async function enregistrerPaiement(suivant: boolean) {
   const f = formulairePaiement.value!
   const b = f.brouillon
-  const recu = new Big(nombreApi(b.montant) ?? '0')
-  const reparti = saisies(b).reduce((t, x) => t.plus(x.montant!), new Big(0))
-  // What the form left unsplit, with the sign of the amount (negative for a refund)
-  const nonReparti = recu.minus(reparti)
   occupe.value = true
   try {
+    // A rest left (a deposit paid with the first rent…) stays to complete: « Dépôt de garantie… » then
     await enregistrerBrouillon(b, f.mouvement.id)
-    // A deposit paid with the rent (or refunded with the last month)
-    if (b.resteDepot && !nonReparti.eq(0) && nonReparti.gt(0) === recu.gt(0)) {
-      await api.creerDepot({
-        sejour_id: b.sejour_id!, date_versement: b.date, montant: nonReparti.toString(), note: null, mouvement_id: f.mouvement.id,
-      })
-    }
     await recharger()
     const m = mouvements.value.find((x) => x.id === f.mouvement.id)!
     formulairePaiement.value = null
@@ -558,68 +547,20 @@ function supprimerTravaux(t: Travaux | undefined) {
   })
 }
 
-// ---------------------------------------------------------------- deposits (ADR 0019)
+// ---------------------------------------------------------------- deposits (ADR 0019, 0021)
 
-// A deposit paid (positive) or refunded (negative), typed from the movement: the amount follows its sign
-type SaisieDepot = { mouvement: Mouvement, id: number | null, sejour_id: number | null, date: string, montant: string, note: string }
-const saisieDepot = ref<SaisieDepot | null>(null)
-const erreurDepot = ref<string | null>(null)
-
-// Present tenants first; around the date of the movement
-const sejoursTries = computed(() => [...sejours.value].sort((a, b) => Number(Boolean(a.sortie)) - Number(Boolean(b.sortie))
-  || a.lot.localeCompare(b.lot)))
-
-function nouveauDepot(m: Mouvement) {
-  const signe = estCredit(m) ? '' : '-'
-  saisieDepot.value = {
-    mouvement: m, id: null, sejour_id: proposer(m, sejours.value, echeances.value, regularisations.value).sejour?.id ?? null,
-    date: m.date_operation, montant: nombreFr(`${signe}${new Big(reste(m)).toFixed(2)}`), note: '',
-  }
-  erreurDepot.value = null
+// A deposit is managed from the stay (Locataires): the transfer opens its window there, prefilled; the stay is the
+// tenant named in the label, else chosen there
+function versDepot(m: Mouvement) {
+  const sejour = proposer(m, sejours.value, echeances.value, regularisations.value).sejour
+  router.push({ path: '/sejours', query: {
+    depot: estCredit(m) ? 'recu' : 'restitution', mouvement: m.id, date: m.date_operation,
+    montant: new Big(reste(m)).toFixed(2), ...(sejour ? { sejour: sejour.id } : {}),
+  } })
 }
 
-function modifierDepot(m: Mouvement, id: number) {
-  const d = depots.value.find((x) => x.id === id)
-  if (d) {
-    saisieDepot.value = { mouvement: m, id: d.id, sejour_id: d.sejour_id, date: d.date_versement, montant: nombreFr(d.montant), note: d.note ?? '' }
-    erreurDepot.value = null
-  }
-}
-
-async function enregistrerDepot() {
-  const s = saisieDepot.value
-  if (!s || s.sejour_id === null) {
-    return
-  }
-  const donnees = { sejour_id: s.sejour_id, date_versement: s.date, montant: nombreApi(s.montant) ?? s.montant, note: s.note.trim() || null }
-  occupe.value = true
-  try {
-    if (s.id === null) {
-      await api.creerDepot({ ...donnees, mouvement_id: s.mouvement.id })
-    } else {
-      await api.modifierDepot(s.id, donnees)
-    }
-    saisieDepot.value = null
-    await recharger()
-    ok('Dépôt de garantie enregistré')
-  } catch (e) {
-    erreurDepot.value = (e as Error).message
-  } finally {
-    occupe.value = false
-  }
-}
-
-function supprimerDepot(id: number) {
-  const d = depots.value.find((x) => x.id === id)
-  if (!d) {
-    return
-  }
-  confirm.require({
-    message: `Supprimer le dépôt de garantie de ${d.locataire} (${euros(d.montant)}) ?`,
-    header: 'Supprimer', acceptLabel: 'Supprimer', rejectLabel: 'Annuler', acceptClass: 'p-button-danger',
-    accept: () => agir(() => api.supprimerDepot(id), 'Dépôt supprimé'),
-  })
-}
+/** The deposit window of the stay of a deposit linked to the movement. */
+const voirDepot = (sejourId: number) => router.push({ path: '/sejours', query: { depot: 'voir', sejour: sejourId } })
 
 const ONGLETS: { code: Onglet, nom: string }[] = [
   { code: 'a_categoriser', nom: 'À catégoriser' },
@@ -811,9 +752,8 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
                   Dépôt de garantie de {{ d.locataire }} ({{ d.lot }}) :
                   {{ Number(d.montant) > 0 ? 'versé' : 'remboursé' }} <strong>{{ euros(new Big(d.montant).abs().toString()) }}</strong>
                 </span>
-                <Button label="Modifier" size="small" text :disabled="occupe" @click="modifierDepot(data, d.id)" />
+                <Button label="Voir le dépôt" size="small" text :disabled="occupe" @click="voirDepot(d.sejour_id)" />
                 <Button label="Détacher" size="small" text severity="secondary" :disabled="occupe" @click="detacher(data, { depot_id: d.id })" />
-                <Button label="Supprimer" size="small" text severity="danger" :disabled="occupe" @click="supprimerDepot(d.id)" />
               </li>
               <li v-if="!data.paiements.length && !data.travaux.length && !data.depots.length" class="discret">Rien de rattaché pour l'instant.</li>
             </ul>
@@ -823,9 +763,10 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
                 :disabled="occupe || Number(reste(data)) <= 0" @click="nouveauPaiement(data)"
               />
               <Button
-                v-if="data.categorie === 'locataire' || data.categorie === 'depot_garantie'" label="Ajouter un dépôt de garantie…"
+                v-if="data.categorie === 'locataire' || data.categorie === 'depot_garantie'" label="Dépôt de garantie…"
+                title="Le dépôt se saisit dans l'écran Locataires : ouvert sur le séjour, ce virement prérempli"
                 icon="oi oi-key" size="small" :outlined="data.categorie === 'locataire'"
-                :disabled="occupe || Number(reste(data)) <= 0" @click="nouveauDepot(data)"
+                :disabled="occupe || Number(reste(data)) <= 0" @click="versDepot(data)"
               />
               <Button
                 :label="libelleRattacher(data)"
@@ -868,35 +809,6 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
       <div class="actions-detail fin">
         <Button label="Annuler" text @click="saisieNote = null" />
         <Button type="submit" label="Enregistrer" :disabled="occupe || (saisieNote.categorie === 'autre' && !saisieNote.note.trim())" />
-      </div>
-    </form>
-  </Dialog>
-
-  <!-- A deposit paid or refunded, from the movement -->
-  <Dialog
-    :visible="saisieDepot !== null" modal :header="saisieDepot?.id ? 'Modifier le dépôt de garantie' : 'Dépôt de garantie'"
-    :style="{ width: '34rem' }" @update:visible="(v: boolean) => { if (!v) saisieDepot = null }"
-  >
-    <form v-if="saisieDepot" class="note-form" @submit.prevent="enregistrerDepot">
-      <p class="discret">
-        {{ saisieDepot.mouvement.libelle }} du {{ dateFr(saisieDepot.mouvement.date_operation) }} : {{ euros(saisieDepot.mouvement.montant) }}
-        · reste {{ euros(reste(saisieDepot.mouvement)) }}
-      </p>
-      <label>Locataire
-        <select v-model="saisieDepot.sejour_id" required>
-          <option :value="null" disabled>Choisir…</option>
-          <option v-for="x in sejoursTries" :key="x.id" :value="x.id">{{ x.lot }} – {{ x.locataire }}{{ x.sortie ? ` (parti le ${dateFr(x.sortie)})` : '' }}</option>
-        </select>
-      </label>
-      <div class="rangee">
-        <label>Date <input v-model="saisieDepot.date" type="date" required></label>
-        <label>Montant (négatif : remboursé au locataire) <input v-model="saisieDepot.montant" class="nombre" size="10" required></label>
-      </div>
-      <label>Note <InputText v-model="saisieDepot.note" fluid /></label>
-      <p v-if="erreurDepot" class="message erreur">{{ erreurDepot }}</p>
-      <div class="actions-detail fin">
-        <Button label="Annuler" text @click="saisieDepot = null" />
-        <Button type="submit" label="Enregistrer" :disabled="occupe || saisieDepot.sejour_id === null" />
       </div>
     </form>
   </Dialog>

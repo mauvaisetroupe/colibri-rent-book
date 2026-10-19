@@ -39,3 +39,4 @@ après une mise à jour qui les change ; le fichier est rejouable.
 | `016_reglements_depots_associes.sql` | 0019 | Règlements des travaux (payés en plusieurs fois, année fiscale de chaque paiement), versements de dépôt de garantie, catégories « associés » et « dépôt de garantie » |
 | `017_authentification.sql` | 0020 | Comptes, passkeys (WebAuthn), sessions, liens d'enregistrement à usage unique, jetons d'API (empreintes seulement) |
 | `018_categorie_agence.sql` | 0019 | Catégorie « agence » : loyers reversés par une agence de gestion, sans détail |
+| `019_retenue_depot.sql` | 0021 | Mode de paiement `depot` (retenue sur le dépôt, jamais rattachée à un mouvement), `sejour.depot_retenu_charges` supprimée (valeur saisie reportée dans la note du séjour) |

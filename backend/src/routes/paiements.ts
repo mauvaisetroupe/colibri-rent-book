@@ -10,9 +10,19 @@ import {
 // Payments received from tenants (ADR 0008): rent and provision of a month, and/or an amount toward a
 // regularisation (negative: refund). The provisions of a year come from these payments (view v_provision) as soon as
 // the year has one; a regularisation is settled when its payments (corrective chain included) reach its balance
-// (computed, ADR 0010).
+// (computed, ADR 0010). A retention on the deposit (mode « depot », ADR 0021) is a payment too, but made and changed only
+// from the deposit of the stay (PUT /sejours/:id/retenue): refused here.
 
 const MODES = ['virement', 'prelevement', 'cheque', 'especes', 'autre']
+export const RETENUE = 'Retenue sur le dépôt de garantie : à modifier depuis le dépôt du séjour (écran Locataires)'
+
+/** A retention on the deposit is changed from the deposit of the stay only. */
+async function refuserRetenue(db: Pool, id: number) {
+  const { rows: [p] } = await db.query<{ mode: string | null }>('SELECT mode FROM paiement WHERE id = $1', [id])
+  if (p?.mode === 'depot') {
+    throw new InputError(RETENUE)
+  }
+}
 
 const COLUMNS = `
   p.id, p.sejour_id, lo.nom AS locataire, lt.code AS lot, p.date_paiement::text, p.mois::text,
@@ -39,6 +49,9 @@ type Saisie = {
 function readPaiement(raw: Record<string, unknown>): Saisie {
   const mois = raw.mois ? requiredDate(`${String(raw.mois).slice(0, 7)}-01`, 'Mois') : null
   const mode = optionalText(raw.mode)
+  if (mode === 'depot') {
+    throw new InputError(RETENUE)
+  }
   if (mode && !MODES.includes(mode)) {
     throw new InputError(`Mode de paiement inconnu : ${mode}`)
   }
@@ -209,6 +222,7 @@ const paiementRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => 
   app.put('/paiements/:id', async (request, reply) => {
     try {
       const id = idParam(request)
+      await refuserRetenue(db, id)
       const raw = body(request)
       const p = readPaiement(raw)
       // Without « mouvement_id », a change keeps the link to the bank movement (Paiements screen)
@@ -240,14 +254,19 @@ const paiementRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => 
   })
 
   app.delete('/paiements/:id', async (request, reply) => {
-    const { rows: [deleted] } = await db.query<{ regularisation_id: number | null }>(
-      'DELETE FROM paiement WHERE id = $1 RETURNING regularisation_id',
-      [idParam(request)],
-    )
-    if (!deleted) {
-      return reply.code(404).send({ message: 'Paiement introuvable' })
+    try {
+      await refuserRetenue(db, idParam(request))
+      const { rows: [deleted] } = await db.query<{ regularisation_id: number | null }>(
+        'DELETE FROM paiement WHERE id = $1 RETURNING regularisation_id',
+        [idParam(request)],
+      )
+      if (!deleted) {
+        return reply.code(404).send({ message: 'Paiement introuvable' })
+      }
+      return reply.code(204).send()
+    } catch (error) {
+      return sendError(reply, error)
     }
-    return reply.code(204).send()
   })
 }
 

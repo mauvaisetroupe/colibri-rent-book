@@ -27,5 +27,6 @@ seed cités ici sont dans ce dépôt-là, qui lance aussi les tests sur ces donn
 | 0018 | [Relevés bancaires : extracteurs, mouvements, rapprochement](0018-releves-bancaires.md) | Accepté |
 | 0019 | [Travaux payés en plusieurs fois, dépôts de garantie, associés](0019-reglements-depots-associes.md) | Accepté (complète 0015, 0018) |
 | 0020 | [Authentification par passkey, dans l'application](0020-authentification-par-passkey.md) | Accepté |
+| 0021 | [Dépôt de garantie géré depuis le séjour, retenue en paiements](0021-depot-de-garantie-gere-depuis-le-sejour.md) | Accepté |
 
-La prochaine décision du logiciel prend le numéro 0021.
+La prochaine décision du logiciel prend le numéro 0022.

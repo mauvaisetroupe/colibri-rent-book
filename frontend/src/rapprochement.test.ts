@@ -7,7 +7,7 @@ import { categoriePropose, moisDuMouvement, motsDuNom, proposer, sejourDuMouveme
 // Proposals of the « Banque » screen (ADR 0018), on made-up tenants.
 
 const sejour = (id: number, locataire: string, entree: string, sortie: string | null = null) =>
-  ({ id, lot_id: id, lot: `Lot ${id}`, locataire_id: id, locataire, entree, sortie, note: null, depot_garantie: null, depot_retenu_charges: null }) as Sejour
+  ({ id, lot_id: id, lot: `Lot ${id}`, locataire_id: id, locataire, entree, sortie, note: null, depot_garantie: null, depot_retenu: null, depot_detenu: null }) as Sejour
 const sejours = [sejour(1, 'Alice MARTIN (ex DURAND)', '2024-01-01'), sejour(2, 'Bruno Étienne', '2025-08-17'), sejour(3, 'Carla MARTIN', '2020-01-01', '2022-06-30')]
 const mouvement = (libelle: string, montant: string, date = '2026-02-03', detail: string | null = null) =>
   ({ id: 1, libelle, detail, montant, date_operation: date, couvert: '0' }) as Mouvement

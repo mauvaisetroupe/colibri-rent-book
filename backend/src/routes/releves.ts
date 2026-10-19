@@ -125,7 +125,7 @@ const MOUVEMENT_FROM = `mouvement m
                                            'mois', p.mois::text, 'date', p.date_paiement::text) ORDER BY abs(p.date_paiement - m.date_operation))
          FROM paiement p JOIN sejour s ON s.id = p.sejour_id JOIN lot lt ON lt.id = s.lot_id
          JOIN locataire lo ON lo.id = s.locataire_id
-         WHERE p.mouvement_id IS NULL AND p.loyer + p.provision + p.regularisation = m.montant
+         WHERE p.mouvement_id IS NULL AND p.mode IS DISTINCT FROM 'depot' AND p.loyer + p.provision + p.regularisation = m.montant
            AND abs(p.date_paiement - m.date_operation) <= 10),
         (SELECT json_agg(json_build_object('type', 'groupe', 'ids', g.ids, 'locataire', g.locataire, 'lot', g.lot, 'mois', g.mois))
          FROM (
@@ -133,7 +133,7 @@ const MOUVEMENT_FROM = `mouvement m
                   string_agg(to_char(p.mois, 'MM/YYYY'), ', ' ORDER BY p.mois) AS mois
            FROM paiement p JOIN sejour s ON s.id = p.sejour_id JOIN lot lt ON lt.id = s.lot_id
            JOIN locataire lo ON lo.id = s.locataire_id
-           WHERE p.mouvement_id IS NULL AND abs(p.date_paiement - m.date_operation) <= 10
+           WHERE p.mouvement_id IS NULL AND p.mode IS DISTINCT FROM 'depot' AND abs(p.date_paiement - m.date_operation) <= 10
            GROUP BY s.id, lo.nom, lt.code
            HAVING count(*) > 1 AND sum(p.loyer + p.provision + p.regularisation) = m.montant
          ) g))
@@ -149,7 +149,7 @@ const MOUVEMENT_FROM = `mouvement m
                                            'mois', p.mois::text, 'date', p.date_paiement::text))
          FROM paiement p JOIN sejour s ON s.id = p.sejour_id JOIN lot lt ON lt.id = s.lot_id
          JOIN locataire lo ON lo.id = s.locataire_id
-         WHERE p.mouvement_id IS NULL AND p.loyer + p.provision + p.regularisation = m.montant
+         WHERE p.mouvement_id IS NULL AND p.mode IS DISTINCT FROM 'depot' AND p.loyer + p.provision + p.regularisation = m.montant
            AND abs(p.date_paiement - m.date_operation) <= 10))
       END AS possibles
   ) l ON true`
@@ -378,10 +378,14 @@ const releveRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async
       if (raw.paiement_ids !== undefined || raw.paiement_id) {
         // One payment, or several at once (a transfer of several months)
         const ids = Array.isArray(raw.paiement_ids) ? raw.paiement_ids.map((x) => requiredId(x, 'Paiement')) : [requiredId(raw.paiement_id, 'Paiement')]
-        const { rows } = await db.query<{ id: number, mouvement_id: number | null, total: string }>(
-          'SELECT id, mouvement_id, (loyer + provision + regularisation)::text AS total FROM paiement WHERE id = ANY($1)', [ids])
+        const { rows } = await db.query<{ id: number, mouvement_id: number | null, total: string, mode: string | null }>(
+          'SELECT id, mouvement_id, (loyer + provision + regularisation)::text AS total, mode FROM paiement WHERE id = ANY($1)', [ids])
         if (rows.length !== ids.length) {
           return reply.code(404).send({ message: 'Paiement introuvable' })
+        }
+        // A retention on the deposit (ADR 0021) is seen on no statement
+        if (rows.some((p) => p.mode === 'depot')) {
+          throw new InputError('Une retenue sur le dépôt de garantie ne passe pas par la banque')
         }
         if (rows.some((p) => p.mouvement_id !== null && p.mouvement_id !== id)) {
           throw new InputError('Un de ces paiements est déjà rattaché à un autre mouvement')

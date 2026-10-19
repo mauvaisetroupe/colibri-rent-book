@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import Big from 'big.js'
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 
 import {
-  api, MODES_PAIEMENT, type Echeance, type Paiement, type Regularisation, type Sejour,
+  api, estRetenue, NOMS_MODES, type Echeance, type Paiement, type Regularisation, type Sejour,
 } from '../api'
 import FormulairePaiement, { type Brouillon, enregistrerBrouillon } from '../components/FormulairePaiement.vue'
 import { dateFr, euros, exerciceCourt, nombreFr } from '../format'
@@ -12,7 +12,8 @@ import { useImmeuble } from '../immeuble'
 
 // Payments received (ADR 0008), one row per payment (a bank transfer, a cheque), entered in a modal form: amount
 // received split into rent, provision and regularisation. The provisions of a year are the sum of its
-// monthly payments; a regularisation is settled when its payments reach its balance (computed, ADR 0010).
+// monthly payments; a regularisation is settled when its payments reach its balance (computed, ADR 0010). A retention on
+// the deposit (ADR 0021) is shown, locked: it is changed from the deposit of the stay (Locataires).
 
 const { immeubleId, pret } = useImmeuble()
 const message = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
@@ -71,7 +72,8 @@ const affiches = computed(() =>
     .filter((p) => filtreSejour.value === '' || p.sejour_id === filtreSejour.value)
     .filter((p) => filtreType.value === ''
       || (filtreType.value === 'loyers' ? p.mois !== null : p.regularisation_id !== null))
-    .filter((p) => filtreBanque.value === '' || (filtreBanque.value === 'rapproches') === Boolean(p.mouvement_id))
+    // A retention on the deposit is never at the bank: neither seen there nor missing from it
+    .filter((p) => filtreBanque.value === '' || (!estRetenue(p) && (filtreBanque.value === 'rapproches') === Boolean(p.mouvement_id)))
     .sort((x, y) => y.date_paiement.localeCompare(x.date_paiement) || y.id - x.id),
 )
 
@@ -101,7 +103,13 @@ function ouvrir(b: Brouillon) {
   erreurFormulaire.value = null
 }
 
+const router = useRouter()
+
 function modifier(p: Paiement) {
+  if (estRetenue(p)) {
+    router.push({ path: '/sejours', query: { depot: 'voir', sejour: p.sejour_id } })
+    return
+  }
   ouvrir({
     id: p.id, date: p.date_paiement, sejour_id: p.sejour_id, mois: p.mois?.slice(0, 7) ?? '',
     montant: nombreFr(new Big(total(p)).toFixed(2)), loyer: nombreFr(p.loyer), provision: nombreFr(p.provision),
@@ -196,6 +204,7 @@ async function supprimer(id: number) {
           <td @click.stop>
             <RouterLink v-if="p.mouvement_id" :to="{ name: 'banque', query: { mouvement: p.mouvement_id } }" class="ok"
               title="Vu sur un relevé de la banque : ouvrir le mouvement">✓</RouterLink>
+            <span v-else-if="estRetenue(p)" class="oi oi-lock discret" title="Retenue sur le dépôt de garantie : à modifier depuis le dépôt du séjour (Locataires)" />
           </td>
           <td class="nombre">{{ p.mois ? euros(p.loyer) : '' }}</td>
           <td class="nombre">{{ p.mois ? euros(p.provision) : '' }}</td>
@@ -204,7 +213,7 @@ async function supprimer(id: number) {
               {{ euros(p.regularisation) }} <span class="discret">({{ exercice(p.regularisation_id) }})</span>
             </template>
           </td>
-          <td>{{ p.mode ? MODES_PAIEMENT[p.mode] : '' }}</td>
+          <td>{{ p.mode ? NOMS_MODES[p.mode] : '' }}</td>
           <td class="discret note" :title="p.note ?? ''">{{ p.note }}</td>
         </tr>
       </tbody>

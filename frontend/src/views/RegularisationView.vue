@@ -4,7 +4,7 @@ import { computed, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import {
-  api, DECISIONS_REGULARISATION, libelleRegularisation, MODES_PAIEMENT, type Decompte, type Paiement, type Regularisation,
+  api, DECISIONS_REGULARISATION, libelleRegularisation, NOMS_MODES, type Decompte, type Paiement, type Regularisation,
 } from '../api'
 import RedactionMail from '../components/RedactionMail.vue'
 import { dateFr, euros } from '../format'
@@ -288,7 +288,7 @@ async function supprimer() {
             <tr v-for="v in versements" :key="v.id" class="sans-clic">
               <td>{{ dateFr(v.date_paiement) }}</td>
               <td class="nombre">{{ euros(v.regularisation) }}</td>
-              <td>{{ v.mode ? MODES_PAIEMENT[v.mode] : '' }}</td>
+              <td>{{ v.mode ? NOMS_MODES[v.mode] : '' }}</td>
               <td class="discret">
                 {{ v.note }}<template v-if="v.regularisation_id !== r.id"> (versé sur la régularisation remplacée)</template>
               </td>

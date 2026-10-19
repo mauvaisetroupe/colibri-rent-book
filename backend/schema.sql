@@ -55,8 +55,8 @@ CREATE TABLE sejour (
   locataire_id int  NOT NULL REFERENCES locataire(id),
   periode      daterange NOT NULL CHECK (NOT isempty(periode) AND lower(periode) IS NOT NULL),
   note         text,
-  depot_garantie        numeric(12,2),        -- dépôt de garantie prévu au bail (ADR 0008) ; versé : versement_depot
-  depot_retenu_charges  numeric(12,2),        -- part conservée au départ pour des charges impayées (SPEC § 9)
+  -- dépôt de garantie prévu au bail (ADR 0008) ; versé, rendu : versement_depot ; conservé : paiements « depot » (ADR 0021)
+  depot_garantie        numeric(12,2),
   -- deux séjours ne peuvent pas se chevaucher sur le même lot
   EXCLUDE USING gist (lot_id WITH =, periode WITH &&)
 );
@@ -224,11 +224,14 @@ CREATE TABLE paiement (
   provision          numeric(12,2) NOT NULL DEFAULT 0,                         -- provision sur charges
   regularisation_id  int REFERENCES regularisation(id),
   regularisation     numeric(12,2) NOT NULL DEFAULT 0,
-  mode               text CHECK (mode IN ('virement', 'prelevement', 'cheque', 'especes', 'autre')),
+  -- « depot » : retenue sur le dépôt de garantie (ADR 0021), jamais rattachée à un mouvement bancaire
+  mode               text CONSTRAINT paiement_mode_check
+                       CHECK (mode IN ('virement', 'prelevement', 'cheque', 'especes', 'autre', 'depot')),
   note               text,
   mouvement_id       int REFERENCES mouvement(id) ON DELETE SET NULL,   -- mouvement du relevé bancaire (ADR 0018)
   CHECK (mois IS NOT NULL OR (loyer = 0 AND provision = 0)),
-  CHECK (regularisation_id IS NOT NULL OR regularisation = 0)
+  CHECK (regularisation_id IS NOT NULL OR regularisation = 0),
+  CONSTRAINT paiement_depot_sans_mouvement CHECK (mode IS DISTINCT FROM 'depot' OR mouvement_id IS NULL)
 );
 CREATE INDEX ON paiement (sejour_id, mois);
 CREATE INDEX ON paiement (regularisation_id);

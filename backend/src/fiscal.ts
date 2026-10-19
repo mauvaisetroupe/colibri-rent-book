@@ -18,7 +18,8 @@ export type Depart = {
   charges: string
   provisions: string
   versements: string
-  // charges − provisions − regularisation payments received by the 31/12 of the year of departure
+  // charges − provisions − regularisation payments received by the 31/12 of the year of departure; the deposit kept
+  // (retention, depot_retenu) is not one of them: it is a receipt of its own (SPEC § 9)
   non_rembourse: string
   // Deductible part (positive amount not repaid)
   deductible: string
@@ -68,7 +69,8 @@ export async function syntheseFiscale(db: Pool, immeuble: number, annee: number)
     sejour_id: number, locataire: string, lot: string, entree: string, sortie: string, depot_retenu: string | null,
   }>(
     `SELECT s.id AS sejour_id, lo.nom AS locataire, lt.code AS lot, ${inclusiveBounds('s.periode', 'entree', 'sortie')},
-            s.depot_retenu_charges::text AS depot_retenu
+            -- Deposit kept for charges (ADR 0021): the retention toward regularisations
+            (SELECT sum(p.regularisation)::text FROM paiement p WHERE p.sejour_id = s.id AND p.mode = 'depot') AS depot_retenu
      FROM sejour s JOIN lot lt ON lt.id = s.lot_id JOIN locataire lo ON lo.id = s.locataire_id
      WHERE lt.immeuble_id = $1 AND NOT upper_inf(s.periode)
        AND (upper(s.periode) - 1) BETWEEN $2::date AND $3::date
@@ -83,7 +85,7 @@ export async function syntheseFiscale(db: Pool, immeuble: number, annee: number)
     const row = sejours.find((r) => r.sejour_id === s.sejour_id)
     const { rows: [paye] } = await db.query<{ montant: string }>(
       `SELECT coalesce(sum(regularisation), 0)::text AS montant FROM paiement
-       WHERE sejour_id = $1 AND date_paiement <= $2::date`,
+       WHERE sejour_id = $1 AND date_paiement <= $2::date AND mode IS DISTINCT FROM 'depot'`,
       [s.sejour_id, fin],
     )
     const charges = row?.total ?? '0'

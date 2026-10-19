@@ -17,7 +17,6 @@ export type FicheSaisie = {
   entree: string
   sortie: string
   depot_garantie: string
-  depot_retenu_charges: string
   note_sejour: string
   // History of the amounts called, oldest first
   echeances: LigneEcheance[]
@@ -115,8 +114,8 @@ function choisirLocataire() {
           <label>Sortie (vide si en cours) <input v-model="f.sortie" type="date"></label>
         </div>
         <div class="rangee">
-          <label>Dépôt de garantie <input v-model="f.depot_garantie" class="nombre" size="9"></label>
-          <label>Conservé au départ pour charges <input v-model="f.depot_retenu_charges" class="nombre" size="9"></label>
+          <!-- Paid, refunded, kept: the « Dépôt » button of the list (ADR 0021) -->
+          <label>Dépôt de garantie prévu au bail <input v-model="f.depot_garantie" class="nombre" size="9"></label>
         </div>
         <div class="rangee">
           <label class="large">Note du séjour <input v-model="f.note_sejour"></label>

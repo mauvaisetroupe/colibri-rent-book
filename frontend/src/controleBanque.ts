@@ -1,4 +1,4 @@
-import type { Mouvement, Paiement, ReleveResume } from './api'
+import { estRetenue, type Mouvement, type Paiement, type ReleveResume } from './api'
 
 // State of the bank over an exercise (ADR 0018), for the checks and the home: statements missing (a gap between two
 // statements of an account, or none for the last weeks of the exercise), movements not categorised or whose detail is
@@ -37,7 +37,8 @@ export function etatBanque(releves: ReleveResume[], mouvements: Mouvement[], pai
   const finManquante = comptes.length && dernier! < plusJours(attendu, -31) && attendu >= debut ? dernier : null
 
   const surExercice = mouvements.filter((m) => m.date_operation >= debut && m.date_operation <= fin)
-  const sansMouvement = premier === null ? [] : paiements.filter((p) => !p.mouvement_id && p.date_paiement >= debut
+  // A retention on the deposit (ADR 0021) is seen on no statement
+  const sansMouvement = premier === null ? [] : paiements.filter((p) => !p.mouvement_id && !estRetenue(p) && p.date_paiement >= debut
     && p.date_paiement <= fin && p.date_paiement >= premier && p.date_paiement <= dernier!)
   return {
     comptes,

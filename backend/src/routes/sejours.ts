@@ -12,9 +12,16 @@ import { inclusiveBounds, inclusiveRange } from '../periods.js'
 
 const SEJOUR_COLUMNS = `
   s.id, s.lot_id, lt.code AS lot, s.locataire_id, lo.nom AS locataire, ${inclusiveBounds('s.periode', 'entree', 'sortie')},
-  s.note, s.depot_garantie::text, s.depot_retenu_charges::text,
-  -- Deposit held (ADR 0019): paid minus refunded; null without any payment recorded
-  (SELECT sum(vd.montant)::text FROM versement_depot vd WHERE vd.sejour_id = s.id) AS depot_detenu`
+  s.note, s.depot_garantie::text,
+  -- Deposit kept (ADR 0021): the retention, payments « depot » toward months or regularisations; null without any
+  (SELECT sum(p.loyer + p.provision + p.regularisation)::text FROM paiement p
+   WHERE p.sejour_id = s.id AND p.mode = 'depot') AS depot_retenu,
+  -- Deposit held (ADR 0019, 0021): paid minus refunded minus kept; null without any deposit or retention recorded
+  (SELECT sum(x)::text FROM (
+     SELECT vd.montant AS x FROM versement_depot vd WHERE vd.sejour_id = s.id
+     UNION ALL
+     SELECT -(p.loyer + p.provision + p.regularisation) FROM paiement p WHERE p.sejour_id = s.id AND p.mode = 'depot') d
+  ) AS depot_detenu`
 
 const SEJOUR_FROM = 'sejour s JOIN lot lt ON lt.id = s.lot_id JOIN locataire lo ON lo.id = s.locataire_id'
 
@@ -31,7 +38,6 @@ function readSejour(raw: Record<string, unknown>) {
     sortie,
     note: optionalText(raw.note),
     depot_garantie: optionalDecimal(raw.depot_garantie, 'Dépôt de garantie'),
-    depot_retenu_charges: optionalDecimal(raw.depot_retenu_charges, 'Dépôt conservé pour charges'),
   }
 }
 
@@ -149,9 +155,9 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
     try {
       const s = readSejour(body(request))
       const { rows: [created] } = await db.query<{ id: number }>(
-        `INSERT INTO sejour (lot_id, locataire_id, periode, note, depot_garantie, depot_retenu_charges)
-         VALUES ($1, $2, ${inclusiveRange('$3', '$4')}, $5, $6, $7) RETURNING id`,
-        [s.lot_id, s.locataire_id, s.entree, s.sortie, s.note, s.depot_garantie, s.depot_retenu_charges],
+        `INSERT INTO sejour (lot_id, locataire_id, periode, note, depot_garantie)
+         VALUES ($1, $2, ${inclusiveRange('$3', '$4')}, $5, $6) RETURNING id`,
+        [s.lot_id, s.locataire_id, s.entree, s.sortie, s.note, s.depot_garantie],
       )
       return reply.code(201).send(await loadSejour(created!.id))
     } catch (error) {
@@ -164,9 +170,9 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
       const s = readSejour(body(request))
       const { rowCount } = await db.query(
         `UPDATE sejour SET lot_id = $2, locataire_id = $3, periode = ${inclusiveRange('$4', '$5')}, note = $6,
-           depot_garantie = $7, depot_retenu_charges = $8
+           depot_garantie = $7
          WHERE id = $1`,
-        [idParam(request), s.lot_id, s.locataire_id, s.entree, s.sortie, s.note, s.depot_garantie, s.depot_retenu_charges],
+        [idParam(request), s.lot_id, s.locataire_id, s.entree, s.sortie, s.note, s.depot_garantie],
       )
       return rowCount ? loadSejour(idParam(request)) : reply.code(404).send({ message: 'Séjour introuvable' })
     } catch (error) {

@@ -1,15 +1,20 @@
 <script setup lang="ts">
 import Big from 'big.js'
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import { api, type Echeance, type ImmeubleDetail, type Locataire, type Sejour } from '../api'
+import FenetreDepot, { type DepotPrerempli } from '../components/FenetreDepot.vue'
 import FormulaireLocataire, { type FicheSaisie, type LigneEcheance } from '../components/FormulaireLocataire.vue'
 import Frise, { type Piste } from '../components/Frise.vue'
 import { dateFr, euros, nombreApi, nombreFr } from '../format'
 import { useImmeuble } from '../immeuble'
 
 // Tenants (SPEC § 7): one row per stay with its tenant's details, edited together in a modal form. A timeline per lot
-// shows the vacancy as gaps; overlapping stays on a lot are refused by the database constraint.
+// shows the vacancy as gaps; overlapping stays on a lot are refused by the database constraint. The deposit of a stay
+// (paid, refunded, kept) has its own window (FenetreDepot, ADR 0021), opened from the list or from the bank
+// (?depot=recu|restitution&sejour=…&mouvement=…&montant=…&date=…, the stay chosen here when the label named nobody;
+// ?depot=voir&sejour=…).
 
 const { immeubleId, pret } = useImmeuble()
 const immeuble = ref<ImmeubleDetail | null>(null)
@@ -27,9 +32,30 @@ async function charger() {
   ])
 }
 
+const route = useRoute()
+const router = useRouter()
+
 onMounted(async () => {
   await pret
   await charger().catch((e) => { message.value = { texte: e.message, type: 'erreur' } })
+  // From the bank: the deposit window of the stay, the transfer prefilled
+  const q = route.query
+  const s = sejours.value.find((x) => x.id === Number(q.sejour))
+  if (q.depot === 'recu' || q.depot === 'restitution') {
+    const prerempli: DepotPrerempli = { sens: q.depot, date: String(q.date), montant: String(q.montant), mouvement_id: Number(q.mouvement) }
+    if (s) {
+      depot.value = { sejour: s, prerempli }
+    } else {
+      // Nobody named in the label: the stay is chosen with its « Dépôt… » button
+      enAttente.value = prerempli
+      avecAnciens.value = true
+    }
+  } else if (q.depot === 'voir' && s) {
+    depot.value = { sejour: s, prerempli: null }
+  }
+  if (q.depot) {
+    router.replace({ query: {} })
+  }
 })
 watch(immeubleId, charger)
 
@@ -71,6 +97,15 @@ const depotEcart = (s: Sejour) => s.sortie === null && s.depot_detenu !== null &
 
 const locataireDe = (s: Sejour) => locataires.value.find((l) => l.id === s.locataire_id)
 
+// The deposit window of a stay; a transfer from the bank waiting for its stay to be chosen
+const depot = ref<{ sejour: Sejour, prerempli: DepotPrerempli | null } | null>(null)
+const enAttente = ref<DepotPrerempli | null>(null)
+
+function ouvrirDepot(s: Sejour) {
+  depot.value = { sejour: s, prerempli: enAttente.value }
+  enAttente.value = null
+}
+
 // ---------------------------------------------------------------- modal form
 
 const fiche = ref<FicheSaisie | null>(null)
@@ -84,7 +119,7 @@ function ouvrir(f: FicheSaisie) {
 
 const nouvelleFiche = () => ouvrir({
   sejour_id: null, locataire_id: null, nom: '', email: '', telephone: '', note_locataire: '', lot_id: null, entree: '',
-  sortie: '', depot_garantie: '', depot_retenu_charges: '', note_sejour: '',
+  sortie: '', depot_garantie: '', note_sejour: '',
   echeances: [{ id: null, mois: '', loyer: '', provision: '', note: '' }],
 })
 
@@ -101,7 +136,7 @@ function modifier(s: Sejour) {
   ouvrir({
     sejour_id: s.id, locataire_id: s.locataire_id, nom: s.locataire, email: l?.email ?? '', telephone: l?.telephone ?? '',
     note_locataire: l?.note ?? '', lot_id: s.lot_id, entree: s.entree, sortie: s.sortie ?? '',
-    depot_garantie: nombreFr(s.depot_garantie), depot_retenu_charges: nombreFr(s.depot_retenu_charges),
+    depot_garantie: nombreFr(s.depot_garantie),
     note_sejour: s.note ?? '',
     echeances: echeancesDe(s),
   })
@@ -137,7 +172,7 @@ async function enregistrer() {
     note: f.note_locataire.trim() || null }
   const sejour = {
     lot_id: f.lot_id!, entree: f.entree, sortie: f.sortie || null, note: f.note_sejour.trim() || null,
-    depot_garantie: nombreApi(f.depot_garantie), depot_retenu_charges: nombreApi(f.depot_retenu_charges),
+    depot_garantie: nombreApi(f.depot_garantie),
   }
   occupe.value = true
   let cree: number | null = null
@@ -203,6 +238,11 @@ async function supprimer() {
     <button type="button" class="principal" @click="nouvelleFiche">+ Nouveau locataire</button>
   </section>
   <p v-if="message" class="message" :class="message.type">{{ message.texte }}</p>
+  <p v-if="enAttente" class="message avertissement">
+    Virement du {{ dateFr(enAttente.date) }} de {{ euros(enAttente.montant) }} : cliquer « Dépôt… » sur le séjour
+    concerné pour y saisir le dépôt {{ enAttente.sens === 'recu' ? 'reçu' : 'restitué' }}.
+    <button type="button" @click="enAttente = null">Abandonner</button>
+  </p>
 
   <Frise v-if="immeuble" :debut="fenetre.debut" :fin="fenetre.fin" :pistes="pistes" />
   <p class="discret">
@@ -229,11 +269,12 @@ async function supprimer() {
         <td>{{ s.sortie ? dateFr(s.sortie) : 'en cours' }}</td>
         <td class="nombre">
           {{ euros(s.depot_garantie) }}
-          <!-- Held (ADR 0019): paid minus refunded, from the deposits recorded (bank screen) -->
+          <!-- Held (ADR 0019, 0021): paid minus refunded minus kept -->
           <div v-if="s.depot_detenu !== null" :class="depotEcart(s) ? 'alerte' : 'discret'">
-            {{ Number(s.depot_detenu) === 0 ? 'remboursé' : `détenu ${euros(s.depot_detenu)}` }}
+            {{ Number(s.depot_detenu) === 0 ? (s.depot_retenu ? 'soldé' : 'remboursé') : `détenu ${euros(s.depot_detenu)}` }}
           </div>
-          <div v-if="s.depot_retenu_charges" class="discret">dont {{ euros(s.depot_retenu_charges) }} conservés pour charges</div>
+          <div v-if="s.depot_retenu" class="discret">dont {{ euros(s.depot_retenu) }} retenus</div>
+          <button type="button" class="petit" :class="{ principal: enAttente }" @click.stop="ouvrirDepot(s)">Dépôt…</button>
         </td>
         <td class="nombre">
           <template v-if="appelActuel(s)">
@@ -260,6 +301,16 @@ async function supprimer() {
     @fermer="fiche = null"
     @supprimer="supprimer"
   />
+
+  <FenetreDepot
+    v-if="depot && immeubleId !== null"
+    :sejour="depot.sejour"
+    :immeuble="immeubleId"
+    :echeances="echeances"
+    :prerempli="depot.prerempli"
+    @modifie="charger"
+    @fermer="depot = null"
+  />
 </template>
 
 <style scoped>
@@ -272,5 +323,10 @@ async function supprimer() {
 
 .ancien td {
   color: var(--discret);
+}
+
+.petit {
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
 }
 </style>
