@@ -428,7 +428,7 @@ export type Mouvement = {
   // Credit positive, debit negative
   montant: string
   categorie: CategorieMouvement | null
-  // Required for « autre »; for a tenant payment or works, justifies the rest the detail does not cover
+  // Required for « autre »; otherwise a comment (it never completes a detail)
   note: string | null
   compte: string
   date_releve: string

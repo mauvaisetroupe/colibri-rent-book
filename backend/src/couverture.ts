@@ -6,7 +6,7 @@ import { InputError } from './http.js'
 
 // What the detail of a bank movement covers (ADR 0018, 0019): the payments of tenants (a refund is negative), the
 // payments of works invoices, the deposits paid or refunded. Linked on their side (mouvement_id); together they never
-// exceed the amount of the movement, the rest is justified by its note.
+// exceed the amount of the movement; until they cover it, the movement is « incomplet ».
 
 export type Detail = 'paiement' | 'reglement_travaux' | 'versement_depot'
 

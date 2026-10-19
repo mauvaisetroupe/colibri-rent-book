@@ -138,9 +138,9 @@ describe('bank statements', { skip: skipWithoutDatabase }, () => {
 
     await app.inject({ method: 'DELETE', url: `/api/paiements/${p1.json().id}` })
     assert.equal((await mouvement(credit.id)).statut, 'incomplet')
-    // The rest justified by a note (a deposit paid with the rent): categorised
-    const justifie = await app.inject({ method: 'PUT', url: `/api/mouvements/${credit.id}/categorie`, payload: { categorie: 'locataire', note: 'Dépôt de garantie' } })
-    assert.deepEqual([justifie.json().statut, justifie.json().note], ['categorise', 'Dépôt de garantie'])
+    // A note does not complete it: only a detail that covers the amount does
+    const note = await app.inject({ method: 'PUT', url: `/api/mouvements/${credit.id}/categorie`, payload: { categorie: 'locataire', note: 'Dépôt de garantie' } })
+    assert.deepEqual([note.json().statut, note.json().note], ['incomplet', 'Dépôt de garantie'])
     await app.inject({ method: 'PUT', url: `/api/mouvements/${credit.id}/categorie`, payload: { categorie: 'locataire' } })
   })
 

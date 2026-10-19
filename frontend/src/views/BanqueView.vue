@@ -30,9 +30,9 @@ import { categoriePropose, proposer } from '../rapprochement'
 // Categorisation of the bank movements (ADR 0018; the statements are imported in RelevesView): each movement gets a
 // category (proposed from its label or the tenant named in it); a tenant payment, works and a deposit have a detail
 // (ADR 0019), unfolded under the movement: the payments, works payments or deposits linked to it, added in the same
-// forms as the Paiements and Travaux screens, linked when typed before, changed or deleted there; a note justifies a
-// rest. Two tabs: to categorise, and
-// categorised (those whose detail does not cover the amount first, « à compléter »).
+// forms as the Paiements and Travaux screens, linked when typed before, changed or deleted there. Two tabs: to
+// categorise, and categorised (those whose detail does not cover the amount first, « à compléter »; a note does not
+// complete them).
 
 type Onglet = 'a_categoriser' | 'categorises'
 
@@ -174,7 +174,7 @@ async function agir(action: () => Promise<unknown>, succes: string) {
   }
 }
 
-// A category with a note to type (« autre »), or the rest of a tenant payment or works to justify
+// A category with a note to type (« autre »), or the note of a categorised movement
 const saisieNote = ref<{ mouvement: Mouvement, categorie: CategorieMouvement, note: string, titre: string } | null>(null)
 
 function categoriser(m: Mouvement, categorie: CategorieMouvement) {
@@ -394,7 +394,7 @@ const alertes = computed(() => {
   if (c.montant !== null && !new Big(c.montant).eq(resteMouvement)) {
     liste.push(new Big(c.montant).gt(resteMouvement)
       ? `${euros(c.montant)} pour un reste de ${euros(resteMouvement.toString())} : ce virement n'en paie qu'une partie (acompte) ?`
-      : `${euros(c.montant)} sur un reste de ${euros(resteMouvement.toString())} : le reste sera à rattacher ou justifier`)
+      : `${euros(c.montant)} sur un reste de ${euros(resteMouvement.toString())} : le reste sera à rattacher`)
   }
   const jours = ecartJours(r.mouvement, c.date)
   if (jours !== null && jours > 31) {
@@ -414,15 +414,6 @@ function rattacher() {
 
 const detacher = (m: Mouvement, l: { paiement_id: number } | { reglement_id: number } | { depot_id: number }) =>
   agir(() => api.delierMouvement(m.id, l), 'Détaché (gardé dans son écran)')
-
-function justifier(m: Mouvement) {
-  const depot = /CAUTION|DEPOT|GARANTIE/i.test(`${m.libelle} ${m.detail ?? ''}`)
-  saisieNote.value = {
-    mouvement: m, categorie: m.categorie!, note: m.note ?? (depot ? 'Dépôt de garantie' : ''),
-    titre: `Justifier le reste de ${euros(reste(m))}`,
-  }
-}
-const retirerJustification = (m: Mouvement) => agir(() => api.categoriserMouvement(m.id, m.categorie!, null), 'Justification retirée')
 
 // ---------------------------------------------------------------- forms (the same as the Paiements and Travaux screens)
 
@@ -458,7 +449,6 @@ function nouveauPaiement(m: Mouvement) {
       // The rest of the transfer not split: a deposit when the label says so, or with the first rent of the stay
       resteDepot: /CAUTION|DEPOT|GARANTIE/i.test(`${m.libelle} ${m.detail ?? ''}`)
         || Boolean(p.sejour && ecartJours(m, p.sejour.entree)! <= 31),
-      justification: m.note ?? '',
     },
   }
   erreurFormulaire.value = dejaPaye
@@ -473,7 +463,7 @@ function modifierPaiement(m: Mouvement, p: Paiement) {
       id: p.id, date: p.date_paiement, sejour_id: p.sejour_id, mois: p.mois?.slice(0, 7) ?? '',
       montant: nombreFr(new Big(totalPaiement(p)).toFixed(2)), loyer: nombreFr(p.loyer), provision: nombreFr(p.provision),
       versements: p.regularisation_id ? [{ regularisation_id: p.regularisation_id, montant: nombreFr(p.regularisation) }] : [],
-      mode: p.mode ?? '', note: p.note ?? '', justification: m.note ?? '',
+      mode: p.mode ?? '', note: p.note ?? '',
     },
   }
   erreurFormulaire.value = null
@@ -489,15 +479,11 @@ async function enregistrerPaiement(suivant: boolean) {
   occupe.value = true
   try {
     await enregistrerBrouillon(b, f.mouvement.id)
-    if (!nonReparti.eq(0) && nonReparti.gt(0) === recu.gt(0)) {
-      if (b.resteDepot) {
-        // A deposit paid with the rent (or refunded with the last month)
-        await api.creerDepot({
-          sejour_id: b.sejour_id!, date_versement: b.date, montant: nonReparti.toString(), note: null, mouvement_id: f.mouvement.id,
-        })
-      } else if (b.justification?.trim()) {
-        await api.categoriserMouvement(f.mouvement.id, 'locataire', b.justification.trim())
-      }
+    // A deposit paid with the rent (or refunded with the last month)
+    if (b.resteDepot && !nonReparti.eq(0) && nonReparti.gt(0) === recu.gt(0)) {
+      await api.creerDepot({
+        sejour_id: b.sejour_id!, date_versement: b.date, montant: nonReparti.toString(), note: null, mouvement_id: f.mouvement.id,
+      })
     }
     await recharger()
     const m = mouvements.value.find((x) => x.id === f.mouvement.id)!
@@ -792,11 +778,7 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
           <template v-if="aDetail(data)">
             <p class="resume">
               {{ estCredit(data) ? 'Virement reçu' : 'Débit' }} de {{ euros(data.montant) }} · rapproché {{ euros(data.couvert) }}
-              · <strong :class="Number(reste(data)) > 0 && !data.note ? 'ko' : 'ok'">reste {{ euros(reste(data)) }}</strong>
-              <template v-if="data.note">
-                · justifié : {{ data.note }}
-                <Button label="Retirer" size="small" text :disabled="occupe" @click="retirerJustification(data)" />
-              </template>
+              · <strong :class="Number(reste(data)) > 0 ? 'ko' : 'ok'">reste {{ euros(reste(data)) }}</strong>
             </p>
             <ul class="liens">
               <li v-for="p in paiementsDe(data)" :key="`p${p.id}`">
@@ -851,10 +833,6 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
                 :severity="correspondances(data) ? 'success' : undefined" :disabled="occupe || Number(reste(data)) <= 0"
                 @click="ouvrirRattachement(data)"
               />
-              <Button
-                v-if="Number(reste(data)) > 0 && !data.note" label="Justifier le reste…" icon="oi oi-comment" size="small"
-                severity="secondary" outlined :disabled="occupe" @click="justifier(data)"
-              />
             </div>
             <form v-if="rattachement && rattachement.mouvement.id === data.id" class="formulaire" @submit.prevent="rattacher">
               <label v-if="rattachement.choix.length">{{ NOMS_SAISIS[data.categorie] }}
@@ -878,7 +856,7 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
     </DataTable>
   </template>
 
-  <!-- A note: « autre », or the rest justified (modal, in the middle of the screen) -->
+  <!-- A note: « autre », or the note of a movement (modal, in the middle of the screen) -->
   <Dialog
     :visible="saisieNote !== null" modal :header="saisieNote?.titre" :style="{ width: '34rem' }"
     @update:visible="(v: boolean) => { if (!v) saisieNote = null }"

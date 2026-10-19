@@ -6,7 +6,7 @@ import { nombreApi } from '../format'
 
 // One payment received (new or edited), in a modal form: the amount of the bank statement, split into rent,
 // provision and regularisations; the split must add up to the amount (checked again by the API). Opened from a bank
-// movement, a rest may be left, justified by a note (a deposit paid with the rent…) that goes on the movement.
+// movement, a rest may be left: a deposit paid with the rent, or left to link (the movement stays « à compléter »).
 
 // Toward one regularisation; negative: refund paid by the owner
 export type Versement = { regularisation_id: number, montant: string }
@@ -25,9 +25,8 @@ export type Brouillon = {
   mode: ModePaiement | ''
   note: string
   // Opened from a bank movement: the rest of the transfer not split here is a deposit (recorded as such, ADR 0019),
-  // or is justified by this note on the movement
+  // or is left to link
   resteDepot?: boolean
-  justification?: string
 }
 
 const zero = (texte: string) => (nombreApi(texte) ?? '0') === '0'
@@ -130,16 +129,14 @@ const repartition = computed(() => {
   if (ecart.eq(0)) {
     return { ok: true, texte: `✓ ${euros(total.toString())} répartis sur ${euros(montant)} reçus` }
   }
-  // From a bank movement, less than received: the rest is a deposit, or justified on the movement
+  // From a bank movement, less than received: the rest is a deposit, or left to link (the movement stays to complete)
   if (props.mouvement && ecart.gt(0) && !total.eq(0)) {
-    const texte = b.value.resteDepot ? 'enregistré comme dépôt de garantie' : 'justifié sur le mouvement'
-    return b.value.resteDepot || (b.value.justification ?? '').trim()
-      ? { ok: true, texte: `✓ ${euros(total.toString())} répartis, reste de ${euros(ecart.toString())} ${texte}`, reste: ecart }
-      : { ok: false, texte: `Reste ${euros(ecart.toString())} non réparti : dire ce qu'il est ci-dessous, ou le répartir`, reste: ecart }
+    const texte = b.value.resteDepot ? 'enregistré comme dépôt de garantie' : 'à rattacher : le mouvement reste à compléter'
+    return { ok: true, texte: `✓ ${euros(total.toString())} répartis, reste de ${euros(ecart.toString())} ${texte}`, reste: ecart }
   }
   return { ok: false, texte: `✗ Réparti ${euros(total.toString())} sur ${euros(montant)} reçus : écart de ${euros(ecart.toString())}` }
 })
-const resteAJustifier = computed(() => ('reste' in repartition.value ? repartition.value.reste : null))
+const resteNonReparti = computed(() => ('reste' in repartition.value ? repartition.value.reste : null))
 
 const pret = computed(() => repartition.value.ok && b.value.sejour_id !== null && Boolean(b.value.date))
 
@@ -268,15 +265,12 @@ function changerDate(event: Event) {
 
       <label class="large">Note du paiement <input v-model="b.note"></label>
 
-      <div v-if="mouvement && resteAJustifier" class="justification">
-        <strong>Reste de {{ euros(resteAJustifier.toString()) }}</strong>
+      <div v-if="mouvement && resteNonReparti" class="reste">
+        <strong>Reste de {{ euros(resteNonReparti.toString()) }}</strong>
         <label class="choix">
           <input v-model="b.resteDepot" type="checkbox">
           C'est le dépôt de garantie {{ Number(b.montant.replace(',', '.')) < 0 ? 'remboursé au' : 'versé par le' }} locataire
           (enregistré comme tel, visible dans sa fiche)
-        </label>
-        <label v-if="!b.resteDepot" class="large">Sinon, ce qui le justifie (note portée sur le mouvement)
-          <input v-model="b.justification" placeholder="ex. avance sur le mois suivant">
         </label>
       </div>
 
@@ -325,7 +319,7 @@ label.choix {
   margin-left: 1.6rem;
 }
 
-.justification {
+.reste {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;

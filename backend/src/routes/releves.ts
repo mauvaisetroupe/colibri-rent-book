@@ -17,8 +17,8 @@ import { isPdf, removeIfUnused, storePdf } from '../pdfStorage.js'
 // Bank statements (ADR 0018): the PDF is read in the browser by the extractor of its bank, the server checks the
 // balances and stores the statement with its movements. Each movement then gets a category (categories.ts): the payment
 // of a tenant, works and deposits have a detail (ADR 0019), linked on the other side (paiement, reglement_travaux,
-// versement_depot: mouvement_id), so deleting a payment leaves its movement « incomplet »; a note justifies a rest the
-// detail does not cover.
+// versement_depot: mouvement_id), so deleting a payment leaves its movement « incomplet »: complete only when its
+// detail covers the amount.
 
 type MouvementLu = { date_operation: string, date_valeur: string | null, libelle: string, detail: string | null, montant: string }
 type ReleveLu = {
@@ -92,9 +92,8 @@ const MOUVEMENT_COLUMNS = `
   coalesce(l.couvert, 0)::text AS couvert,
   coalesce(l.possibles, '[]'::json) AS possibles,
   CASE WHEN m.categorie IS NULL THEN 'a_categoriser'
-       -- A category with a detail that does not cover the amount, and no note to justify the rest
+       -- A category with a detail that does not cover the amount (a note does not make up for it)
        WHEN m.categorie IN (${AVEC_DETAIL.map((c) => `'${c}'`).join(', ')}) AND coalesce(l.couvert, 0) < abs(m.montant)
-            AND m.note IS NULL
          THEN 'incomplet'
        ELSE 'categorise' END AS statut`
 
@@ -331,8 +330,8 @@ const releveRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async
     return l.depots ? ['locataire', 'depot_garantie'] : null
   }
 
-  // The category of a movement, and a note (required for « autre »; for a category with a detail, it justifies the
-  // rest the detail does not cover). A movement with a detail linked stays in a category that has it.
+  // The category of a movement, and a note (required for « autre »; a comment only, it never completes a detail). A
+  // movement with a detail linked stays in a category that has it.
   app.put('/mouvements/:id/categorie', async (request, reply) => {
     const id = idParam(request)
     try {

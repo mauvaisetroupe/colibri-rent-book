@@ -313,13 +313,13 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
       <li>Onglet « Catégorisés » : un <strong>paiement de locataire</strong>, des <strong>travaux</strong> et un
         <strong>dépôt de garantie</strong> ont un détail ; la flèche ▸ le déplie. « Ajouter un paiement du locataire… »
         ouvre la fenêtre de l'écran Paiements, préremplie (locataire, mois, loyer et provision du séjour encore dus,
-        montant restant) : un reste s'y déclare dépôt de garantie, ou se justifie par une note. « Ajouter un dépôt de
+        montant restant) : un reste s'y déclare dépôt de garantie, ou reste à rattacher. « Ajouter un dépôt de
         garantie… » enregistre un dépôt versé ou remboursé (négatif), visible dans la fiche du locataire. Des travaux :
         la facture se saisit d'abord (écran Travaux), puis « Rattacher à une facture de travaux… » y accroche le virement
         (un acompte, puis le solde : deux virements pour une facture). « Rattacher… » reprend ce qui a été saisi (ce qui
-        correspond est marqué ✓ et choisi d'office, une alerte signale un montant ou une date qui diffère) ;
-        « Justifier le reste… » explique ce que le détail ne couvre pas. Ceux à compléter viennent en tête ; ✕ retire la
-        catégorie.</li>
+        correspond est marqué ✓ et choisi d'office, une alerte signale un montant ou une date qui diffère). Un mouvement
+        reste « à compléter » tant que son détail ne couvre pas son montant (une note n'y suffit pas) ; ceux-là viennent
+        en tête ; ✕ retire la catégorie.</li>
     </ol>
   </details>
 

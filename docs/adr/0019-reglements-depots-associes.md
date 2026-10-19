@@ -46,13 +46,16 @@ Le rapprochement des relevés (ADR 0018) a montré trois limites du modèle :
 - Un versement se rattache à un mouvement « paiement de locataire » (versé avec le loyer, remboursé avec le dernier
   mois) ou « dépôt de garantie » (seul), du même signe.
 - Dans la fenêtre de paiement ouverte depuis un virement, le reste non réparti se déclare **dépôt de garantie** (un
-  versement est créé) ou se justifie par une note. La case est cochée d'office quand le libellé parle de caution ou de
+  versement est créé) ou reste à rattacher. La case est cochée d'office quand le libellé parle de caution ou de
   garantie, ou quand le séjour commence moins d'un mois avant le virement.
 
 ### Catégories
 
 - `remboursement_depot` devient **`depot_garantie`** (« Dépôt de garantie », versé ou remboursé seul) et a un détail,
-  comme « locataire » et « travaux » : sans versement qui le couvre ni note, le mouvement est « à compléter ».
+  comme « locataire » et « travaux » : sans versement qui le couvre, le mouvement est « à compléter ».
+- **Une note ne complète pas un mouvement** (modifié le 2026-10-19) : un mouvement « locataire », « travaux » ou
+  « dépôt de garantie » n'est complet que si son détail (paiements, règlements, versements) couvre son montant. La
+  note reste un commentaire (obligatoire pour « autre ») ; elle ne justifie plus un reste.
 - `virement_interne` devient **`associes`** (« Associés : apports, versements ») pour tous les mouvements existants ;
   `virement_interne` reste, renommé « Virement entre comptes de la société ».
 - Le montant couvert d'un mouvement additionne paiements, règlements de travaux et versements de dépôt
@@ -64,6 +67,6 @@ Le rapprochement des relevés (ADR 0018) a montré trois limites du modèle :
   années ; modifier une facture ne touche pas à ses règlements (un montant inférieur à ce qu'ils paient est refusé).
 - Les dépôts de garantie ont un historique réel ; la fiche du locataire montre le dépôt détenu, et signale un écart
   avec le bail pour un séjour en cours.
-- Migration 016 : règlements repris des factures payées, catégories renommées. Les dépôts déjà justifiés par une note
-  restent des notes : les transformer en versements est une reprise de l'exploitation (données propres à chaque
+- Migration 016 : règlements repris des factures payées, catégories renommées. Les dépôts notés sur un mouvement
+  restent des notes (le mouvement est « à compléter ») : les transformer en versements est une reprise de l'exploitation (données propres à chaque
   propriétaire), pas de la migration ; un mouvement « dépôt de garantie » repris sans versement est « à compléter ».
