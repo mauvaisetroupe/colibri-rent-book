@@ -559,7 +559,7 @@ function versDepot(m: Mouvement) {
   } })
 }
 
-/** The deposit window of the stay of a deposit linked to the movement. */
+/** The form of the stay of a deposit linked to the movement, with its deposit. */
 const voirDepot = (sejourId: number) => router.push({ path: '/sejours', query: { depot: 'voir', sejour: sejourId } })
 
 const ONGLETS: { code: Onglet, nom: string }[] = [

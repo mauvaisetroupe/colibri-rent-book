@@ -1,9 +1,9 @@
 <script lang="ts">
-// The deposit of a stay (ADR 0021), in a modal window: what was paid and refunded (linked to their bank transfer, or to
-// none: paid to an agency, before the statements), and the retention, what is kept to cover unpaid months or
-// regularisations (payments « depot », never seen at the bank, made again as a whole here). Each action is saved at
-// once. Opened from the bank (« Dépôt de garantie… » on a transfer), a deposit received or a refund comes prefilled
-// with the transfer.
+// The deposit of a stay (ADR 0021), a block of its form (FormulaireLocataire): what was paid and refunded (linked to
+// their bank transfer, or to none: paid to an agency, before the statements), and the retention, what is kept to cover
+// unpaid months or regularisations (payments « depot », never seen at the bank, made again as a whole here). Each
+// action is saved at once, apart from the form's own « Enregistrer »: no nested form, and Enter does not submit the
+// form. Opened from the bank (« Dépôt de garantie… » on a transfer), a deposit received or a refund comes prefilled.
 
 export type DepotPrerempli = { sens: 'recu' | 'restitution', date: string, montant: string, mouvement_id: number }
 </script>
@@ -20,9 +20,8 @@ import { dusDuSejour, partageMois, type Du } from '../depot'
 import { dateFr, euros, nombreApi, nombreFr } from '../format'
 
 const props = defineProps<{ sejour: Sejour, immeuble: number, echeances: Echeance[], prerempli: DepotPrerempli | null }>()
-const emit = defineEmits<{ modifie: [], fermer: [] }>()
+const emit = defineEmits<{ modifie: [] }>()
 
-const fenetre = ref<HTMLDialogElement | null>(null)
 const versements = ref<VersementDepot[]>([])
 const paiements = ref<Paiement[]>([])
 const regularisations = ref<Regularisation[]>([])
@@ -40,7 +39,6 @@ async function charger() {
 }
 
 onMounted(async () => {
-  fenetre.value?.showModal()
   try {
     await charger()
     if (props.prerempli) {
@@ -184,10 +182,9 @@ function annulerRetenue() {
 </script>
 
 <template>
-  <dialog ref="fenetre" class="fenetre large" @cancel.prevent="emit('fermer')">
-    <h2>Dépôt de garantie · {{ sejour.locataire }} ({{ sejour.lot }})</h2>
+  <div class="bloc-depot" @keydown.enter.prevent>
     <p class="resume">
-      Prévu au bail {{ sejour.depot_garantie ? euros(sejour.depot_garantie) : '—' }} · versé {{ euros(verse.toString()) }}
+      Versé {{ euros(verse.toString()) }}
       <template v-if="retenu.gt(0)"> · retenu {{ euros(retenu.toString()) }}</template>
       · <strong>détenu {{ euros(detenu.toString()) }}</strong>
     </p>
@@ -233,11 +230,11 @@ function annulerRetenue() {
     </div>
 
     <!-- Deposit received or refunded -->
-    <form v-if="versement" class="formulaire" @submit.prevent="enregistrerVersement">
+    <div v-if="versement" class="formulaire">
       <h3>{{ versement.sens === 'recu' ? 'Dépôt reçu' : 'Restitution' }}</h3>
       <div class="rangee">
-        <label>Date <input v-model="versement.date" type="date" required></label>
-        <label>Montant <input v-model="versement.montant" class="nombre" size="9" required></label>
+        <label>Date <input v-model="versement.date" type="date"></label>
+        <label>Montant <input v-model="versement.montant" class="nombre" size="9"></label>
       </div>
       <label class="large">Virement
         <select v-model="versement.mouvement_id">
@@ -250,19 +247,19 @@ function annulerRetenue() {
       </label>
       <label class="large">Note <input v-model="versement.note"></label>
       <div class="actions">
-        <button type="submit" class="principal" :disabled="occupe">Enregistrer</button>
+        <button type="button" class="principal" :disabled="occupe || !versement.date" @click="enregistrerVersement">Enregistrer</button>
         <button type="button" @click="versement = null">Annuler</button>
       </div>
-    </form>
+    </div>
 
     <!-- Retention: what the deposit covers -->
-    <form v-if="saisieRetenue" class="formulaire" @submit.prevent="enregistrerRetenue">
+    <div v-if="saisieRetenue" class="formulaire">
       <h3>Retenue sur le dépôt de {{ euros(verse.toString()) }}</h3>
       <p class="discret">
         Ce que le locataire doit encore, les plus anciens d'abord : les mois impayés et les régularisations envoyées non
         soldées. Les montants sont proposés jusqu'au dépôt versé ; ils se modifient.
       </p>
-      <label>Date <input v-model="saisieRetenue.date" type="date" required></label>
+      <label>Date <input v-model="saisieRetenue.date" type="date"></label>
       <table v-if="saisieRetenue.lignes.length" class="liste">
         <thead><tr><th /><th>Dû</th><th class="nombre">Reste dû</th><th class="nombre">Retenu</th></tr></thead>
         <tbody>
@@ -282,18 +279,16 @@ function annulerRetenue() {
         <template v-else>rien à restituer</template>
       </p>
       <div class="actions">
-        <button type="submit" class="principal" :disabled="occupe || aRendre.lt(0)">Enregistrer la retenue</button>
+        <button type="button" class="principal" :disabled="occupe || aRendre.lt(0) || !saisieRetenue.date" @click="enregistrerRetenue">
+          Enregistrer la retenue
+        </button>
         <button type="button" @click="saisieRetenue = null">Annuler</button>
       </div>
-    </form>
+    </div>
 
     <p v-if="erreur" class="message erreur">{{ erreur }}</p>
-
-    <div class="actions">
-      <RouterLink v-if="prerempli" to="/banque">Retour à la banque</RouterLink>
-      <button type="button" @click="emit('fermer')">Fermer</button>
-    </div>
-  </dialog>
+    <p v-if="prerempli"><RouterLink to="/banque">Retour à la banque</RouterLink></p>
+  </div>
 </template>
 
 <style scoped>

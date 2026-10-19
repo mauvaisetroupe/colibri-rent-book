@@ -3,7 +3,7 @@ import Big from 'big.js'
 import { estRetenue, type Echeance, type Paiement, type Regularisation, type Sejour } from './api'
 import { attendu } from './echeances'
 
-// What a retention on the deposit can cover (ADR 0021), proposed in the « Retenue » window of the stay: the months
+// What a retention on the deposit can cover (ADR 0021), proposed by « Retenue… » in the deposit of the stay: the months
 // still unpaid (rent and provision called, ADR 0009, less what was paid for them) and the sent regularisations still
 // open (their balance less their payments), the oldest first, filled up to the deposit paid. The retention being made
 // again as a whole, its current lines are left out of what was paid. Proposals only: the amounts can be changed.

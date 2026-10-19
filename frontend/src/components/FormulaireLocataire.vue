@@ -1,6 +1,7 @@
 <script lang="ts">
 // A tenant and one of its stays, in a modal form. New stay: a new tenant, or one already known (a tenant coming
-// back). Saving goes through the existing routes, tenant first (see SejoursView).
+// back). Saving goes through the existing routes, tenant first (see SejoursView). A stay already saved shows its
+// deposit (BlocDepot, ADR 0021), whose operations are saved at once, apart from this form.
 
 // Rent and provision called from a month on (ADR 0009); id null: new row
 export type LigneEcheance = { id: number | null, mois: string, loyer: string, provision: string, note: string }
@@ -27,13 +28,18 @@ export type FicheSaisie = {
 import Big from 'big.js'
 import { computed, onMounted, ref } from 'vue'
 
-import type { Locataire, Lot } from '../api'
+import type { Echeance, Locataire, Lot, Sejour } from '../api'
 import { euros, nombreApi } from '../format'
+import BlocDepot, { type DepotPrerempli } from './BlocDepot.vue'
 import ChoixMois from './ChoixMois.vue'
 
-const props = defineProps<{ lots: Lot[], locataires: Locataire[], occupe: boolean, erreur: string | null }>()
+const props = defineProps<{
+  lots: Lot[], locataires: Locataire[], occupe: boolean, erreur: string | null,
+  // The stay saved (null for a new one), for its deposit; a transfer from the bank to enter as a deposit
+  sejour: Sejour | null, immeuble: number, echeances: Echeance[], prerempli: DepotPrerempli | null
+}>()
 const f = defineModel<FicheSaisie>({ required: true })
-const emit = defineEmits<{ enregistrer: [], fermer: [], supprimer: [] }>()
+const emit = defineEmits<{ enregistrer: [], fermer: [], supprimer: [], depotModifie: [] }>()
 
 const fenetre = ref<HTMLDialogElement | null>(null)
 onMounted(() => fenetre.value?.showModal())
@@ -114,10 +120,6 @@ function choisirLocataire() {
           <label>Sortie (vide si en cours) <input v-model="f.sortie" type="date"></label>
         </div>
         <div class="rangee">
-          <!-- Paid, refunded, kept: the « Dépôt » button of the list (ADR 0021) -->
-          <label>Dépôt de garantie prévu au bail <input v-model="f.depot_garantie" class="nombre" size="9"></label>
-        </div>
-        <div class="rangee">
           <label class="large">Note du séjour <input v-model="f.note_sejour"></label>
         </div>
       </fieldset>
@@ -145,6 +147,21 @@ function choisirLocataire() {
         </table>
         <p v-else class="discret">Aucun montant renseigné : les contrôles ne pourront pas repérer un mois payé en partie.</p>
         <p><button type="button" @click="ajouterEcheance">+ {{ f.echeances.length ? 'Un changement' : 'Montant appelé' }}</button></p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Dépôt de garantie</legend>
+        <div class="rangee">
+          <label>Prévu au bail <input v-model="f.depot_garantie" class="nombre" size="9"></label>
+        </div>
+        <template v-if="sejour">
+          <p class="discret">
+            Dépôts reçus, restitutions et retenue : enregistrés aussitôt, indépendamment du bouton « Enregistrer » de la
+            fiche.
+          </p>
+          <BlocDepot :sejour="sejour" :immeuble="immeuble" :echeances="echeances" :prerempli="prerempli" @modifie="emit('depotModifie')" />
+        </template>
+        <p v-else class="discret">Le dépôt reçu se saisit une fois le séjour enregistré.</p>
       </fieldset>
 
       <p v-if="erreur" class="message erreur">{{ erreur }}</p>

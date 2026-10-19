@@ -15,7 +15,8 @@ banque, alors que les factures et les travaux se saisissent dans leur écran et 
 
 ## Décision
 
-- **Le dépôt se gère depuis le séjour** (écran Locataires, bouton « Dépôt… » : une fenêtre par séjour) : le montant du
+- **Le dépôt se gère depuis le séjour** (écran Locataires, encadré « Dépôt de garantie » de la fiche du
+  séjour, dont les opérations sont enregistrées aussitôt, à part du bouton « Enregistrer » de la fiche) : le montant du
   bail (fiche du séjour), les **dépôts reçus** et **restitutions** (`versement_depot`, rattachés à un virement ou à
   aucun : versé à une agence, avant les relevés, en espèces), et la **retenue**.
 - **La retenue est faite de paiements** du mode **`depot`** (« retenue sur le dépôt ») : un dépôt non rendu, c'est un
@@ -38,8 +39,8 @@ banque, alors que les factures et les travaux se saisissent dans leur écran et 
   payé du séjour (loyer et provision appelés, au prorata, ADR 0009, moins les paiements) et les régularisations
   ouvertes, la plus ancienne d'abord, jusqu'au dépôt versé ; date par défaut : la sortie. Le propriétaire ajuste.
 - **Depuis la banque, plus de création de dépôt** : sur un virement « locataire » ou « dépôt de garantie », le bouton
-  « Dépôt de garantie… » ouvre l'écran Locataires sur le dépôt du séjour (le locataire nommé dans le libellé, sinon à
-  choisir), le virement prérempli ; « Rattacher… » rattache un dépôt saisi sans virement, comme un paiement. La case
+  « Dépôt de garantie… » ouvre la fiche du séjour (le locataire nommé dans le libellé, sinon à choisir), le virement
+  prérempli dans son dépôt ; « Rattacher… » rattache un dépôt saisi sans virement, comme un paiement. La case
   « c'est le dépôt de garantie » de la fenêtre de paiement disparaît : le reste d'un virement reste « à compléter »
   jusqu'au dépôt.
 

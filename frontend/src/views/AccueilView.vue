@@ -262,7 +262,8 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
         là), dépôt de garantie prévu au bail, et le loyer et la provision appelés chaque mois (une ligne par changement,
         pour garder l'historique). Deux séjours ne peuvent pas se chevaucher sur un même lot. Un ancien locataire qui
         revient se choisit dans « Fiche » au lieu de « Nouveau locataire ».</li>
-      <li><strong>Dépôt de garantie</strong> : le bouton « Dépôt… » d'un séjour ouvre son dépôt. « Dépôt reçu… » et
+      <li><strong>Dépôt de garantie</strong> : l'encadré du même nom, dans la fiche d'un séjour enregistré (ses
+        opérations sont enregistrées aussitôt, sans le bouton « Enregistrer » de la fiche). « Dépôt reçu… » et
         « Restitution… » : date, montant, virement de la banque (ou aucun : versé à l'agence, avant les relevés).
         « Retenue… » : au départ, ce que le dépôt couvre de ce que le locataire doit encore (mois impayés, régularisations
         envoyées), proposé du plus ancien au plus récent ; ces montants deviennent des paiements « retenue sur dépôt »,
@@ -414,7 +415,7 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
     <summary><strong>8. Synthèse fiscale</strong> : pour la déclaration de revenus fonciers</summary>
     <p>Pour une année civile : charges de la vacance, charges restées impayées par les locataires partis dans l'année
       (sur tout leur séjour, versements reçus au 31 décembre), dépôts de garantie conservés pour charges : la part de la
-      retenue sur le dépôt qui couvre des régularisations (Locataires, « Dépôt… »). Méthode à faire valider par
+      retenue sur le dépôt qui couvre des régularisations (fiche du séjour, encadré « Dépôt de garantie »). Méthode à faire valider par
       l'expert-comptable.</p>
   </details>
 
