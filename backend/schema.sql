@@ -124,10 +124,10 @@ CREATE TABLE mouvement (
   detail          text,
   montant         numeric(12,2) NOT NULL CHECK (montant <> 0),
   -- Ce qu'est le mouvement : paiement d'un locataire, travaux et dépôt de garantie ont un détail
-  -- (paiement.mouvement_id, reglement_travaux.mouvement_id, versement_depot.mouvement_id) ; la note justifie alors un
-  -- reste non couvert (ADR 0018, 0019)
+  -- (paiement.mouvement_id, reglement_travaux.mouvement_id, versement_depot.mouvement_id) qui doit couvrir le montant ;
+  -- « agence » : loyers reversés par une agence de gestion, sans détail (ADR 0018, 0019)
   categorie       text CONSTRAINT mouvement_categorie_check CHECK (categorie IN ('locataire', 'travaux',
-    'depot_garantie', 'emprunt', 'assurance', 'energie', 'eau', 'impots', 'frais_bancaires', 'copropriete',
+    'depot_garantie', 'agence', 'emprunt', 'assurance', 'energie', 'eau', 'impots', 'frais_bancaires', 'copropriete',
     'honoraires', 'associes', 'virement_interne', 'autre')),
   note            text,
   CONSTRAINT mouvement_autre_note CHECK (categorie IS DISTINCT FROM 'autre' OR note IS NOT NULL)

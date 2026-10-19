@@ -38,3 +38,4 @@ après une mise à jour qui les change ; le fichier est rejouable.
 | `015_categorie_mouvement.sql` | 0018 | Catégorie d'un mouvement bancaire (paiement de locataire, travaux, emprunt, assurance…) et note, à la place du motif « ignoré » |
 | `016_reglements_depots_associes.sql` | 0019 | Règlements des travaux (payés en plusieurs fois, année fiscale de chaque paiement), versements de dépôt de garantie, catégories « associés » et « dépôt de garantie » |
 | `017_authentification.sql` | 0020 | Comptes, passkeys (WebAuthn), sessions, liens d'enregistrement à usage unique, jetons d'API (empreintes seulement) |
+| `018_categorie_agence.sql` | 0019 | Catégorie « agence » : loyers reversés par une agence de gestion, sans détail |

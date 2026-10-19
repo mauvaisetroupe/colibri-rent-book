@@ -393,12 +393,13 @@ export type ReleveResume = Releve & { nb_mouvements: number, suite: boolean | nu
 // What a bank movement is (ADR 0018, 0019), fixed in the code: « locataire », « travaux » and « depot_garantie » have a
 // detail (the payments of a tenant, the payments of works invoices, the deposits paid or refunded, linked to it); the
 // others only a note, required for « autre ». sens: the movements it applies to.
-export type CategorieMouvement = 'locataire' | 'travaux' | 'depot_garantie' | 'emprunt' | 'assurance' | 'energie' | 'eau'
+export type CategorieMouvement = 'locataire' | 'travaux' | 'depot_garantie' | 'agence' | 'emprunt' | 'assurance' | 'energie' | 'eau'
   | 'impots' | 'frais_bancaires' | 'copropriete' | 'honoraires' | 'associes' | 'virement_interne' | 'autre'
 export const CATEGORIES_MOUVEMENT: Record<CategorieMouvement, { nom: string, sens: 'credit' | 'debit' | 'tous', icone: string }> = {
   locataire: { nom: 'Paiement de locataire', sens: 'tous', icone: 'oi oi-users' },
   travaux: { nom: 'Travaux', sens: 'debit', icone: 'oi oi-hammer' },
   depot_garantie: { nom: 'Dépôt de garantie', sens: 'tous', icone: 'oi oi-key' },
+  agence: { nom: 'Versement d\'une agence (gérance)', sens: 'tous', icone: 'oi oi-shop' },
   emprunt: { nom: 'Emprunt', sens: 'tous', icone: 'oi oi-building-columns' },
   assurance: { nom: 'Assurance', sens: 'tous', icone: 'oi oi-shield' },
   energie: { nom: 'Énergie (gaz, électricité)', sens: 'debit', icone: 'oi oi-bolt' },
@@ -413,8 +414,8 @@ export const CATEGORIES_MOUVEMENT: Record<CategorieMouvement, { nom: string, sen
 }
 export const AVEC_DETAIL: CategorieMouvement[] = ['locataire', 'travaux', 'depot_garantie']
 
-// a_categoriser: no category yet; incomplet: a category with a detail that does not cover the amount (no note
-// to justify the rest); categorise
+// a_categoriser: no category yet; incomplet: a category with a detail that does not cover the amount (a note does
+// not make up for it); categorise
 export type StatutMouvement = 'a_categoriser' | 'incomplet' | 'categorise'
 
 export type Mouvement = {

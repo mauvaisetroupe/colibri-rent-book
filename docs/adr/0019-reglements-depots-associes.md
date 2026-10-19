@@ -56,6 +56,11 @@ Le rapprochement des relevés (ADR 0018) a montré trois limites du modèle :
 - **Une note ne complète pas un mouvement** (modifié le 2026-10-19) : un mouvement « locataire », « travaux » ou
   « dépôt de garantie » n'est complet que si son détail (paiements, règlements, versements) couvre son montant. La
   note reste un commentaire (obligatoire pour « autre ») ; elle ne justifie plus un reste.
+- **`agence`** (« Versement d'une agence (gérance) », ajoutée le 2026-10-19, migration 018) : les loyers encaissés par
+  une agence de gestion et reversés, ses frais déduits, avant que le propriétaire gère lui-même la location. Sans
+  détail, jamais « à compléter » : les paiements des locataires de cette période ne s'y rattachent pas (le virement
+  n'est ni un loyer ni une somme de loyers) ; les revenus et les frais de ces années se lisent dans le compte rendu de
+  gérance de l'agence. Le filtre par catégorie de l'écran Banque les retrouve.
 - `virement_interne` devient **`associes`** (« Associés : apports, versements ») pour tous les mouvements existants ;
   `virement_interne` reste, renommé « Virement entre comptes de la société ».
 - Le montant couvert d'un mouvement additionne paiements, règlements de travaux et versements de dépôt
