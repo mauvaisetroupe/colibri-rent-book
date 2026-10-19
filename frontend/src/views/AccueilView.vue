@@ -12,6 +12,7 @@ import { etatBanque } from '../controleBanque'
 import { useExercice } from '../exercice'
 import { dateFr, euros } from '../format'
 import { useImmeuble } from '../immeuble'
+import { anneesARegulariser, regularisationsManquantes, type Manquante } from '../regularisationsManquantes'
 
 // Home: the yearly cycle as a checklist of the chosen exercise (real state of each step, link to its screen),
 // then the user guide of every screen.
@@ -29,6 +30,8 @@ const paiements = ref<Paiement[]>([])
 const sejours = ref<Sejour[]>([])
 const releves = ref<ReleveResume[]>([])
 const mouvementsBanque = ref<Mouvement[]>([])
+// Missing regularisations of every finished year, not only of the exercise chosen
+const aRegulariser = ref<Manquante[]>([])
 const erreur = ref<string | null>(null)
 
 async function charger() {
@@ -47,6 +50,13 @@ async function charger() {
       ...annees.map((a) => api.paiements(exercice.immeuble, a)),
     ])
     paiements.value = lus.flat()
+    const aujourdhui = new Date().toISOString().slice(0, 10)
+    // Calendar years only (the statement of the exercise chosen when it is one of them)
+    const decomptes = await Promise.all(anneesARegulariser(regularisations.value, aujourdhui).map((a) =>
+      `${a}-01-01` === debut.value && `${a}-12-31` === fin.value
+        ? decompte.value! : api.decompte({ immeuble: exercice.immeuble, debut: `${a}-01-01`, fin: `${a}-12-31` })))
+    aRegulariser.value = decomptes.flatMap((x) => regularisationsManquantes(x, regularisations.value, aujourdhui))
+      .sort((a, b) => a.debut.localeCompare(b.debut) || a.sejour.lot.localeCompare(b.sejour.lot))
     erreur.value = null
   } catch (e) {
     erreur.value = (e as Error).message
@@ -160,16 +170,28 @@ const etapes = computed<Etape[]>(() => {
   const courantes = regularisations.value.filter((r) => r.debut === debut.value && r.fin === fin.value && !r.remplacee_par)
   const envoyees = courantes.filter((r) => r.etat !== 'brouillon')
   const enAttente = envoyees.filter(aEncaisser)
+  // Missing over a finished year (this exercise or another): the creation page of the first one
+  const manque = aRegulariser.value[0]
   const regularisationEtape: Etape = {
     // Stays still without a regularisation over the exercise: the creation page, else the list
     numero: 7, titre: 'Régularisations',
-    lien: courantes.length < presents.length ? `/regularisations/nouvelle${query}` : '/regularisations',
-    etat: envoyees.length >= presents.length && presents.length ? 'ok' : courantes.length ? 'attention' : 'a-faire',
-    resume: `${nombre(envoyees.length, 'envoyée', 'envoyées')} sur ${nombre(presents.length, 'séjour', 'séjours')}`
-      + (courantes.length > envoyees.length
-        ? ` · ${nombre(courantes.length - envoyees.length, 'brouillon', 'brouillons')} à envoyer` : '')
-      + (enAttente.length ? ` · ${enAttente.length} en attente de paiement ou de remboursement` : ''),
-    details: enAttente.map((r) => `${r.locataire} : reste ${euros(new Big(r.solde).minus(r.montant_recu).toString())}`),
+    lien: manque ? `/regularisations/nouvelle?debut=${manque.debut}&fin=${manque.fin}`
+      : courantes.length < presents.length ? `/regularisations/nouvelle${query}` : '/regularisations',
+    etat: manque ? 'a-faire' : envoyees.length >= presents.length && presents.length ? 'ok' : courantes.length ? 'attention' : 'a-faire',
+    resume: [
+      ...(aRegulariser.value.length ? [nombre(aRegulariser.value.length, 'régularisation manquante', 'régularisations manquantes')] : []),
+      `${nombre(envoyees.length, 'envoyée', 'envoyées')} sur ${nombre(presents.length, 'séjour', 'séjours')}`
+        + (courantes.length > envoyees.length
+          ? ` · ${nombre(courantes.length - envoyees.length, 'brouillon', 'brouillons')} à envoyer` : '')
+        + (enAttente.length ? ` · ${enAttente.length} en attente de paiement ou de remboursement` : ''),
+    ].join(' · '),
+    details: [
+      ...aRegulariser.value.map((m) => `Manquante : ${m.sejour.locataire} (${m.sejour.lot}), ${m.debut.slice(0, 4)}`
+        + (m.debut.slice(0, 4) !== m.fin.slice(0, 4) ? `-${m.fin.slice(0, 4)}` : '') + ' : '
+        + (new Big(m.sejour.solde).gt(0) ? `${euros(m.sejour.solde)} à réclamer`
+          : new Big(m.sejour.solde).lt(0) ? `${euros(new Big(m.sejour.solde).neg().toString())} à rembourser` : 'solde nul')),
+      ...enAttente.map((r) => `${r.locataire} : reste ${euros(new Big(r.solde).minus(r.montant_recu).toString())}`),
+    ],
   }
 
   // 8. Tax summary of the calendar year of the end of the exercise
@@ -350,6 +372,10 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
         régularisation » : choisir la période (une année, ou « Autre période… » pour 2024-2025 par exemple), vérifier
         le décompte et l'aperçu PDF de chaque locataire, puis <strong>Créer</strong> : les montants sont figés, le
         justificatif ne changera plus. Une régularisation envoyée avant Colibri se saisit sur la même page.</li>
+      <li><strong>Régularisations manquantes</strong> : l'étape 7 ci-dessus et le bloc Régularisations des Contrôles
+        signalent tout locataire présent sur une année terminée (depuis la première régularisation de l'immeuble) sans
+        régularisation qui la couvre, que le solde du décompte soit à réclamer, à rembourser ou nul. Un séjour sans
+        charges ni provisions n'en a pas besoin.</li>
       <li>Cliquer une régularisation ouvre sa fiche. <strong>Mail</strong> : le texte est prêt (étalement, nouvelle
         provision, signature) ; le relire, l'ouvrir dans la messagerie, joindre le PDF (le justificatif, puis les
         factures en annexe, sauf celles d'un fournisseur confidentiel, signalées), envoyer, puis

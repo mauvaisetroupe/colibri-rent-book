@@ -4,16 +4,19 @@ import { computed, ref, watch } from 'vue'
 
 import { api, type Paiement, type Regularisation } from '../api'
 import { dateFr, euros, exerciceCourt } from '../format'
+import { regularisationsManquantes, type Manquante } from '../regularisationsManquantes'
 
 // Control: the regularisations sent (current ones, not replaced) that concern the exercise: still to be paid, or paid
 // toward during it. The payments toward each are shown by month of payment (no amount is called per month), then the
 // balance, what was received in all (previous regularisations of a corrective chain included, ADR 0010) and the rest:
-// settled within 1 euro (green), to be paid or refunded (red), given up by the owner (grey).
+// settled within 1 euro (green), to be paid or refunded (red), given up by the owner (grey). First, the regularisations
+// missing for a finished exercise (regularisationsManquantes): a stay present without one, whichever way its balance goes.
 
 const props = defineProps<{ immeuble: number, debut: string, fin: string }>()
 
 const regularisations = ref<Regularisation[]>([])
 const paiements = ref<Paiement[]>([])
+const manquantes = ref<Manquante[]>([])
 const erreur = ref<string | null>(null)
 
 const MOIS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.']
@@ -36,11 +39,13 @@ const moisExercice = computed(() => {
 
 async function charger() {
   try {
-    const [r, lus] = await Promise.all([
+    const [r, lus, d] = await Promise.all([
       api.regularisations(props.immeuble), Promise.all(annees.value.map((a) => api.paiements(props.immeuble, a))),
+      api.decompte({ immeuble: props.immeuble, debut: props.debut, fin: props.fin }),
     ])
     regularisations.value = r
     paiements.value = lus.flat()
+    manquantes.value = regularisationsManquantes(d, r, new Date().toISOString().slice(0, 10))
     erreur.value = null
   } catch (e) {
     erreur.value = (e as Error).message
@@ -90,15 +95,36 @@ const aRembourser = computed(() => enAttente.value.filter((x) => new Big(x.reste
 <template>
   <section class="bloc">
     <h2>Régularisations</h2>
-    <p class="bilan" :class="enAttente.length ? 'ko' : 'ok'">
-      <template v-if="enAttente.length">
-        {{ enAttente.length }} régularisation(s) en attente · reste dû {{ euros(resteDu) }}
-        <template v-if="new Big(aRembourser).gt(0)"> · à rembourser {{ euros(aRembourser) }}</template>
+    <p class="bilan" :class="enAttente.length || manquantes.length ? 'ko' : 'ok'">
+      <template v-if="enAttente.length || manquantes.length">
+        <template v-if="manquantes.length">{{ manquantes.length }} régularisation(s) manquante(s)</template>
+        <template v-if="manquantes.length && enAttente.length"> · </template>
+        <template v-if="enAttente.length">
+          {{ enAttente.length }} régularisation(s) en attente · reste dû {{ euros(resteDu) }}
+          <template v-if="new Big(aRembourser).gt(0)"> · à rembourser {{ euros(aRembourser) }}</template>
+        </template>
       </template>
       <template v-else-if="tableau.length">✓ Toutes les régularisations envoyées sont soldées</template>
       <template v-else>Aucune régularisation envoyée en attente ni payée sur l'exercice</template>
     </p>
     <p v-if="erreur" class="message erreur">{{ erreur }}</p>
+    <template v-if="manquantes.length">
+      <h3>Régularisations manquantes</h3>
+      <p class="discret">
+        Locataires présents sur l'exercice, terminé, sans régularisation qui le couvre. Le solde est celui du décompte
+        d'aujourd'hui : à réclamer s'il est positif, à rembourser s'il est négatif.
+      </p>
+      <ul class="constats">
+        <li v-for="m in manquantes" :key="m.sejour.sejour_id" class="avertissement">
+          <strong>{{ m.sejour.locataire }}</strong> ({{ m.sejour.lot }}, présent du {{ dateFr(m.sejour.present_du) }} au
+          {{ dateFr(m.sejour.present_au) }}) :
+          <template v-if="new Big(m.sejour.solde).gt(0)">{{ euros(m.sejour.solde) }} à réclamer</template>
+          <template v-else-if="new Big(m.sejour.solde).lt(0)">{{ euros(new Big(m.sejour.solde).neg().toString()) }} à rembourser</template>
+          <template v-else>solde nul, décompte à envoyer</template>
+          · <RouterLink :to="{ name: 'nouvelle-regularisation', query: { debut: m.debut, fin: m.fin } }">Créer la régularisation</RouterLink>
+        </li>
+      </ul>
+    </template>
     <div v-if="tableau.length" class="defilement">
       <table class="liste paiements-annee">
         <thead>
