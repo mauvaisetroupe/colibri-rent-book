@@ -20,6 +20,9 @@ export const RESTE_FACTURE_SQL = `(coalesce(f.montant_ttc, 0)
  */
 export const NUMERO_LISIBLE_SQL = `substring(f.numero from '(\\d{5,})\\D*$')`
 
+/** A debit may pay up to this much more than the invoice (a balance rounded by the supplier): shown as a gap. */
+export const ECART_REGLEMENT = '1.00'
+
 export class IntrouvableError extends Error {}
 
 /**
@@ -48,7 +51,10 @@ export async function reglerFacture(db: Pool | PoolClient, factureId: number, mo
   if (credit && !resteMouvement.gt(0)) {
     throw new InputError('Ce mouvement est déjà rattaché en entier')
   }
-  const montant = credit ? resteMouvement.times(-1) : resteMouvement.lt(f.reste) ? resteMouvement : new Big(f.reste)
+  // A debit pays what remains of the invoice; all of what remains of it when that is at most ECART_REGLEMENT more (the
+  // gap is shown on the invoice and in the checks)
+  const montant = credit ? resteMouvement.times(-1)
+    : resteMouvement.minus(f.reste).lte(ECART_REGLEMENT) ? resteMouvement : new Big(f.reste)
   if (!credit && !montant.gt(0)) {
     throw new InputError(new Big(f.reste).gt(0) ? 'Ce mouvement est déjà rattaché en entier' : 'Cette facture est déjà réglée en entier')
   }

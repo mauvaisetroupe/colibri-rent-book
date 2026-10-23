@@ -486,7 +486,8 @@ onBeforeUnmount(() => {
         <section v-if="facture.statut === 'validee' || reglements.length" class="reglements">
           <h2>
             Paiement
-            <span v-if="Number(facture.reste) <= 0" class="ok">✓ payée</span>
+            <span v-if="Number(facture.reste) < 0" class="ok">✓ payée, écart de {{ euros(facture.reste.replace('-', '')) }} (solde arrondi)</span>
+            <span v-else-if="Number(facture.reste) <= 0" class="ok">✓ payée</span>
             <span v-else-if="reglements.length">reste {{ euros(facture.reste) }} à payer</span>
             <span v-else class="discret">aucun mouvement bancaire rattaché</span>
           </h2>

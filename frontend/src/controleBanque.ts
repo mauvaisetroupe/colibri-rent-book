@@ -1,4 +1,4 @@
-import { estRetenue, type Mouvement, type Paiement, type ReleveResume } from './api'
+import { estRetenue, type FactureResumee, type Mouvement, type Paiement, type ReleveResume } from './api'
 
 // State of the bank over an exercise (ADR 0018), for the checks and the home: statements missing (a gap between two
 // statements of an account, or none for the last weeks of the exercise), movements not categorised or whose detail is
@@ -52,3 +52,11 @@ export function etatBanque(releves: ReleveResume[], mouvements: Mouvement[], pai
 export const nbProblemesBanque = (e: EtatBanque) =>
   e.comptes.reduce((n, c) => n + c.manquants.length, 0) + (e.finManquante ? 1 : 0) + e.aCategoriser.length
   + e.incomplets.length + e.sansMouvement.length
+
+/**
+ * Validated invoices paid a little more than their total (ADR 0022: a balance rounded by the supplier, up to 1 euro),
+ * whose last payment falls in the exercise: shown in the checks, not a problem.
+ */
+export const facturesAvecEcart = (factures: FactureResumee[], debut: string, fin: string) => factures
+  .filter((f) => f.statut === 'validee' && Number(f.reste) < 0 && f.date_paiement !== null && f.date_paiement >= debut
+    && f.date_paiement <= fin)

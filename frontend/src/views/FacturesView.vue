@@ -81,6 +81,9 @@ function paiement(f: FactureResumee) {
     return { classe: 'discret', texte: '', titre: '' }
   }
   const titre = f.date_paiement ? `Dernier règlement le ${dateFr(f.date_paiement)}` : 'Aucun mouvement bancaire rattaché'
+  if (Number(f.reste) < 0) {
+    return { classe: 'ok', texte: `✓ ${dateFr(f.date_paiement)}, écart ${euros(f.reste.replace('-', ''))}`, titre: `${titre} ; payée ${euros(f.paye)}` }
+  }
   if (Number(f.reste) <= 0) {
     return { classe: 'ok', texte: `✓ ${dateFr(f.date_paiement)}`, titre }
   }

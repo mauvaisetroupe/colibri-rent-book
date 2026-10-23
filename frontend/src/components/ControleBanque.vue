@@ -3,8 +3,8 @@ import Big from 'big.js'
 import { computed, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
-import { api, type Mouvement, type Paiement, type ReleveResume } from '../api'
-import { etatBanque, nbProblemesBanque } from '../controleBanque'
+import { api, type FactureResumee, type Mouvement, type Paiement, type ReleveResume } from '../api'
+import { etatBanque, facturesAvecEcart, nbProblemesBanque } from '../controleBanque'
 import { dateFr, euros } from '../format'
 
 // The « Banque » group of the checks: statements missing, movements to categorise or to complete, payments of the
@@ -15,14 +15,16 @@ const props = defineProps<{ immeuble: number, debut: string, fin: string }>()
 const releves = ref<ReleveResume[]>([])
 const mouvements = ref<Mouvement[]>([])
 const paiements = ref<Paiement[]>([])
+const factures = ref<FactureResumee[]>([])
 const erreur = ref<string | null>(null)
 
 async function charger() {
   try {
     const annees = [...new Set([Number(props.debut.slice(0, 4)), Number(props.fin.slice(0, 4))])]
     let lus: Paiement[][]
-    ;[releves.value, mouvements.value, ...lus] = await Promise.all([
-      api.releves(), api.mouvements('tous', props.debut, props.fin), ...annees.map((a) => api.paiements(props.immeuble, a)),
+    ;[releves.value, mouvements.value, factures.value, ...lus] = await Promise.all([
+      api.releves(), api.mouvements('tous', props.debut, props.fin), api.factures(props.immeuble),
+      ...annees.map((a) => api.paiements(props.immeuble, a)),
     ])
     paiements.value = lus.flat()
     erreur.value = null
@@ -34,6 +36,8 @@ watch(() => [props.immeuble, props.debut, props.fin], charger, { immediate: true
 
 const etat = computed(() => etatBanque(releves.value, mouvements.value, paiements.value, props.debut, props.fin))
 const problemes = computed(() => nbProblemesBanque(etat.value))
+// Invoices paid with a gap (ADR 0022: a balance rounded by the supplier, up to 1 euro): shown, not a problem
+const ecarts = computed(() => facturesAvecEcart(factures.value, props.debut, props.fin))
 const total = (p: Paiement) => new Big(p.loyer).plus(p.provision).plus(p.regularisation).toString()
 const mois = (p: Paiement) => (p.mois ? `${p.mois.slice(5, 7)}/${p.mois.slice(0, 4)}` : 'régularisation')
 </script>
@@ -101,6 +105,17 @@ const mois = (p: Paiement) => (p.mois ? `${p.mois.slice(5, 7)}/${p.mois.slice(0,
           <li v-for="m in etat.incomplets" :key="m.id" class="avertissement">
             <RouterLink :to="{ name: 'banque', query: { mouvement: m.id } }">{{ dateFr(m.date_operation) }} {{ m.libelle }}</RouterLink>
             : {{ euros(m.montant) }}, rattaché {{ euros(m.couvert) }}
+          </li>
+        </ul>
+      </template>
+
+      <template v-if="ecarts.length">
+        <h3>Factures payées avec un écart</h3>
+        <p class="discret">Le prélèvement dépasse la facture de quelques centimes (solde arrondi par le fournisseur).</p>
+        <ul class="constats">
+          <li v-for="f in ecarts" :key="f.id">
+            <RouterLink :to="{ name: 'facture', params: { id: f.id } }">{{ f.fournisseur }} n° {{ f.numero }}</RouterLink>
+            : {{ euros(f.montant_ttc) }}, payée {{ euros(f.paye) }} (écart {{ euros(f.reste.replace('-', '')) }})
           </li>
         </ul>
       </template>

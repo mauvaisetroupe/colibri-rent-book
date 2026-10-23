@@ -156,6 +156,18 @@ describe('payments of invoices', { skip: skipWithoutDatabase }, () => {
       ['120.00', '120.00', '120.00', '-60.00'])
   })
 
+  test('a balance rounded by the supplier: the debit is linked in full, the gap shown', async () => {
+    const f = await facture('Énergie Exemple', 'electricite', '90000000005', '25.07')
+    const m = await debit('2026-03-25', 'PRLV SOLDE', '25.08')
+    const lie = await app.inject({ method: 'POST', url: `/api/mouvements/${m}/lier`, payload: { facture_id: f } })
+    assert.deepEqual([lie.json().couvert, lie.json().statut], ['25.08', 'categorise'])
+    assert.deepEqual([(await resume(f)).paye, (await resume(f)).reste], ['25.08', '-0.01'])
+    // More than 1 euro above: no more than the invoice
+    const g = await facture('Énergie Exemple', 'electricite', '90000000006', '20.00')
+    const n = await debit('2026-03-25', 'PRLV SOLDE', '25.00')
+    assert.equal((await app.inject({ method: 'POST', url: `/api/mouvements/${n}/lier`, payload: { facture_id: g } })).json().couvert, '20.00')
+  })
+
   test('the payments of a corrected invoice go to its correction', async () => {
     const f = await facture('Énergie Exemple', 'electricite', '90000000003', '222.22')
     const m = await debit('2026-04-02', 'PRLV SEPA ENERGIE', '222.22')
