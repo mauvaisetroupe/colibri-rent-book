@@ -38,6 +38,9 @@ banque, alors que les factures et les travaux se saisissent dans leur écran et 
 - **La fenêtre de retenue propose** ce qui reste dû (`frontend/src/depot.ts`) : les mois impayés depuis le premier mois
   payé du séjour (loyer et provision appelés, au prorata, ADR 0009, moins les paiements) et les régularisations
   ouvertes, la plus ancienne d'abord, jusqu'au dépôt versé ; date par défaut : la sortie. Le propriétaire ajuste.
+  La provision d'un mois couvert par une régularisation (non remplacée) n'est pas proposée : la régularisation est
+  calculée sur les provisions versées (ADR 0008), son solde contient déjà ce qui manque ; la retenir aussi sur le mois
+  la compterait deux fois (le décompte baisserait, la régularisation figée non). Le loyer impayé reste proposé.
 - **Depuis la banque, plus de création de dépôt** : sur un virement « locataire » ou « dépôt de garantie », le bouton
   « Dépôt de garantie… » ouvre la fiche du séjour (le locataire nommé dans le libellé, sinon à choisir), le virement
   prérempli dans son dépôt ; « Rattacher… » rattache un dépôt saisi sans virement, comme un paiement. La case
