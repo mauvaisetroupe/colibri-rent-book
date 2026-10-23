@@ -9,11 +9,15 @@ import type { Pool, PoolClient } from 'pg'
 import { checkInvoice, isDecimal } from '../invoices/checks.js'
 import { BadRequestError, readLines, readTotal } from '../invoices/requestBody.js'
 import type { InvoiceLine } from '../invoices/types.js'
+import { AVEC_FACTURE } from '../categories.js'
+import { COUVERT_SQL } from '../couverture.js'
+import { InputError, sendError } from '../http.js'
 import { isPdf, removeIfUnused as removeFile, storePdf } from '../pdfStorage.js'
 import { inclusiveBounds, inclusiveRange } from '../periods.js'
+import { IntrouvableError, RESTE_FACTURE_SQL, reglerFacture, transfererReglements } from '../reglementsFacture.js'
 
 // Invoices: import of a PDF read in the browser (draft), editing, validation (ADR 0003, 0005, 0013), replacement of
-// a validated invoice (ADR 0017). Periods: see periods.ts.
+// a validated invoice (ADR 0017), payments by bank movements (ADR 0022). Periods: see periods.ts.
 
 export type FactureOptions = {
   db: Pool
@@ -30,7 +34,11 @@ const LINE_COLUMNS = `
 const FACTURE_COLUMNS = `
   f.id, f.immeuble_id, fo.nom AS fournisseur, f.energie, f.numero, f.date_facture::text,
   f.montant_ttc::text, f.statut, f.note, f.fichier_pdf IS NOT NULL AS pdf,
-  f.remplacee_par, f.remplacee_le::text, f.motif_remplacement, f.remplace_id`
+  f.remplacee_par, f.remplacee_le::text, f.motif_remplacement, f.remplace_id,
+  (SELECT coalesce(sum(rf.montant), 0) FROM reglement_facture rf WHERE rf.facture_id = f.id)::text AS paye,
+  ${RESTE_FACTURE_SQL}::text AS reste,
+  (SELECT max(m.date_operation) FROM reglement_facture rf JOIN mouvement m ON m.id = rf.mouvement_id
+   WHERE rf.facture_id = f.id)::text AS date_paiement`
 
 // Another invoice, as shown in a link: « EDF n° 123 »
 type Reference = { id: number, fournisseur: string, numero: string, statut: string }
@@ -94,7 +102,12 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
       correction: (await db.query<Reference>(
         `${REFERENCE} WHERE f.remplace_id = $1 AND f.statut = 'a_verifier'`, [id])).rows[0] ?? null,
     }
-    return { facture, lignes, liens, controle: checkInvoice({ montant_ttc: facture.montant_ttc, lignes }) }
+    // Its payments (ADR 0022): the movement (date, label), the amount
+    const { rows: reglements } = await db.query(
+      `SELECT rf.id, rf.mouvement_id, m.date_operation::text AS date_paiement, m.libelle, rf.montant::text
+       FROM reglement_facture rf JOIN mouvement m ON m.id = rf.mouvement_id
+       WHERE rf.facture_id = $1 ORDER BY m.date_operation, rf.id`, [id])
+    return { facture, lignes, liens, reglements, controle: checkInvoice({ montant_ttc: facture.montant_ttc, lignes }) }
   }
 
   /** Sent regularisations, not rectified yet, whose period touches recoverable lines of these invoices: to check. */
@@ -425,6 +438,8 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
             message: 'La facture corrigée n\'est plus validée (déjà remplacée) : supprimer ce brouillon',
           })
         }
+        // Its payments go to the correction (ADR 0022)
+        await transfererReglements(client, corrige, id)
       }
       await client.query('UPDATE facture SET statut = \'validee\' WHERE id = $1 AND statut = \'a_verifier\'', [id])
       await client.query('COMMIT')
@@ -480,6 +495,7 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
          WHERE id = $1`,
         [id, par, motif],
       )
+      await transfererReglements(client, id, par)
       await client.query('COMMIT')
     } catch (error) {
       await client.query('ROLLBACK')
@@ -525,6 +541,57 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     } finally {
       client.release()
     }
+  })
+
+  // ---------------------------------------------------------------- payments (ADR 0022)
+
+  // The debits that may pay this invoice: « energie », « eau », « impots » or without category, not covered in full;
+  // those of the same amount as its rest first, then by closeness to its date
+  app.get('/factures/:id/mouvements', async (request, reply) => {
+    const id = Number((request.params as { id: string }).id)
+    const { rows: [f] } = await db.query<{ reste: string, date_facture: string | null }>(
+      `SELECT ${RESTE_FACTURE_SQL}::text AS reste, f.date_facture::text FROM facture f WHERE f.id = $1`, [id])
+    if (!f) {
+      return reply.code(404).send({ message: 'Facture introuvable' })
+    }
+    const { rows } = await db.query(
+      `SELECT * FROM (
+         SELECT m.id, m.date_operation::text, m.libelle, m.montant::text, m.categorie,
+                (abs(m.montant) - ${COUVERT_SQL})::text AS reste
+         FROM mouvement m
+         WHERE m.montant < 0 AND (m.categorie IS NULL OR m.categorie = ANY($1))
+           AND NOT EXISTS (SELECT 1 FROM reglement_facture rf WHERE rf.facture_id = $2 AND rf.mouvement_id = m.id)
+       ) x
+       WHERE reste::numeric > 0
+       ORDER BY (reste::numeric = $3::numeric) DESC, abs(date_operation::date - coalesce($4::date, date_operation::date)), id
+       LIMIT 200`,
+      [AVEC_FACTURE, id, f.reste, f.date_facture],
+    )
+    return rows.map((m) => ({ ...m, correspond: new Big(m.reste).eq(f.reste) }))
+  })
+
+  // Linked to a debit: a payment of what remains of the movement, no more than what remains of the invoice
+  app.post('/factures/:id/reglements', async (request, reply) => {
+    const id = Number((request.params as { id: string }).id)
+    try {
+      const mouvement = Number((request.body as { mouvement_id?: unknown } | undefined)?.mouvement_id)
+      if (!Number.isInteger(mouvement)) {
+        throw new InputError('Choisir le mouvement bancaire qui règle la facture')
+      }
+      await reglerFacture(db, id, mouvement)
+      return load(id)
+    } catch (error) {
+      if (error instanceof IntrouvableError) {
+        return reply.code(404).send({ message: error.message })
+      }
+      return sendError(reply, error)
+    }
+  })
+
+  app.delete('/factures/:id/reglements/:reglement', async (request, reply) => {
+    const { id, reglement } = request.params as { id: string, reglement: string }
+    await db.query('DELETE FROM reglement_facture WHERE id = $1 AND facture_id = $2', [Number(reglement), Number(id)])
+    return (await load(Number(id))) ?? reply.code(404).send({ message: 'Facture introuvable' })
   })
 
   // Only a draft can be deleted (to import it again, for instance)

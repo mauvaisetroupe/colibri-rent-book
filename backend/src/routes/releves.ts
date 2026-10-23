@@ -10,15 +10,17 @@ import {
   body, idParam, InputError, optionalDate, optionalText, query, requiredDate, requiredDecimal, requiredId, requiredText,
   sendError,
 } from '../http.js'
-import { AVEC_DETAIL, estCategorie, type Categorie } from '../categories.js'
+import { AVEC_DETAIL, AVEC_FACTURE, estCategorie, type Categorie } from '../categories.js'
 import { COUVERT_SQL, categoriserSiVide, verifierMouvement } from '../couverture.js'
 import { isPdf, removeIfUnused, storePdf } from '../pdfStorage.js'
+import { IntrouvableError, NUMERO_LISIBLE_SQL, RESTE_FACTURE_SQL, reglerFacture } from '../reglementsFacture.js'
 
 // Bank statements (ADR 0018): the PDF is read in the browser by the extractor of its bank, the server checks the
 // balances and stores the statement with its movements. Each movement then gets a category (categories.ts): the payment
 // of a tenant, works and deposits have a detail (ADR 0019), linked on the other side (paiement, reglement_travaux,
 // versement_depot: mouvement_id), so deleting a payment leaves its movement « incomplet »: complete only when its
-// detail covers the amount.
+// detail covers the amount. A debit « energie », « eau » or « impots » pays invoices of charges (reglement_facture,
+// ADR 0022): « incomplet » too until they cover it.
 
 type MouvementLu = { date_operation: string, date_valeur: string | null, libelle: string, detail: string | null, montant: string }
 type ReleveLu = {
@@ -88,7 +90,7 @@ const MOUVEMENT_COLUMNS = `
   m.id, m.releve_id, m.ordre, m.date_operation::text, m.date_valeur::text, m.libelle, m.detail, m.montant::text,
   m.categorie, m.note, r.compte, r.date_releve::text,
   coalesce(l.paiements, '[]'::json) AS paiements, coalesce(l.travaux, '[]'::json) AS travaux,
-  coalesce(l.depots, '[]'::json) AS depots,
+  coalesce(l.factures, '[]'::json) AS factures, coalesce(l.depots, '[]'::json) AS depots,
   coalesce(l.couvert, 0)::text AS couvert,
   coalesce(l.possibles, '[]'::json) AS possibles,
   CASE WHEN m.categorie IS NULL THEN 'a_categoriser'
@@ -112,6 +114,12 @@ const MOUVEMENT_FROM = `mouvement m
                                          'reste', (t.montant_ttc - (SELECT sum(x.montant) FROM reglement_travaux x
                                                                     WHERE x.travaux_id = t.id))::text) ORDER BY rt.id)
        FROM reglement_travaux rt JOIN travaux t ON t.id = rt.travaux_id WHERE rt.mouvement_id = m.id) AS travaux,
+      -- The payments of invoices of charges (ADR 0022), the same way
+      (SELECT json_agg(json_build_object('id', f.id, 'reglement_id', rf.id, 'fournisseur', fo.nom, 'numero', f.numero,
+                                         'energie', f.energie, 'date_facture', f.date_facture::text, 'total', rf.montant::text,
+                                         'montant_ttc', f.montant_ttc::text, 'reste', ${RESTE_FACTURE_SQL}::text) ORDER BY rf.id)
+       FROM reglement_facture rf JOIN facture f ON f.id = rf.facture_id JOIN fournisseur fo ON fo.id = f.fournisseur_id
+       WHERE rf.mouvement_id = m.id) AS factures,
       (SELECT json_agg(json_build_object('id', vd.id, 'sejour_id', vd.sejour_id, 'locataire', lo.nom, 'lot', lt.code,
                                          'date', vd.date_versement::text, 'montant', vd.montant::text) ORDER BY vd.id)
        FROM versement_depot vd JOIN sejour s ON s.id = vd.sejour_id JOIN lot lt ON lt.id = s.lot_id
@@ -138,12 +146,26 @@ const MOUVEMENT_FROM = `mouvement m
            HAVING count(*) > 1 AND sum(p.loyer + p.provision + p.regularisation) = m.montant
          ) g))
       ELSE coalesce(
-        -- Works: an invoice whose unpaid rest is the amount
-        (SELECT json_agg(json_build_object('type', 'travaux', 'id', t.id, 'description', t.description,
-                                           'fournisseur', t.fournisseur, 'date', t.date_facture::text))
-         FROM travaux t
-         WHERE t.montant_ttc - (SELECT coalesce(sum(rt.montant), 0) FROM reglement_travaux rt WHERE rt.travaux_id = t.id)
-               = -m.montant),
+        nullif(coalesce(
+          -- Works: an invoice whose unpaid rest is the amount
+          (SELECT jsonb_agg(jsonb_build_object('type', 'travaux', 'id', t.id, 'description', t.description,
+                                               'fournisseur', t.fournisseur, 'date', t.date_facture::text))
+           FROM travaux t
+           WHERE t.montant_ttc - (SELECT coalesce(sum(rt.montant), 0) FROM reglement_travaux rt WHERE rt.travaux_id = t.id)
+                 = -m.montant), '[]'::jsonb)
+        -- Invoices of charges (ADR 0022): validated, not paid in full, whose rest is the amount or whose number is in
+        -- the label (a part of the invoice paid by a transfer naming it)
+        || coalesce(
+          (SELECT jsonb_agg(jsonb_build_object('type', 'facture', 'id', f.id, 'fournisseur', fo.nom, 'numero', f.numero,
+                                               'energie', f.energie, 'date', f.date_facture::text)
+                            ORDER BY abs(f.date_facture - m.date_operation))
+           FROM facture f JOIN fournisseur fo ON fo.id = f.fournisseur_id
+           WHERE f.statut = 'validee' AND ${RESTE_FACTURE_SQL} > 0
+             AND NOT EXISTS (SELECT 1 FROM reglement_facture rf WHERE rf.facture_id = f.id AND rf.mouvement_id = m.id)
+             AND (${RESTE_FACTURE_SQL} = -m.montant
+                  OR (${NUMERO_LISIBLE_SQL} IS NOT NULL
+                      AND regexp_replace(m.libelle || ' ' || coalesce(m.detail, ''), '\\D', '', 'g') LIKE '%' || ${NUMERO_LISIBLE_SQL} || '%'))),
+          '[]'::jsonb), '[]'::jsonb)::json,
         -- A refund to a tenant (negative payment) typed by hand
         (SELECT json_agg(json_build_object('type', 'paiement', 'id', p.id, 'locataire', lo.nom, 'lot', lt.code,
                                            'mois', p.mois::text, 'date', p.date_paiement::text))
@@ -268,6 +290,7 @@ const releveRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async
       `SELECT 1 FROM mouvement m WHERE m.releve_id = $1 AND (m.categorie IS NOT NULL
          OR EXISTS (SELECT 1 FROM paiement p WHERE p.mouvement_id = m.id)
          OR EXISTS (SELECT 1 FROM reglement_travaux rt WHERE rt.mouvement_id = m.id)
+         OR EXISTS (SELECT 1 FROM reglement_facture rf WHERE rf.mouvement_id = m.id)
          OR EXISTS (SELECT 1 FROM versement_depot vd WHERE vd.mouvement_id = m.id))`,
       [id],
     )
@@ -310,19 +333,23 @@ const releveRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async
   const loadMouvement = async (id: number) => (await db.query(
     `SELECT ${MOUVEMENT_COLUMNS} FROM ${MOUVEMENT_FROM} WHERE m.id = $1`, [id])).rows[0] ?? null
 
-  /** Its links: payments, works payments, deposits. */
+  /** Its links: payments, works payments, invoice payments, deposits. */
   async function liens(id: number) {
-    const { rows: [l] } = await db.query<{ paiements: number, travaux: number, depots: number }>(
+    const { rows: [l] } = await db.query<{ paiements: number, travaux: number, factures: number, depots: number }>(
       `SELECT (SELECT count(*)::int FROM paiement WHERE mouvement_id = $1) AS paiements,
               (SELECT count(*)::int FROM reglement_travaux WHERE mouvement_id = $1) AS travaux,
+              (SELECT count(*)::int FROM reglement_facture WHERE mouvement_id = $1) AS factures,
               (SELECT count(*)::int FROM versement_depot WHERE mouvement_id = $1) AS depots`, [id])
     return l!
   }
 
-  /** The categories a movement may have with its links: payments, works or deposits keep theirs. */
-  function categoriesPermises(l: { paiements: number, travaux: number, depots: number }): Categorie[] | null {
+  /** The categories a movement may have with its links: payments, works, invoices or deposits keep theirs. */
+  function categoriesPermises(l: { paiements: number, travaux: number, factures: number, depots: number }): Categorie[] | null {
     if (l.travaux) {
       return ['travaux']
+    }
+    if (l.factures) {
+      return AVEC_FACTURE
     }
     if (l.paiements) {
       return ['locataire']
@@ -345,7 +372,7 @@ const releveRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async
       }
       const permises = categoriesPermises(await liens(id))
       if (permises && !permises.includes(raw.categorie)) {
-        return reply.code(409).send({ message: 'Des paiements, des travaux ou des dépôts y sont rattachés : les détacher d\'abord' })
+        return reply.code(409).send({ message: 'Des paiements, des factures ou des dépôts y sont rattachés : les détacher d\'abord' })
       }
       const { rowCount } = await db.query('UPDATE mouvement SET categorie = $2, note = $3 WHERE id = $1', [id, raw.categorie, note])
       return rowCount ? loadMouvement(id) : reply.code(404).send({ message: 'Mouvement introuvable' })
@@ -357,7 +384,7 @@ const releveRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async
   app.delete('/mouvements/:id/categorie', async (request, reply) => {
     const id = idParam(request)
     if (categoriesPermises(await liens(id))) {
-      return reply.code(409).send({ message: 'Des paiements, des travaux ou des dépôts y sont rattachés : les détacher d\'abord' })
+      return reply.code(409).send({ message: 'Des paiements, des factures ou des dépôts y sont rattachés : les détacher d\'abord' })
     }
     const { rowCount } = await db.query('UPDATE mouvement SET categorie = NULL, note = NULL WHERE id = $1', [id])
     return rowCount ? loadMouvement(id) : reply.code(404).send({ message: 'Mouvement introuvable' })
@@ -423,6 +450,10 @@ const releveRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async
         await categoriserSiVide(db, id, 'travaux')
         return loadMouvement(id)
       }
+      if (raw.facture_id) {
+        await reglerFacture(db, requiredId(raw.facture_id, 'Facture'), id)
+        return loadMouvement(id)
+      }
       if (raw.depot_id) {
         const depotId = requiredId(raw.depot_id, 'Versement de dépôt')
         const { rows: [d] } = await db.query<{ montant: string, mouvement_id: number | null }>(
@@ -441,13 +472,17 @@ const releveRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async
         await categoriserSiVide(db, id, 'depot_garantie')
         return loadMouvement(id)
       }
-      throw new InputError('Indiquer le paiement, les travaux ou le versement de dépôt à rattacher')
+      throw new InputError('Indiquer le paiement, les travaux, la facture ou le versement de dépôt à rattacher')
     } catch (error) {
+      if (error instanceof IntrouvableError) {
+        return reply.code(404).send({ message: error.message })
+      }
       return sendError(reply, error)
     }
   })
 
-  // Detaches: the payment or the deposit stays, in its screen; a works payment is the movement itself, it goes
+  // Detaches: the payment or the deposit stays, in its screen; a payment of works or of an invoice is the movement
+  // itself, it goes
   app.post('/mouvements/:id/delier', async (request, reply) => {
     const id = idParam(request)
     const raw = body(request)
@@ -457,6 +492,8 @@ const releveRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async
       await db.query('DELETE FROM reglement_travaux WHERE id = $1 AND mouvement_id = $2', [Number(raw.reglement_id), id])
     } else if (raw.travaux_id) {
       await db.query('DELETE FROM reglement_travaux WHERE travaux_id = $1 AND mouvement_id = $2', [Number(raw.travaux_id), id])
+    } else if (raw.reglement_facture_id) {
+      await db.query('DELETE FROM reglement_facture WHERE id = $1 AND mouvement_id = $2', [Number(raw.reglement_facture_id), id])
     } else if (raw.depot_id) {
       await db.query('UPDATE versement_depot SET mouvement_id = NULL WHERE id = $1 AND mouvement_id = $2', [Number(raw.depot_id), id])
     }

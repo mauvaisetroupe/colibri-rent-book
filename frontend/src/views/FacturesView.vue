@@ -65,11 +65,29 @@ const annees = computed(() =>
 const voirRemplacees = ref(false)
 const remplacees = computed(() => factures.value.filter((f) => f.statut === 'remplacee').length)
 
+// Paid by bank movements (ADR 0022): a validated invoice is paid, partly paid or to pay; « à payer » shows the last two
+const seulementAPayer = ref(false)
+const aPayer = (f: FactureResumee) => f.statut === 'validee' && Number(f.reste) > 0
+
 const affichees = computed(() =>
   factures.value.filter((f) =>
     (!energie.value || f.energie === energie.value) && (!annee.value || f.date_facture?.startsWith(annee.value))
-    && (voirRemplacees.value || f.statut !== 'remplacee')),
+    && (voirRemplacees.value || f.statut !== 'remplacee') && (!seulementAPayer.value || aPayer(f))),
 )
+const nbAPayer = computed(() => factures.value.filter(aPayer).length)
+
+function paiement(f: FactureResumee) {
+  if (f.statut !== 'validee') {
+    return { classe: 'discret', texte: '', titre: '' }
+  }
+  const titre = f.date_paiement ? `Dernier règlement le ${dateFr(f.date_paiement)}` : 'Aucun mouvement bancaire rattaché'
+  if (Number(f.reste) <= 0) {
+    return { classe: 'ok', texte: `✓ ${dateFr(f.date_paiement)}`, titre }
+  }
+  return Number(f.paye) > 0
+    ? { classe: '', texte: `partielle, reste ${euros(f.reste)}`, titre }
+    : { classe: 'discret', texte: 'à payer', titre }
+}
 
 const brouillons = computed(() => factures.value.filter((f) => f.statut === 'a_verifier').length)
 
@@ -274,6 +292,9 @@ const periode = (f: FactureResumee) => (f.debut && f.fin ? `${dateFr(f.debut)} �
       {{ affichees.length }} facture(s)<template v-if="brouillons"> · {{ brouillons }} brouillon(s) à vérifier</template>
     </span>
     <label v-if="remplacees" class="discret"><input v-model="voirRemplacees" type="checkbox"> Afficher les factures remplacées ({{ remplacees }})</label>
+    <label v-if="nbAPayer" class="discret" title="Validées, sans mouvement bancaire qui les règle en entier (rattacher dans Banque ou depuis la facture)">
+      <input v-model="seulementAPayer" type="checkbox"> Seulement celles à payer ({{ nbAPayer }})
+    </label>
   </section>
 
   <table class="liste">
@@ -288,6 +309,7 @@ const periode = (f: FactureResumee) => (f.debut && f.fin ? `${dateFr(f.debut)} �
         <th class="nombre">Lignes</th>
         <th>Total</th>
         <th>Statut</th>
+        <th>Payée</th>
         <th>PDF</th>
       </tr>
     </thead>
@@ -302,6 +324,7 @@ const periode = (f: FactureResumee) => (f.debut && f.fin ? `${dateFr(f.debut)} �
         <td class="nombre">{{ f.nb_lignes }}</td>
         <td :class="f.total_ok ? 'ok' : 'ko'">{{ f.total_ok ? '✓' : f.montant_ttc === null ? '✗ total à saisir' : '✗ écart' }}</td>
         <td><span class="pastille" :class="f.statut">{{ STATUTS[f.statut] }}</span></td>
+        <td :class="paiement(f).classe" :title="paiement(f).titre">{{ paiement(f).texte }}</td>
         <td>
           <a v-if="f.pdf" :href="api.pdfUrl(f.id)" target="_blank" title="Ouvrir le PDF" @click.stop>PDF</a>
           <span v-else class="discret" title="Pas de PDF : le joindre depuis la facture">—</span>

@@ -398,9 +398,10 @@ export type Releve = {
 // suite: the opening balance is the closing balance of the previous statement of the account (null: the first one)
 export type ReleveResume = Releve & { nb_mouvements: number, suite: boolean | null }
 
-// What a bank movement is (ADR 0018, 0019), fixed in the code: « locataire », « travaux » and « depot_garantie » have a
-// detail (the payments of a tenant, the payments of works invoices, the deposits paid or refunded, linked to it); the
-// others only a note, required for « autre ». sens: the movements it applies to.
+// What a bank movement is (ADR 0018, 0019, 0022), fixed in the code: « locataire », « travaux », « depot_garantie »,
+// « energie », « eau » and « impots » have a detail (the payments of a tenant, the payments of works invoices, the
+// deposits paid or refunded, the invoices of charges paid, linked to it); the others only a note, required for
+// « autre ». sens: the movements it applies to.
 export type CategorieMouvement = 'locataire' | 'travaux' | 'depot_garantie' | 'agence' | 'emprunt' | 'assurance' | 'energie' | 'eau'
   | 'impots' | 'frais_bancaires' | 'copropriete' | 'honoraires' | 'associes' | 'virement_interne' | 'autre'
 export const CATEGORIES_MOUVEMENT: Record<CategorieMouvement, { nom: string, sens: 'credit' | 'debit' | 'tous', icone: string }> = {
@@ -420,7 +421,9 @@ export const CATEGORIES_MOUVEMENT: Record<CategorieMouvement, { nom: string, sen
   virement_interne: { nom: 'Virement entre comptes de la société', sens: 'tous', icone: 'oi oi-arrow-right-arrow-left' },
   autre: { nom: 'Autre', sens: 'tous', icone: 'oi oi-tag' },
 }
-export const AVEC_DETAIL: CategorieMouvement[] = ['locataire', 'travaux', 'depot_garantie']
+// Debits that pay invoices of charges (ADR 0022): their detail is the invoices paid
+export const AVEC_FACTURE: CategorieMouvement[] = ['energie', 'eau', 'impots']
+export const AVEC_DETAIL: CategorieMouvement[] = ['locataire', 'travaux', 'depot_garantie', ...AVEC_FACTURE]
 
 // a_categoriser: no category yet; incomplet: a category with a detail that does not cover the amount (a note does
 // not make up for it); categorise
@@ -444,6 +447,9 @@ export type Mouvement = {
   paiements: { id: number, locataire: string, lot: string, mois: string | null, total: string }[]
   // Payments of works invoices: total is this payment; montant_ttc and reste, those of the invoice
   travaux: { id: number, reglement_id: number, description: string, fournisseur: string, total: string, montant_ttc: string, reste: string }[]
+  // Payments of invoices of charges (ADR 0022), the same way
+  factures: { id: number, reglement_id: number, fournisseur: string, numero: string, energie: Energie, date_facture: string,
+    total: string, montant_ttc: string, reste: string }[]
   depots: { id: number, sejour_id: number, locataire: string, lot: string, date: string, montant: string }[]
   couvert: string
   statut: StatutMouvement
@@ -451,6 +457,8 @@ export type Mouvement = {
   possibles: ({ type: 'paiement', id: number, locataire: string, lot: string, mois: string | null, date: string }
     // An invoice whose unpaid rest is the amount; date: that of the invoice
     | { type: 'travaux', id: number, description: string, fournisseur: string, date: string | null }
+    // An invoice of charges whose rest is the amount, or whose number is in the label (ADR 0022)
+    | { type: 'facture', id: number, fournisseur: string, numero: string, energie: Energie, date: string | null }
     // Several payments of one tenant whose sum is the amount (a transfer of several months); mois: « 10/2025, 11/2025 »
     | { type: 'groupe', ids: number[], locataire: string, lot: string, mois: string })[]
 }
@@ -559,6 +567,16 @@ export type Facture = {
   remplacee_le: string | null
   motif_remplacement: string | null
   remplace_id: number | null
+  // ADR 0022: paid by bank movements, what remains, the date of the last payment
+  paye: string
+  reste: string
+  date_paiement: string | null
+}
+
+export type ReglementFacture = { id: number, mouvement_id: number, date_paiement: string, libelle: string, montant: string }
+// A debit that may pay an invoice: what remains of it; correspond, the rest of the invoice
+export type MouvementPourFacture = {
+  id: number, date_operation: string, libelle: string, montant: string, categorie: CategorieMouvement | null, reste: string, correspond: boolean
 }
 
 export type ReferenceFacture = { id: number, fournisseur: string, numero: string, statut: Statut }
@@ -595,7 +613,7 @@ export type Controle = {
   validable: boolean
 }
 
-export type FactureDetail = { facture: Facture, lignes: Ligne[], liens: LiensFacture, controle: Controle }
+export type FactureDetail = { facture: Facture, lignes: Ligne[], liens: LiensFacture, reglements: ReglementFacture[], controle: Controle }
 export type FactureRemplacee = FactureDetail & { regularisations: RegularisationTouchee[] }
 
 export type FactureEnTete = Pick<Facture, 'numero' | 'date_facture' | 'montant_ttc' | 'energie' | 'note'>
@@ -783,9 +801,9 @@ export const api = {
   categoriserMouvement: (id: number, categorie: CategorieMouvement, note: string | null = null) =>
     request<Mouvement>('PUT', `/mouvements/${id}/categorie`, { categorie, note }),
   retirerCategorie: (id: number) => request<Mouvement>('DELETE', `/mouvements/${id}/categorie`),
-  lierMouvement: (id: number, lien: { paiement_id: number } | { travaux_id: number } | { paiement_ids: number[] } | { depot_id: number }) =>
-    request<Mouvement>('POST', `/mouvements/${id}/lier`, lien),
-  delierMouvement: (id: number, lien: { paiement_id: number } | { reglement_id: number } | { depot_id: number }) =>
+  lierMouvement: (id: number, lien: { paiement_id: number } | { travaux_id: number } | { facture_id: number } | { paiement_ids: number[] }
+    | { depot_id: number }) => request<Mouvement>('POST', `/mouvements/${id}/lier`, lien),
+  delierMouvement: (id: number, lien: { paiement_id: number } | { reglement_id: number } | { reglement_facture_id: number } | { depot_id: number }) =>
     request<Mouvement>('POST', `/mouvements/${id}/delier`, lien),
 
   depots: (immeuble: number) => request<VersementDepot[]>('GET', `/depots?immeuble=${immeuble}`),
@@ -808,6 +826,10 @@ export const api = {
   remplacer: (id: number, par: number, motif: string) =>
     request<FactureRemplacee>('POST', `/factures/${id}/remplacer`, { par, motif }),
   corriger: (id: number) => request<FactureDetail>('POST', `/factures/${id}/corriger`),
+  // Payments by bank movements (ADR 0022)
+  mouvementsPourFacture: (id: number) => request<MouvementPourFacture[]>('GET', `/factures/${id}/mouvements`),
+  reglerFacture: (id: number, mouvement: number) => request<FactureDetail>('POST', `/factures/${id}/reglements`, { mouvement_id: mouvement }),
+  supprimerReglementFacture: (id: number, reglement: number) => request<FactureDetail>('DELETE', `/factures/${id}/reglements/${reglement}`),
   supprimer: (id: number) => request<void>('DELETE', `/factures/${id}`),
   controler: (saisie: Pick<FactureSaisie, 'montant_ttc' | 'lignes'>) => request<Controle>('POST', '/controle', saisie),
   pdfUrl: (id: number) => `/api/factures/${id}/pdf`,

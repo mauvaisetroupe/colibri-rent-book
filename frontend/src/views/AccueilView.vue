@@ -137,7 +137,7 @@ const etapes = computed<Etape[]>(() => {
     resume: !releves.value.length ? 'Aucun relevé importé' : [
       b.finManquante ? `relevés importés jusqu'au ${dateFr(b.finManquante)}` : manquants ? `${nombre(manquants, 'relevé manquant', 'relevés manquants')}` : 'Relevés à jour',
       b.aCategoriser.length ? `${nombre(b.aCategoriser.length, 'mouvement', 'mouvements')} à catégoriser` : 'tout est catégorisé',
-      ...(b.incomplets.length ? [`${b.incomplets.length} à compléter`] : []),
+      ...(b.incomplets.length ? [`${b.incomplets.length} à rattacher`] : []),
       ...(b.sansMouvement.length ? [`${nombre(b.sansMouvement.length, 'paiement absent', 'paiements absents')} des relevés`] : []),
     ].join(' · '),
     details: b.sansMouvement.map((p) => `Paiement du ${dateFr(p.date_paiement)}, ${p.locataire} : sur aucun relevé`),
@@ -297,6 +297,11 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
         rectificative, vrai PDF d'une facture saisie à la main), avec le motif. La facture remplacée reste consultable
         (« Afficher les factures remplacées ») mais ne compte plus ; les régularisations envoyées touchées sont
         listées, l'écran Régularisations dit si l'une est « à rectifier ».</li>
+      <li>Une facture validée est <strong>payée</strong> quand un mouvement bancaire la règle : colonne « Payée » de la
+        liste (✓ et la date, partielle avec son reste, ou à payer ; « Seulement celles à payer »). Le prélèvement se
+        rattache depuis la facture (« Rattacher un paiement… », les débits du même montant d'abord) ou depuis la Banque ;
+        une facture payée en deux fois a deux paiements. Une facture remplacée passe ses paiements à celle qui la
+        remplace.</li>
     </ol>
   </details>
 
@@ -339,16 +344,23 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
         colonne « Proposition » donne la catégorie proposée (lue dans le libellé, le locataire nommé, ou un paiement ou des
         travaux déjà saisis qui lui correspondent) ; « Autre catégorie » ouvre la liste. « Accepter les N propositions »
         catégorise d'un coup.</li>
-      <li>Onglet « Catégorisés » : un <strong>paiement de locataire</strong>, des <strong>travaux</strong> et un
-        <strong>dépôt de garantie</strong> ont un détail ; la flèche ▸ le déplie. « Ajouter un paiement du locataire… »
+      <li>Onglet « Rapprochement » : un <strong>paiement de locataire</strong>, des <strong>travaux</strong>, un
+        <strong>dépôt de garantie</strong> et un prélèvement d'<strong>énergie</strong>, d'<strong>eau</strong> ou
+        d'<strong>impôts et taxes</strong> se rattachent à ce qu'ils paient ; la flèche ▸ déplie leur détail.
+        « Seulement ceux à rattacher » (cochée d'office) ne montre que ceux dont le détail ne couvre pas le montant. « Ajouter un paiement du locataire… »
         ouvre la fenêtre de l'écran Paiements, préremplie (locataire, mois, loyer et provision du séjour encore dus,
         montant restant) : un reste reste à rattacher. « Dépôt de garantie… » ouvre le dépôt du séjour (écran
         Locataires), ce virement prérempli : le dépôt se saisit là, comme une facture dans son écran. Des travaux :
         la facture se saisit d'abord (écran Travaux), puis « Rattacher à une facture de travaux… » y accroche le virement
         (un acompte, puis le solde : deux virements pour une facture). « Rattacher… » reprend ce qui a été saisi (ce qui
         correspond est marqué ✓ et choisi d'office, une alerte signale un montant ou une date qui diffère). Un mouvement
-        reste « à compléter » tant que son détail ne couvre pas son montant (une note n'y suffit pas) ; ceux-là viennent
+        reste « à rattacher » tant que son détail ne couvre pas son montant (une note n'y suffit pas) ; ceux-là viennent
         en tête ; ✕ retire la catégorie.</li>
+      <li>Un prélèvement d'énergie, d'eau ou de taxe se rattache à sa facture (« Rattacher à une facture… ») : la
+        facture se saisit d'abord (écran Factures, sur son immeuble). Quand une facture validée a son montant, la
+        proposition de l'onglet « À catégoriser » dit « + facture » et la rattache en même temps ; un virement qui porte
+        le numéro de la facture est proposé aussi (eau payée en deux fois).</li>
+      <li>Onglet « Autres catégories » : emprunt, assurance, frais bancaires… une catégorie suffit.</li>
     </ol>
   </details>
 

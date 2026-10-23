@@ -124,7 +124,7 @@ CREATE TABLE mouvement (
   detail          text,
   montant         numeric(12,2) NOT NULL CHECK (montant <> 0),
   -- Ce qu'est le mouvement : paiement d'un locataire, travaux et dépôt de garantie ont un détail
-  -- (paiement.mouvement_id, reglement_travaux.mouvement_id, versement_depot.mouvement_id) qui doit couvrir le montant ;
+  -- (paiement.mouvement_id, reglement_travaux.mouvement_id, versement_depot.mouvement_id ; reglement_facture, facultatif) qui doit couvrir le montant ;
   -- « agence » : loyers reversés par une agence de gestion, sans détail (ADR 0018, 0019)
   categorie       text CONSTRAINT mouvement_categorie_check CHECK (categorie IN ('locataire', 'travaux',
     'depot_garantie', 'agence', 'emprunt', 'assurance', 'energie', 'eau', 'impots', 'frais_bancaires', 'copropriete',
@@ -337,6 +337,17 @@ CREATE TABLE reglement_travaux (
   UNIQUE (travaux_id, mouvement_id)
 );
 CREATE INDEX ON reglement_travaux (mouvement_id);
+
+-- ADR 0022 : les factures des charges (gaz, électricité, eau, taxe foncière) réglées par des mouvements bancaires, comme
+-- les travaux : un ou plusieurs règlements ; leur total ne dépasse ni la facture ni le mouvement
+CREATE TABLE reglement_facture (
+  id             serial PRIMARY KEY,
+  facture_id     int NOT NULL REFERENCES facture(id) ON DELETE CASCADE,
+  mouvement_id   int NOT NULL REFERENCES mouvement(id) ON DELETE CASCADE,
+  montant        numeric(12,2) NOT NULL CHECK (montant > 0),
+  UNIQUE (facture_id, mouvement_id)
+);
+CREATE INDEX ON reglement_facture (mouvement_id);
 
 -- ADR 0016 : la société (SCI), ses associés et leurs parts, ses assemblées générales et leurs procès-verbaux ;
 -- une assemblée close est numérotée dans le registre et figée.

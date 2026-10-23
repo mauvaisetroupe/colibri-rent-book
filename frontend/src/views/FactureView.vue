@@ -5,7 +5,7 @@ import { onBeforeRouteLeave, RouterLink, useRouter } from 'vue-router'
 
 import {
   api, ApiError, CATEGORIES, ENERGIES, STATUTS, type Controle, type Facture, type FactureDetail, type FactureResumee,
-  type FactureSaisie, type LiensFacture, type RegularisationTouchee,
+  type FactureSaisie, type LiensFacture, type MouvementPourFacture, type ReglementFacture, type RegularisationTouchee,
 } from '../api'
 import { dateFr, depuisGrille, euros, ligneVide, nombreApi, nombreFr, versGrille, type LigneGrille } from '../format'
 
@@ -22,6 +22,9 @@ const message = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
 const ligneActive = ref<number | null>(null)
 
 const liens = ref<LiensFacture | null>(null)
+// Its payments by bank movements (ADR 0022), and the debits offered to link one
+const reglements = ref<ReglementFacture[]>([])
+const reglement = ref<{ mouvements: MouvementPourFacture[], choisi: number | null } | null>(null)
 // Sent regularisations touched by a replacement just made: to check (ADR 0017)
 const touchees = ref<RegularisationTouchee[]>([])
 
@@ -62,6 +65,7 @@ async function charger() {
 function appliquer(detail: FactureDetail) {
   facture.value = detail.facture
   liens.value = detail.liens
+  reglements.value = detail.reglements
   Object.assign(entete, {
     numero: detail.facture.numero,
     date_facture: detail.facture.date_facture,
@@ -196,6 +200,27 @@ async function executer(action: () => Promise<FactureDetail & { regularisations?
 }
 
 const enregistrer = () => executer(() => api.enregistrer(props.id, saisie()), 'Brouillon enregistré')
+
+// ---------------------------------------------------------------- payments (ADR 0022)
+
+async function ouvrirReglement() {
+  try {
+    const mouvements = await api.mouvementsPourFacture(props.id)
+    reglement.value = { mouvements, choisi: mouvements.find((m) => m.correspond)?.id ?? null }
+  } catch (e) {
+    message.value = { texte: (e as Error).message, type: 'erreur' }
+  }
+}
+
+async function regler() {
+  const choisi = reglement.value?.choisi
+  if (choisi && await executer(() => api.reglerFacture(props.id, choisi), 'Paiement rattaché')) {
+    reglement.value = null
+  }
+}
+
+const detacherReglement = (r: ReglementFacture) =>
+  executer(() => api.supprimerReglementFacture(props.id, r.id), 'Paiement détaché (le mouvement reste dans la banque)')
 
 async function valider() {
   if (modifie.value && !(await enregistrer())) {
@@ -456,6 +481,39 @@ onBeforeUnmount(() => {
             <button type="button" :disabled="occupe" @click="ouvrirRemplacement">Remplacer par…</button>
           </template>
         </div>
+
+        <!-- Payments by bank movements (ADR 0022) -->
+        <section v-if="facture.statut === 'validee' || reglements.length" class="reglements">
+          <h2>
+            Paiement
+            <span v-if="Number(facture.reste) <= 0" class="ok">✓ payée</span>
+            <span v-else-if="reglements.length">reste {{ euros(facture.reste) }} à payer</span>
+            <span v-else class="discret">aucun mouvement bancaire rattaché</span>
+          </h2>
+          <ul v-if="reglements.length">
+            <li v-for="r in reglements" :key="r.id">
+              {{ dateFr(r.date_paiement) }} · {{ r.libelle }} : <strong>{{ euros(r.montant) }}</strong>
+              <RouterLink :to="{ name: 'banque', query: { mouvement: r.mouvement_id } }">voir dans la banque</RouterLink>
+              <button v-if="validee" type="button" :disabled="occupe" @click="detacherReglement(r)">Détacher</button>
+            </li>
+          </ul>
+          <template v-if="validee && Number(facture.reste) > 0">
+            <button v-if="!reglement" type="button" :disabled="occupe" @click="ouvrirReglement">Rattacher un paiement…</button>
+            <form v-else class="formulaire" @submit.prevent="regler">
+              <label v-if="reglement.mouvements.length">Mouvement bancaire
+                <select v-model="reglement.choisi" required>
+                  <option :value="null" disabled>Choisir un débit</option>
+                  <option v-for="m in reglement.mouvements" :key="m.id" :value="m.id">
+                    {{ m.correspond ? '✓ même montant · ' : '' }}{{ dateFr(m.date_operation) }} · {{ m.libelle }} : {{ euros(m.montant) }}{{ Number(m.reste) < Math.abs(Number(m.montant)) ? ` (reste ${euros(m.reste)})` : '' }}
+                  </option>
+                </select>
+              </label>
+              <span v-else class="discret">Aucun débit « énergie », « eau », « impôts » ou sans catégorie qui ne soit déjà rattaché.</span>
+              <button type="submit" class="principal" :disabled="occupe || !reglement.choisi">Rattacher</button>
+              <button type="button" @click="reglement = null">Annuler</button>
+            </form>
+          </template>
+        </section>
 
         <form v-if="remplacement" class="formulaire" @submit.prevent="remplacer">
           <label>Remplacée par
