@@ -545,8 +545,8 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
 
   // ---------------------------------------------------------------- payments (ADR 0022)
 
-  // The debits that may pay this invoice: « energie », « eau », « impots » or without category, not covered in full;
-  // those of the same amount as its rest first, then by closeness to its date
+  // The movements that may pay this invoice: debits (or a credit refunding it) « energie », « eau », « impots » or
+  // without category, not covered in full; those of the same amount as its rest first, then by closeness to its date
   app.get('/factures/:id/mouvements', async (request, reply) => {
     const id = Number((request.params as { id: string }).id)
     const { rows: [f] } = await db.query<{ reste: string, date_facture: string | null }>(
@@ -559,18 +559,20 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
          SELECT m.id, m.date_operation::text, m.libelle, m.montant::text, m.categorie,
                 (abs(m.montant) - ${COUVERT_SQL})::text AS reste
          FROM mouvement m
-         WHERE m.montant < 0 AND (m.categorie IS NULL OR m.categorie = ANY($1))
+         WHERE (m.categorie IS NULL OR m.categorie = ANY($1))
            AND NOT EXISTS (SELECT 1 FROM reglement_facture rf WHERE rf.facture_id = $2 AND rf.mouvement_id = m.id)
        ) x
        WHERE reste::numeric > 0
-       ORDER BY (reste::numeric = $3::numeric) DESC, abs(date_operation::date - coalesce($4::date, date_operation::date)), id
+       ORDER BY (reste::numeric = $3::numeric AND montant::numeric < 0) DESC,
+                abs(date_operation::date - coalesce($4::date, date_operation::date)), id
        LIMIT 200`,
       [AVEC_FACTURE, id, f.reste, f.date_facture],
     )
-    return rows.map((m) => ({ ...m, correspond: new Big(m.reste).eq(f.reste) }))
+    return rows.map((m) => ({ ...m, correspond: new Big(m.montant).lt(0) && new Big(m.reste).eq(f.reste) }))
   })
 
-  // Linked to a debit: a payment of what remains of the movement, no more than what remains of the invoice
+  // Linked to a debit: a payment of what remains of the movement, no more than what remains of the invoice; to a
+  // credit: a refund
   app.post('/factures/:id/reglements', async (request, reply) => {
     const id = Number((request.params as { id: string }).id)
     try {

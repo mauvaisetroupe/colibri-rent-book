@@ -87,7 +87,7 @@ export async function loadDetail(db: Pool, { immeuble, debut, fin }: Exercice, f
 // Lines that tell whether a period is covered: consumption for gas and electricity (subscriptions are billed in
 // advance, taxes overlap by design), every recoverable line for the other energies.
 const COVERING_LINES = `
-  SELECT l.id, f.id AS facture_id, f.energie, f.numero, fo.nom AS fournisseur, l.libelle, l.periode
+  SELECT l.id, f.id AS facture_id, f.energie, f.numero, fo.nom AS fournisseur, l.libelle, l.categorie, l.periode
   FROM ligne_facture l
   JOIN facture f ON f.id = l.facture_id
   JOIN fournisseur fo ON fo.id = f.fournisseur_id
@@ -144,7 +144,10 @@ export async function loadCouverture(db: Pool, { immeuble, debut, fin }: Exercic
               'libelle', a.libelle, 'debut', lower(a.periode), 'fin', upper(a.periode) - 1) AS ligne_a,
             json_build_object('facture_id', b.facture_id, 'fournisseur', b.fournisseur, 'numero', b.numero,
               'libelle', b.libelle, 'debut', lower(b.periode), 'fin', upper(b.periode) - 1) AS ligne_b
+     -- Counted twice: lines of the same kind from two invoices (within one invoice, its lines are its detail: off-peak
+     -- and peak over the same period, a subscription billed ahead of the consumption)
      FROM lig a JOIN lig b ON a.energie = b.energie AND a.id < b.id AND a.periode && b.periode
+       AND a.facture_id <> b.facture_id AND a.categorie = b.categorie
      WHERE NOT isempty(a.periode * b.periode * daterange($2::date, $3::date, '[]'))
      ORDER BY a.energie, lower(a.periode * b.periode)`,
     params,

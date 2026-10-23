@@ -377,8 +377,10 @@ function ouvrirRattachement(m: Mouvement) {
   const correspond = (l: Possible) => correspondants.some((c) => clePossible(c) === clePossible(l))
   let choix: Choix[]
   if (payeFactures(m)) {
-    // Validated invoices not paid in full, of the energies of the category: this debit pays their rest, or a part of it
-    choix = factures.value.filter((f) => f.statut === 'validee' && Number(f.reste) > 0 && categorieDeFacture(f.energie) === m.categorie)
+    // Validated invoices of the energies of the category: a debit pays their rest, or a part of it (those not paid in
+    // full); a credit refunds one (any, the latest first)
+    choix = factures.value.filter((f) => f.statut === 'validee' && (estCredit(m) || Number(f.reste) > 0)
+      && categorieDeFacture(f.energie) === m.categorie)
       .map((f) => {
         const l: Possible = { type: 'facture', id: f.id, fournisseur: f.fournisseur, numero: f.numero, energie: f.energie, date: f.date_facture }
         return {
@@ -802,7 +804,8 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
               <li v-for="f in data.factures" :key="`f${f.reglement_id}`">
                 <span class="oi oi-file" />
                 <span>
-                  {{ f.fournisseur }} n° {{ f.numero }} ({{ ENERGIES[f.energie as Energie] }}) : règlement de <strong>{{ euros(f.total) }}</strong>
+                  {{ f.fournisseur }} n° {{ f.numero }} ({{ ENERGIES[f.energie as Energie] }}) :
+                  {{ Number(f.total) < 0 ? 'remboursement de' : 'règlement de' }} <strong>{{ euros(new Big(f.total).abs().toString()) }}</strong>
                   <span class="discret">
                     (facture du {{ dateFr(f.date_facture) }} de {{ euros(f.montant_ttc) }}{{ Number(f.reste) > 0 ? `, reste ${euros(f.reste)} à payer` : ', payée en entier' }})
                   </span>

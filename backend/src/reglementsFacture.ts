@@ -6,8 +6,9 @@ import { COUVERT_SQL, categoriserSiVide, verifierMouvement } from './couverture.
 import { InputError } from './http.js'
 
 // Payments of invoices of charges by bank movements (ADR 0022): a validated invoice, a debit « energie », « eau » or
-// « impots » (or without category, given that of the invoice), an amount. Linked from the movement (Banque) or from the
-// invoice; when an invoice is replaced, its payments go to the one replacing it.
+// « impots » (or without category, given that of the invoice), an amount; a credit refunding the invoice (monthly
+// payments above the yearly invoice) is a negative payment. Linked from the movement (Banque) or from the invoice; when
+// an invoice is replaced, its payments go to the one replacing it.
 
 /** SQL: what remains to pay of the invoice « f » (its total less its payments). */
 export const RESTE_FACTURE_SQL = `(coalesce(f.montant_ttc, 0)
@@ -22,8 +23,10 @@ export const NUMERO_LISIBLE_SQL = `substring(f.numero from '(\\d{5,})\\D*$')`
 export class IntrouvableError extends Error {}
 
 /**
- * A payment of the invoice by the movement: what remains of the movement, no more than what remains of the invoice (a
- * debit paying two invoices is linked to both). A second link of the same pair adds to the first.
+ * A payment of the invoice by the movement: for a debit, what remains of the movement, no more than what remains of the
+ * invoice (a debit paying two invoices is linked to both); for a credit, a refund: what remains of it, as a negative
+ * payment (the invoice then has that much more to pay, the monthly payments that exceeded it). A second link of the same
+ * pair adds to the first.
  */
 export async function reglerFacture(db: Pool | PoolClient, factureId: number, mouvementId: number) {
   const { rows: [f] } = await db.query<{ statut: string, energie: string, reste: string }>(
@@ -41,12 +44,16 @@ export async function reglerFacture(db: Pool | PoolClient, factureId: number, mo
     throw new IntrouvableError('Mouvement introuvable')
   }
   const resteMouvement = new Big(m.montant).abs().minus(m.couvert)
-  const montant = resteMouvement.lt(f.reste) ? resteMouvement : new Big(f.reste)
-  if (!montant.gt(0)) {
+  const credit = new Big(m.montant).gt(0)
+  if (credit && !resteMouvement.gt(0)) {
+    throw new InputError('Ce mouvement est déjà rattaché en entier')
+  }
+  const montant = credit ? resteMouvement.times(-1) : resteMouvement.lt(f.reste) ? resteMouvement : new Big(f.reste)
+  if (!credit && !montant.gt(0)) {
     throw new InputError(new Big(f.reste).gt(0) ? 'Ce mouvement est déjà rattaché en entier' : 'Cette facture est déjà réglée en entier')
   }
   await verifierMouvement(db, mouvementId, {
-    categories: AVEC_FACTURE, signe: -1, montant, detail: 'reglement_facture', exclure: null,
+    categories: AVEC_FACTURE, signe: credit ? 1 : -1, montant, detail: 'reglement_facture', exclure: null,
   })
   await db.query(
     `INSERT INTO reglement_facture (facture_id, mouvement_id, montant) VALUES ($1, $2, $3)

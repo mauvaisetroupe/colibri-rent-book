@@ -26,6 +26,10 @@ Ce qu'on voit dans les relevés d'une exploitation réelle :
 - **Payé, c'est vu à la banque**, comme pour les travaux (ADR 0019) : une facture validée a ses **règlements**
   (`reglement_facture` : un mouvement, un montant positif). Un paiement en deux fois fait deux règlements ; un
   prélèvement qui paie deux factures, un règlement sur chacune. Leur total ne dépasse ni la facture ni le mouvement.
+- **Un remboursement est un règlement négatif** (ajouté le 2026-10-23, migration 021) : une mensualisation qui a
+  prélevé plus que la facture annuelle est remboursée par un crédit ; ce crédit (« énergie », « eau » ou « impôts et
+  taxes », catégories désormais possibles pour un crédit) se rattache à la facture pour tout son reste, en négatif. La
+  facture a alors d'autant plus à régler, ce que couvrent les mensualités : rattacher le remboursement d'abord.
 - Seule une facture **validée** se règle (un brouillon n'est pas encore une facture). Quand une facture est remplacée
   (« Corriger… » validé ou « Remplacer par… », ADR 0017), **ses règlements passent à la facture qui la remplace** : le
   paiement suit le document qui compte.

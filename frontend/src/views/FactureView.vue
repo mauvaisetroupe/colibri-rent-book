@@ -492,23 +492,25 @@ onBeforeUnmount(() => {
           </h2>
           <ul v-if="reglements.length">
             <li v-for="r in reglements" :key="r.id">
-              {{ dateFr(r.date_paiement) }} · {{ r.libelle }} : <strong>{{ euros(r.montant) }}</strong>
+              {{ dateFr(r.date_paiement) }} · {{ r.libelle }} :
+              <template v-if="Number(r.montant) < 0">remboursement de <strong>{{ euros(r.montant.replace('-', '')) }}</strong></template>
+              <strong v-else>{{ euros(r.montant) }}</strong>
               <RouterLink :to="{ name: 'banque', query: { mouvement: r.mouvement_id } }">voir dans la banque</RouterLink>
               <button v-if="validee" type="button" :disabled="occupe" @click="detacherReglement(r)">Détacher</button>
             </li>
           </ul>
-          <template v-if="validee && Number(facture.reste) > 0">
+          <template v-if="validee">
             <button v-if="!reglement" type="button" :disabled="occupe" @click="ouvrirReglement">Rattacher un paiement…</button>
             <form v-else class="formulaire" @submit.prevent="regler">
               <label v-if="reglement.mouvements.length">Mouvement bancaire
                 <select v-model="reglement.choisi" required>
-                  <option :value="null" disabled>Choisir un débit</option>
+                  <option :value="null" disabled>Choisir un débit (ou un crédit qui la rembourse)</option>
                   <option v-for="m in reglement.mouvements" :key="m.id" :value="m.id">
                     {{ m.correspond ? '✓ même montant · ' : '' }}{{ dateFr(m.date_operation) }} · {{ m.libelle }} : {{ euros(m.montant) }}{{ Number(m.reste) < Math.abs(Number(m.montant)) ? ` (reste ${euros(m.reste)})` : '' }}
                   </option>
                 </select>
               </label>
-              <span v-else class="discret">Aucun débit « énergie », « eau », « impôts » ou sans catégorie qui ne soit déjà rattaché.</span>
+              <span v-else class="discret">Aucun mouvement « énergie », « eau », « impôts » ou sans catégorie qui ne soit déjà rattaché.</span>
               <button type="submit" class="principal" :disabled="occupe || !reglement.choisi">Rattacher</button>
               <button type="button" @click="reglement = null">Annuler</button>
             </form>

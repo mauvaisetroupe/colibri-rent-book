@@ -14,7 +14,7 @@ export type Detail = 'paiement' | 'reglement_travaux' | 'reglement_facture' | 'v
 export const COUVERT_SQL = `(
   abs((SELECT coalesce(sum(p.loyer + p.provision + p.regularisation), 0) FROM paiement p WHERE p.mouvement_id = m.id))
   + (SELECT coalesce(sum(rt.montant), 0) FROM reglement_travaux rt WHERE rt.mouvement_id = m.id)
-  + (SELECT coalesce(sum(rf.montant), 0) FROM reglement_facture rf WHERE rf.mouvement_id = m.id)
+  + abs((SELECT coalesce(sum(rf.montant), 0) FROM reglement_facture rf WHERE rf.mouvement_id = m.id))
   + abs((SELECT coalesce(sum(vd.montant), 0) FROM versement_depot vd WHERE vd.mouvement_id = m.id)))`
 
 /**
@@ -30,8 +30,8 @@ export async function verifierMouvement(db: Pool | PoolClient, mouvementId: numb
             WHERE mouvement_id = m.id AND NOT ($2 = 'paiement' AND id = $3)))
        + (SELECT coalesce(sum(montant), 0) FROM reglement_travaux
           WHERE mouvement_id = m.id AND NOT ($2 = 'reglement_travaux' AND id = $3))
-       + (SELECT coalesce(sum(montant), 0) FROM reglement_facture
-          WHERE mouvement_id = m.id AND NOT ($2 = 'reglement_facture' AND id = $3))
+       + abs((SELECT coalesce(sum(montant), 0) FROM reglement_facture
+              WHERE mouvement_id = m.id AND NOT ($2 = 'reglement_facture' AND id = $3)))
        + abs((SELECT coalesce(sum(montant), 0) FROM versement_depot
               WHERE mouvement_id = m.id AND NOT ($2 = 'versement_depot' AND id = $3))))::text AS couvert
      FROM mouvement m WHERE m.id = $1`,
@@ -46,7 +46,7 @@ export async function verifierMouvement(db: Pool | PoolClient, mouvementId: numb
   const montant = new Big(m.montant)
   if (montant.gt(0) !== (o.signe > 0)) {
     throw new InputError(o.detail === 'reglement_travaux' ? 'Des travaux se rattachent à un débit du relevé'
-      : o.detail === 'reglement_facture' ? 'Une facture se rattache à un débit du relevé'
+      : o.detail === 'reglement_facture' ? 'Une facture se règle par un débit, ou se rembourse par un crédit'
       : o.signe > 0 ? 'Un versement reçu se rattache à un crédit du relevé'
         : 'Un débit du relevé ne porte qu\'un remboursement au locataire (montant négatif)')
   }

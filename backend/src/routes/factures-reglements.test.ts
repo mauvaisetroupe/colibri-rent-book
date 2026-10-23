@@ -120,10 +120,10 @@ describe('payments of invoices', { skip: skipWithoutDatabase }, () => {
     assert.equal(encore.statusCode, 400)
   })
 
-  test('a credit, a works debit, a draft are refused', async () => {
+  test('a tenant credit, a works debit, a draft are refused', async () => {
     const f = await facture('Énergie Exemple', 'gaz', '90000000002', '111.11')
     const credit = (await pool.query<{ id: number }>(
-      `INSERT INTO mouvement (releve_id, ordre, date_operation, libelle, montant) VALUES ($1, $2, '2026-04-01', 'RBT', 111.11)
+      `INSERT INTO mouvement (releve_id, ordre, date_operation, libelle, montant, categorie) VALUES ($1, $2, '2026-04-01', 'VIR LOCATAIRE', 111.11, 'locataire')
        RETURNING id`, [releve, ordre++])).rows[0]!.id
     assert.equal((await app.inject({ method: 'POST', url: `/api/mouvements/${credit}/lier`, payload: { facture_id: f } })).statusCode, 400)
     const travaux = await debit('2026-04-01', 'VIR ARTISAN', '111.11', 'travaux')
@@ -134,6 +134,26 @@ describe('payments of invoices', { skip: skipWithoutDatabase }, () => {
     })).json().facture.id
     const m = await debit('2026-04-01', 'PRLV SEPA GAZ', '50.00')
     assert.equal((await app.inject({ method: 'POST', url: `/api/mouvements/${m}/lier`, payload: { facture_id: brouillon } })).statusCode, 400)
+  })
+
+  test('a monthly payment plan above the yearly invoice: the refund is a negative payment', async () => {
+    const f = await facture('Énergie Exemple', 'electricite', '90000000004', '300.00')
+    const credit = (await pool.query<{ id: number }>(
+      `INSERT INTO mouvement (releve_id, ordre, date_operation, libelle, montant) VALUES ($1, $2, '2026-03-01', 'VIR RBT ENERGIE', 60)
+       RETURNING id`, [releve, ordre++])).rows[0]!.id
+    const mensualites = [await debit('2026-01-10', 'PRLV MENSUALITE', '120.00'), await debit('2026-02-10', 'PRLV MENSUALITE', '120.00'),
+      await debit('2026-02-25', 'PRLV MENSUALITE', '120.00')]
+    // The refund first: the invoice has 60 more to pay, the three monthly payments then pay it in full
+    const rembourse = await app.inject({ method: 'POST', url: `/api/mouvements/${credit}/lier`, payload: { facture_id: f } })
+    assert.equal(rembourse.statusCode, 200, rembourse.body)
+    assert.deepEqual([rembourse.json().categorie, rembourse.json().statut, rembourse.json().factures[0].total], ['energie', 'categorise', '-60.00'])
+    for (const m of mensualites) {
+      assert.equal((await app.inject({ method: 'POST', url: `/api/mouvements/${m}/lier`, payload: { facture_id: f } })).statusCode, 200)
+    }
+    const r = await resume(f)
+    assert.deepEqual([r.paye, r.reste], ['300.00', '0.00'])
+    assert.deepEqual((await app.inject(`/api/factures/${f}`)).json().reglements.map((x: { montant: string }) => x.montant),
+      ['120.00', '120.00', '120.00', '-60.00'])
   })
 
   test('the payments of a corrected invoice go to its correction', async () => {

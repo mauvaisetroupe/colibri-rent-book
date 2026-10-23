@@ -411,8 +411,9 @@ export const CATEGORIES_MOUVEMENT: Record<CategorieMouvement, { nom: string, sen
   agence: { nom: 'Versement d\'une agence (gérance)', sens: 'tous', icone: 'oi oi-shop' },
   emprunt: { nom: 'Emprunt', sens: 'tous', icone: 'oi oi-building-columns' },
   assurance: { nom: 'Assurance', sens: 'tous', icone: 'oi oi-shield' },
-  energie: { nom: 'Énergie (gaz, électricité)', sens: 'debit', icone: 'oi oi-bolt' },
-  eau: { nom: 'Eau', sens: 'debit', icone: 'oi oi-filter' },
+  // « tous »: a credit may refund an invoice (ADR 0022)
+  energie: { nom: 'Énergie (gaz, électricité)', sens: 'tous', icone: 'oi oi-bolt' },
+  eau: { nom: 'Eau', sens: 'tous', icone: 'oi oi-filter' },
   impots: { nom: 'Impôts et taxes', sens: 'tous', icone: 'oi oi-percentage' },
   frais_bancaires: { nom: 'Frais bancaires', sens: 'tous', icone: 'oi oi-credit-card' },
   copropriete: { nom: 'Copropriété', sens: 'tous', icone: 'oi oi-building' },

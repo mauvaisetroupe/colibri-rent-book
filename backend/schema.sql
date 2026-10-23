@@ -339,12 +339,13 @@ CREATE TABLE reglement_travaux (
 CREATE INDEX ON reglement_travaux (mouvement_id);
 
 -- ADR 0022 : les factures des charges (gaz, électricité, eau, taxe foncière) réglées par des mouvements bancaires, comme
--- les travaux : un ou plusieurs règlements ; leur total ne dépasse ni la facture ni le mouvement
+-- les travaux : un ou plusieurs règlements ; leur total ne dépasse ni la facture ni le mouvement ; un crédit qui
+-- rembourse la facture (mensualités supérieures à la facture annuelle) est un règlement négatif
 CREATE TABLE reglement_facture (
   id             serial PRIMARY KEY,
   facture_id     int NOT NULL REFERENCES facture(id) ON DELETE CASCADE,
   mouvement_id   int NOT NULL REFERENCES mouvement(id) ON DELETE CASCADE,
-  montant        numeric(12,2) NOT NULL CHECK (montant > 0),
+  montant        numeric(12,2) NOT NULL CONSTRAINT reglement_facture_montant_check CHECK (montant <> 0),
   UNIQUE (facture_id, mouvement_id)
 );
 CREATE INDEX ON reglement_facture (mouvement_id);
