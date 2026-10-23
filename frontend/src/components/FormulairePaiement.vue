@@ -6,7 +6,7 @@ import { nombreApi } from '../format'
 
 // One payment received (new or edited), in a modal form: the amount of the bank statement, split into rent,
 // provision and regularisations; the split must add up to the amount (checked again by the API). Opened from a bank
-// movement, a rest may be left (a deposit paid with the rent…): the movement stays « à compléter » until it is linked;
+// movement, a rest may be left (a deposit paid with the rent…): the movement stays « à rattacher » until it is linked;
 // a deposit is entered from the stay (ADR 0021).
 
 // Toward one regularisation; negative: refund paid by the owner

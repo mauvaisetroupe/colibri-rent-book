@@ -48,7 +48,7 @@ const mois = (p: Paiement) => (p.mois ? `${p.mois.slice(5, 7)}/${p.mois.slice(0,
     <template v-else>
       <p class="bilan" :class="problemes ? 'ko' : 'ok'">
         <template v-if="problemes">
-          {{ etat.aCategoriser.length }} mouvement(s) à catégoriser · {{ etat.incomplets.length }} à compléter ·
+          {{ etat.aCategoriser.length }} mouvement(s) à catégoriser · {{ etat.incomplets.length }} à rattacher ·
           {{ etat.sansMouvement.length }} paiement(s) absent(s) des relevés
         </template>
         <template v-else>✓ Relevés complets, chaque mouvement catégorisé, chaque paiement vu sur un relevé</template>
@@ -92,7 +92,7 @@ const mois = (p: Paiement) => (p.mois ? `${p.mois.slice(5, 7)}/${p.mois.slice(0,
       </template>
 
       <template v-if="etat.incomplets.length">
-        <h3>Mouvements à compléter</h3>
+        <h3>Mouvements à rattacher</h3>
         <p class="discret">
           Paiement de locataire, travaux ou dépôt de garantie dont le détail ne couvre pas le montant : un loyer reçu
           mais pas saisi, une facture de travaux (ou son solde) à saisir, ou un dépôt à enregistrer.
