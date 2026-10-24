@@ -5,7 +5,8 @@ import { AVEC_FACTURE, categorieDeFacture } from './categories.js'
 import { COUVERT_SQL, categoriserSiVide, verifierMouvement } from './couverture.js'
 import { InputError } from './http.js'
 
-// Payments of invoices of charges by bank movements (ADR 0022): a validated invoice, a debit « energie », « eau » or
+// Payments of invoices of charges by bank movements (ADR 0022): a validated invoice, or a draft whose total is known
+// (an invoice still to find, typed from the transfer, ADR 0022), a debit « energie », « eau » or
 // « impots » (or without category, given that of the invoice), an amount; a credit refunding the invoice (monthly
 // payments above the yearly invoice) is a negative payment. Linked from the movement (Banque) or from the invoice; when
 // an invoice is replaced, its payments go to the one replacing it.
@@ -32,14 +33,18 @@ export class IntrouvableError extends Error {}
  * pair adds to the first.
  */
 export async function reglerFacture(db: Pool | PoolClient, factureId: number, mouvementId: number) {
-  const { rows: [f] } = await db.query<{ statut: string, energie: string, reste: string }>(
-    `SELECT f.statut, f.energie, ${RESTE_FACTURE_SQL}::text AS reste FROM facture f WHERE f.id = $1`, [factureId])
+  const { rows: [f] } = await db.query<{ statut: string, energie: string, reste: string, montant_ttc: string | null }>(
+    `SELECT f.statut, f.energie, f.montant_ttc::text, ${RESTE_FACTURE_SQL}::text AS reste FROM facture f WHERE f.id = $1`,
+    [factureId])
   if (!f) {
     throw new IntrouvableError('Facture introuvable')
   }
-  if (f.statut !== 'validee') {
-    throw new InputError(f.statut === 'remplacee' ? 'Facture remplacée : régler celle qui la remplace'
-      : 'Seule une facture validée se règle')
+  if (f.statut === 'remplacee') {
+    throw new InputError('Facture remplacée : régler celle qui la remplace')
+  }
+  // A draft counts in no statement: linking it only says what the transfer pays; its total must be known
+  if (f.montant_ttc === null) {
+    throw new InputError('Saisir d\'abord le total imprimé du brouillon (ce qu\'il reste à payer est inconnu)')
   }
   const { rows: [m] } = await db.query<{ montant: string, couvert: string }>(
     `SELECT m.montant::text, ${COUVERT_SQL}::text AS couvert FROM mouvement m WHERE m.id = $1`, [mouvementId])

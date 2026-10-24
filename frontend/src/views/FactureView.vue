@@ -29,6 +29,8 @@ const reglement = ref<{ mouvements: MouvementPourFacture[], choisi: number | nul
 const touchees = ref<RegularisationTouchee[]>([])
 
 const validee = computed(() => facture.value?.statut === 'validee')
+// Paid by bank movements (ADR 0022): a validated invoice, or a draft whose total is known (an invoice still to find)
+const reglable = computed(() => facture.value !== null && facture.value.statut !== 'remplacee' && facture.value.montant_ttc !== null)
 // Validated or replaced: never edited (ADR 0003, 0017)
 const figee = computed(() => facture.value !== null && facture.value.statut !== 'a_verifier')
 
@@ -483,7 +485,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Payments by bank movements (ADR 0022) -->
-        <section v-if="facture.statut === 'validee' || reglements.length" class="reglements">
+        <section v-if="reglable || reglements.length" class="reglements">
           <h2>
             Paiement
             <span v-if="Number(facture.reste) < 0" class="ok">✓ payée, écart de {{ euros(facture.reste.replace('-', '')) }} (solde arrondi)</span>
@@ -497,10 +499,10 @@ onBeforeUnmount(() => {
               <template v-if="Number(r.montant) < 0">remboursement de <strong>{{ euros(r.montant.replace('-', '')) }}</strong></template>
               <strong v-else>{{ euros(r.montant) }}</strong>
               <RouterLink :to="{ name: 'banque', query: { mouvement: r.mouvement_id } }">voir dans la banque</RouterLink>
-              <button v-if="validee" type="button" :disabled="occupe" @click="detacherReglement(r)">Détacher</button>
+              <button v-if="reglable" type="button" :disabled="occupe" @click="detacherReglement(r)">Détacher</button>
             </li>
           </ul>
-          <template v-if="validee">
+          <template v-if="reglable">
             <button v-if="!reglement" type="button" :disabled="occupe" @click="ouvrirReglement">Rattacher un paiement…</button>
             <form v-else class="formulaire" @submit.prevent="regler">
               <label v-if="reglement.mouvements.length">Mouvement bancaire

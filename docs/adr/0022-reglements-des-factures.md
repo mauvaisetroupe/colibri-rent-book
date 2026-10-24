@@ -30,7 +30,11 @@ Ce qu'on voit dans les relevés d'une exploitation réelle :
   prélevé plus que la facture annuelle est remboursée par un crédit ; ce crédit (« énergie », « eau » ou « impôts et
   taxes », catégories désormais possibles pour un crédit) se rattache à la facture pour tout son reste, en négatif. La
   facture a alors d'autant plus à régler, ce que couvrent les mensualités : rattacher le remboursement d'abord.
-- Seule une facture **validée** se règle (un brouillon n'est pas encore une facture). Quand une facture est remplacée
+- Se règle une facture **validée**, ou un **brouillon dont le total est saisi** (modifié le 2026-10-24) : une facture à
+  retrouver se saisit d'après le virement (fournisseur, numéro, montant), le virement s'y rattache, et le brouillon se
+  complète plus tard (PDF, lignes, validation). Un brouillon ne compte dans aucun décompte : le rattacher dit seulement
+  ce que paie le virement. Son total ne peut plus descendre sous ce qui lui est rattaché ; supprimé, ses règlements
+  disparaissent avec lui (le virement redevient à rattacher). Quand une facture est remplacée
   (« Corriger… » validé ou « Remplacer par… », ADR 0017), **ses règlements passent à la facture qui la remplace** : le
   paiement suit le document qui compte.
 - **Un règlement naît d'un rattachement** : depuis le mouvement (Banque, « Rattacher à une facture… ») ou depuis la

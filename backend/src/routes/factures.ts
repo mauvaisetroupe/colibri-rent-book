@@ -387,6 +387,15 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
             : 'Facture validée : elle n\'est plus modifiable (« Corriger » ou « Remplacer par… »)',
         })
       }
+      // A draft already paid (ADR 0022): its total stays known, and no lower than what is linked to it
+      const { rows: [paye] } = await client.query<{ paye: string }>(
+        'SELECT coalesce(sum(montant), 0)::text AS paye FROM reglement_facture WHERE facture_id = $1', [id])
+      if (new Big(paye!.paye).gt(0) && (header.montant_ttc === null || new Big(paye!.paye).gt(header.montant_ttc))) {
+        await client.query('ROLLBACK')
+        return reply.code(422).send({
+          message: `Des paiements de ${new Big(paye!.paye).toFixed(2)} € sont rattachés : le total ne peut pas être inférieur`,
+        })
+      }
       await client.query(
         'UPDATE facture SET numero = $2, date_facture = $3, montant_ttc = $4, energie = $5, note = $6 WHERE id = $1',
         [id, header.numero, header.date_facture, header.montant_ttc, header.energie, header.note],

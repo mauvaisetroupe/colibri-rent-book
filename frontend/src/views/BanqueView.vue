@@ -283,7 +283,7 @@ function libellePossible(p: Possible) {
     return `${p.fournisseur} : ${p.description}`
   }
   if (p.type === 'facture') {
-    return `${p.fournisseur} n° ${p.numero}`
+    return `${p.fournisseur} n° ${p.numero}${p.statut === 'a_verifier' ? ' (brouillon)' : ''}`
   }
   if (p.type === 'groupe') {
     return `${p.locataire}, ${p.ids.length} paiements : ${p.mois}`
@@ -379,13 +379,14 @@ function ouvrirRattachement(m: Mouvement) {
   if (payeFactures(m)) {
     // Validated invoices of the energies of the category: a debit pays their rest, or a part of it (those not paid in
     // full); a credit refunds one (any, the latest first)
-    choix = factures.value.filter((f) => f.statut === 'validee' && (estCredit(m) || Number(f.reste) > 0)
-      && categorieDeFacture(f.energie) === m.categorie)
+    // (a draft with a total too: an invoice still to find, typed from the transfer)
+    choix = factures.value.filter((f) => (f.statut === 'validee' || (f.statut === 'a_verifier' && f.montant_ttc !== null))
+      && (estCredit(m) || Number(f.reste) > 0) && categorieDeFacture(f.energie) === m.categorie)
       .map((f) => {
-        const l: Possible = { type: 'facture', id: f.id, fournisseur: f.fournisseur, numero: f.numero, energie: f.energie, date: f.date_facture }
+        const l: Possible = { type: 'facture', id: f.id, fournisseur: f.fournisseur, numero: f.numero, energie: f.energie, date: f.date_facture, statut: f.statut }
         return {
           cle: clePossible(l),
-          texte: `${f.fournisseur} n° ${f.numero} (${ENERGIES[f.energie]}), du ${dateFr(f.date_facture)} de ${euros(f.montant_ttc)}`
+          texte: `${f.fournisseur} n° ${f.numero}${f.statut === 'a_verifier' ? ' (brouillon)' : ''} (${ENERGIES[f.energie]}), du ${dateFr(f.date_facture)} de ${euros(f.montant_ttc)}`
             + (Number(f.paye) > 0 ? `, reste ${euros(f.reste)}` : ''),
           correspond: correspond(l), lien: l, montant: f.reste, date: f.date_facture,
         }

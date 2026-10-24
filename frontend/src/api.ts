@@ -463,7 +463,7 @@ export type Mouvement = {
     // An invoice whose unpaid rest is the amount; date: that of the invoice
     | { type: 'travaux', id: number, description: string, fournisseur: string, date: string | null }
     // An invoice of charges whose rest is the amount, or whose number is in the label (ADR 0022)
-    | { type: 'facture', id: number, fournisseur: string, numero: string, energie: Energie, date: string | null }
+    | { type: 'facture', id: number, fournisseur: string, numero: string, energie: Energie, date: string | null, statut?: Statut }
     // Several payments of one tenant whose sum is the amount (a transfer of several months); mois: « 10/2025, 11/2025 »
     | { type: 'groupe', ids: number[], locataire: string, lot: string, mois: string })[]
 }

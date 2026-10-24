@@ -157,10 +157,10 @@ const MOUVEMENT_FROM = `mouvement m
         -- the label (a part of the invoice paid by a transfer naming it)
         || coalesce(
           (SELECT jsonb_agg(jsonb_build_object('type', 'facture', 'id', f.id, 'fournisseur', fo.nom, 'numero', f.numero,
-                                               'energie', f.energie, 'date', f.date_facture::text)
+                                               'energie', f.energie, 'date', f.date_facture::text, 'statut', f.statut)
                             ORDER BY abs(f.date_facture - m.date_operation))
            FROM facture f JOIN fournisseur fo ON fo.id = f.fournisseur_id
-           WHERE f.statut = 'validee' AND ${RESTE_FACTURE_SQL} > 0
+           WHERE f.statut IN ('validee', 'a_verifier') AND f.montant_ttc IS NOT NULL AND ${RESTE_FACTURE_SQL} > 0
              AND NOT EXISTS (SELECT 1 FROM reglement_facture rf WHERE rf.facture_id = f.id AND rf.mouvement_id = m.id)
              AND (${RESTE_FACTURE_SQL} = -m.montant
                   OR (${NUMERO_LISIBLE_SQL} IS NOT NULL

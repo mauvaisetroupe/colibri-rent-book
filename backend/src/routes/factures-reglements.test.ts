@@ -120,7 +120,7 @@ describe('payments of invoices', { skip: skipWithoutDatabase }, () => {
     assert.equal(encore.statusCode, 400)
   })
 
-  test('a tenant credit, a works debit, a draft are refused', async () => {
+  test('a tenant credit, a works debit are refused', async () => {
     const f = await facture('Énergie Exemple', 'gaz', '90000000002', '111.11')
     const credit = (await pool.query<{ id: number }>(
       `INSERT INTO mouvement (releve_id, ordre, date_operation, libelle, montant, categorie) VALUES ($1, $2, '2026-04-01', 'VIR LOCATAIRE', 111.11, 'locataire')
@@ -128,12 +128,38 @@ describe('payments of invoices', { skip: skipWithoutDatabase }, () => {
     assert.equal((await app.inject({ method: 'POST', url: `/api/mouvements/${credit}/lier`, payload: { facture_id: f } })).statusCode, 400)
     const travaux = await debit('2026-04-01', 'VIR ARTISAN', '111.11', 'travaux')
     assert.equal((await app.inject({ method: 'POST', url: `/api/mouvements/${travaux}/lier`, payload: { facture_id: f } })).statusCode, 400)
-    const brouillon = (await app.inject({
+  })
+
+  test('a draft whose total is known is paid (an invoice still to find); its total stays above what is linked', async () => {
+    const creer = (numero: string, montant_ttc: string) => app.inject({
       method: 'POST', url: `/api/factures?immeuble=${immeuble}`,
-      payload: { fournisseur: 'Énergie Exemple', energie: 'gaz', numero: 'BROUILLON-1', date_facture: '2026-03-20', montant_ttc: '50' },
-    })).json().facture.id
-    const m = await debit('2026-04-01', 'PRLV SEPA GAZ', '50.00')
-    assert.equal((await app.inject({ method: 'POST', url: `/api/mouvements/${m}/lier`, payload: { facture_id: brouillon } })).statusCode, 400)
+      payload: { fournisseur: 'Eau Exemple', energie: 'eau', numero, date_facture: '2026-03-20', montant_ttc },
+    })
+    // Without a total: what remains is unknown
+    const sansTotal = (await creer('A-TROUVER-0', '')).json().facture.id
+    const m0 = await debit('2026-04-01', 'VIR EAU EXEMPLE', '77.00')
+    assert.equal((await app.inject({ method: 'POST', url: `/api/mouvements/${m0}/lier`, payload: { facture_id: sansTotal } })).statusCode, 400)
+
+    const brouillon = (await creer('A-TROUVER-1', '88.00')).json().facture.id
+    const m = await debit('2026-04-01', 'VIR EAU EXEMPLE A-TROUVER-1', '88.00')
+    assert.ok((await mouvement(m)).possibles.some((p: { id: number, statut: string }) => p.id === brouillon && p.statut === 'a_verifier'))
+    const lie = await app.inject({ method: 'POST', url: `/api/mouvements/${m}/lier`, payload: { facture_id: brouillon } })
+    assert.deepEqual([lie.statusCode, lie.json().statut, lie.json().categorie], [200, 'categorise', 'eau'])
+    assert.equal((await resume(brouillon)).reste, '0.00')
+
+    // Its total no lower than what is linked; then completed and validated, its payment stays
+    const enregistrer = (montant_ttc: string) => app.inject({
+      method: 'PUT', url: `/api/factures/${brouillon}`,
+      payload: {
+        numero: 'A-TROUVER-1', date_facture: '2026-03-20', montant_ttc, energie: 'eau', note: null,
+        lignes: [{ categorie: 'consommation', libelle: 'Consommation', debut: '2026-01-01', fin: '2026-02-28', kwh: null,
+          montant_ht: null, taux_tva: null, montant_ttc, affectation: 'recuperable', note: null }],
+      },
+    })
+    assert.equal((await enregistrer('80.00')).statusCode, 422)
+    assert.equal((await enregistrer('88.00')).statusCode, 200)
+    assert.equal((await app.inject({ method: 'POST', url: `/api/factures/${brouillon}/valider` })).statusCode, 200)
+    assert.deepEqual([(await resume(brouillon)).statut, (await resume(brouillon)).paye], ['validee', '88.00'])
   })
 
   test('a monthly payment plan above the yearly invoice: the refund is a negative payment', async () => {

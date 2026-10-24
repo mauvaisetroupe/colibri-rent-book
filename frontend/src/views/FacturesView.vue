@@ -77,7 +77,8 @@ const affichees = computed(() =>
 const nbAPayer = computed(() => factures.value.filter(aPayer).length)
 
 function paiement(f: FactureResumee) {
-  if (f.statut !== 'validee') {
+  // A replaced invoice, or a draft without a total: nothing to pay; a draft with one may already be paid (ADR 0022)
+  if (f.statut === 'remplacee' || f.montant_ttc === null || (f.statut === 'a_verifier' && Number(f.paye) === 0)) {
     return { classe: 'discret', texte: '', titre: '' }
   }
   const titre = f.date_paiement ? `Dernier règlement le ${dateFr(f.date_paiement)}` : 'Aucun mouvement bancaire rattaché'
