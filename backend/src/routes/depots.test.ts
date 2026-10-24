@@ -105,6 +105,18 @@ describe('deposit of a stay', { skip: skipWithoutDatabase }, () => {
     assert.equal(d.versements, '100.00')
   })
 
+  test('the start of the management of the building: the years before are not counted (ADR 0023)', async () => {
+    const majImmeuble = (debut_gestion: string | null) => app.inject({
+      method: 'PUT', url: `/api/immeubles/${immeuble}`, payload: { nom: 'Immeuble fictif', adresse: null, debut_gestion },
+    })
+    assert.equal((await majImmeuble('2024-01-01')).json().debut_gestion, '2024-01-01')
+    const d = (await app.inject(`/api/fiscal?immeuble=${immeuble}&annee=2024`)).json().departs[0]
+    // The cheque paid the regularisation 2023, before the start: not counted any more
+    assert.deepEqual([d.debut_calcul, d.versements], ['2024-01-01', '0'])
+    await majImmeuble(null)
+    assert.equal((await app.inject(`/api/fiscal?immeuble=${immeuble}&annee=2024`)).json().departs[0].debut_calcul, '2022-01-01')
+  })
+
   test('removed: the regularisations open again, the deposit is held again', async () => {
     assert.equal((await retenue([])).statusCode, 200)
     const s = await sejourLu()

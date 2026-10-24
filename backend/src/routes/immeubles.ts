@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify'
 import type { Pool } from 'pg'
 
-import { body, idParam, InputError, optionalDecimal, optionalText, requiredText, sendError } from '../http.js'
+import { body, idParam, InputError, optionalDate, optionalDecimal, optionalText, requiredText, sendError } from '../http.js'
 
 // Buildings and their lots. Changing the tantièmes of a lot changes every statement, past ones included
 // (SPEC R11: a key change must be dated; the dated key is a later phase): the screen asks for confirmation.
@@ -24,7 +24,8 @@ function readLot(raw: Record<string, unknown>) {
 const immeubleRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
   app.get('/immeubles', async () => {
     const { rows } = await db.query(
-      `SELECT i.id, i.code, i.nom, i.adresse, count(l.id)::int AS nb_lots, coalesce(sum(l.tantiemes), 0)::int AS total_tantiemes
+      `SELECT i.id, i.code, i.nom, i.adresse, i.debut_gestion::text, count(l.id)::int AS nb_lots,
+              coalesce(sum(l.tantiemes), 0)::int AS total_tantiemes
        FROM immeuble i LEFT JOIN lot l ON l.immeuble_id = i.id
        GROUP BY i.id ORDER BY i.nom`,
     )
@@ -33,7 +34,7 @@ const immeubleRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => 
 
   app.get('/immeubles/:id', async (request, reply) => {
     const id = idParam(request)
-    const { rows: [immeuble] } = await db.query('SELECT id, code, nom, adresse FROM immeuble WHERE id = $1', [id])
+    const { rows: [immeuble] } = await db.query('SELECT id, code, nom, adresse, debut_gestion::text FROM immeuble WHERE id = $1', [id])
     if (!immeuble) {
       return reply.code(404).send({ message: 'Immeuble introuvable' })
     }
@@ -45,8 +46,10 @@ const immeubleRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => 
     try {
       const b = body(request)
       const { rows: [created] } = await db.query(
-        'INSERT INTO immeuble (code, nom, adresse) VALUES ($1, $2, $3) RETURNING id, code, nom, adresse',
-        [requiredText(b.code, 'Code').toUpperCase(), requiredText(b.nom, 'Nom'), optionalText(b.adresse)],
+        `INSERT INTO immeuble (code, nom, adresse, debut_gestion) VALUES ($1, $2, $3, $4)
+         RETURNING id, code, nom, adresse, debut_gestion::text`,
+        [requiredText(b.code, 'Code').toUpperCase(), requiredText(b.nom, 'Nom'), optionalText(b.adresse),
+          optionalDate(b.debut_gestion, 'Début de la gestion')],
       )
       return reply.code(201).send(created)
     } catch (error) {
@@ -58,8 +61,9 @@ const immeubleRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => 
     try {
       const b = body(request)
       const { rows: [updated] } = await db.query(
-        'UPDATE immeuble SET nom = $2, adresse = $3 WHERE id = $1 RETURNING id, code, nom, adresse',
-        [idParam(request), requiredText(b.nom, 'Nom'), optionalText(b.adresse)],
+        `UPDATE immeuble SET nom = $2, adresse = $3, debut_gestion = $4 WHERE id = $1
+         RETURNING id, code, nom, adresse, debut_gestion::text`,
+        [idParam(request), requiredText(b.nom, 'Nom'), optionalText(b.adresse), optionalDate(b.debut_gestion, 'Début de la gestion')],
       )
       return updated ?? reply.code(404).send({ message: 'Immeuble introuvable' })
     } catch (error) {

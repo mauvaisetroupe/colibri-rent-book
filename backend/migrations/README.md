@@ -42,3 +42,4 @@ après une mise à jour qui les change ; le fichier est rejouable.
 | `019_retenue_depot.sql` | 0021 | Mode de paiement `depot` (retenue sur le dépôt, jamais rattachée à un mouvement), `sejour.depot_retenu_charges` supprimée (valeur saisie reportée dans la note du séjour) |
 | `020_reglement_facture.sql` | 0022 | Règlements des factures des charges (gaz, électricité, eau, taxe foncière) par des mouvements bancaires |
 | `021_reglement_facture_remboursement.sql` | 0022 | Un crédit qui rembourse une facture des charges est un règlement négatif |
+| `022_immeuble_debut_gestion.sql` | 0023 | Date de début de la gestion d'un immeuble dans l'application |

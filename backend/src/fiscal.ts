@@ -3,7 +3,7 @@ import type { Pool } from 'pg'
 
 import { frenchDate } from './format.js'
 import { inclusiveBounds } from './periods.js'
-import { loadCouverture, loadDecompte } from './statements.js'
+import { debutGestion, loadCouverture, loadDecompte } from './statements.js'
 
 // Tax summary of a calendar year (SPEC § 9, to be checked by the accountant): charges borne during vacancy,
 // recoverable charges not repaid by the 31/12 of the year a tenant left (whole stay), deposits kept for charges.
@@ -15,6 +15,9 @@ export type Depart = {
   lot: string
   entree: string
   sortie: string
+  // Start of the computation: the entry, or the start of the management of the building when later (ADR 0023: the
+  // years before, managed by an agency, are not counted)
+  debut_calcul: string
   charges: string
   provisions: string
   versements: string
@@ -78,15 +81,19 @@ export async function syntheseFiscale(db: Pool, immeuble: number, annee: number)
     [immeuble, debut, fin],
   )
 
+  const gestion = await debutGestion(db, immeuble)
   const departs: Depart[] = []
   for (const s of sorties) {
-    const sejour = { immeuble, debut: s.entree, fin: s.sortie }
+    const debutCalcul = gestion && gestion > s.entree ? gestion : s.entree
+    const sejour = { immeuble, debut: debutCalcul, fin: s.sortie }
     const [{ sejours }, couverture] = await Promise.all([loadDecompte(db, sejour), loadCouverture(db, sejour)])
     const row = sejours.find((r) => r.sejour_id === s.sejour_id)
     const { rows: [paye] } = await db.query<{ montant: string }>(
-      `SELECT coalesce(sum(regularisation), 0)::text AS montant FROM paiement
-       WHERE sejour_id = $1 AND date_paiement <= $2::date AND mode IS DISTINCT FROM 'depot'`,
-      [s.sejour_id, fin],
+      `SELECT coalesce(sum(p.regularisation), 0)::text AS montant FROM paiement p
+       JOIN regularisation r ON r.id = p.regularisation_id
+       WHERE p.sejour_id = $1 AND p.date_paiement <= $2::date AND p.mode IS DISTINCT FROM 'depot'
+         AND upper(r.exercice) > $3::date`,
+      [s.sejour_id, fin, debutCalcul],
     )
     const charges = row?.total ?? '0'
     const provisions = row?.provisions ?? '0'
@@ -94,6 +101,7 @@ export async function syntheseFiscale(db: Pool, immeuble: number, annee: number)
     const nonRembourse = new Big(charges).minus(provisions).minus(versements)
     departs.push({
       ...s,
+      debut_calcul: debutCalcul,
       charges,
       provisions,
       versements,

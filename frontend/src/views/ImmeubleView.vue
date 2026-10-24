@@ -12,7 +12,7 @@ type LotSaisi = { id: number | null, code: string, designation: string, surface_
 const { immeubleId, pret } = useImmeuble()
 const nouveau = ref<null | { code: string, nom: string, adresse: string }>(null)
 const immeuble = ref<ImmeubleDetail | null>(null)
-const identite = reactive({ nom: '', adresse: '' })
+const identite = reactive({ nom: '', adresse: '', debut_gestion: '' })
 const lots = ref<LotSaisi[]>([])
 const message = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
 
@@ -31,6 +31,7 @@ async function charger() {
   immeuble.value = await api.immeuble(immeubleId.value)
   identite.nom = immeuble.value.nom
   identite.adresse = immeuble.value.adresse ?? ''
+  identite.debut_gestion = immeuble.value.debut_gestion ?? ''
   lots.value = immeuble.value.lots.map(vers)
 }
 
@@ -54,7 +55,9 @@ async function action(f: () => Promise<unknown>, succes: string) {
 }
 
 const enregistrerIdentite = () => action(
-  () => api.modifierImmeuble(immeubleId.value!, { nom: identite.nom, adresse: identite.adresse || null }),
+  () => api.modifierImmeuble(immeubleId.value!, {
+    nom: identite.nom, adresse: identite.adresse || null, debut_gestion: identite.debut_gestion || null,
+  }),
   'Immeuble enregistré',
 )
 
@@ -113,8 +116,15 @@ const ajouterLot = () => lots.value.push({ id: null, code: '', designation: '', 
       <label>Code <input :value="immeuble.code" disabled></label>
       <label>Nom <input v-model="identite.nom" size="34"></label>
       <label>Adresse <input v-model="identite.adresse" size="40"></label>
+      <label title="Avant cette date, les comptes n'étaient pas tenus ici (une agence de gestion, par exemple) : pas de factures manquantes, de régularisations manquantes ni de charges comptées au départ d'un locataire">
+        Début de la gestion dans Colibri <input v-model="identite.debut_gestion" type="date">
+      </label>
       <button type="button" class="aligne" @click="enregistrerIdentite">Enregistrer</button>
     </section>
+    <p class="discret">
+      Début de la gestion : avant cette date (une agence gérait, ou rien n'était suivi), Colibri ne signale ni factures ni
+      régularisations manquantes, et la synthèse fiscale ne compte pas ces années dans les charges d'un locataire parti.
+    </p>
 
     <h2>Lots</h2>
     <table class="liste">

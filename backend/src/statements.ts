@@ -101,7 +101,20 @@ export type Plage = { debut: string, fin: string }
  * For each energy billed to the building: the parts of the exercise covered by validated invoices and the gaps,
  * the covering lines that overlap each other (counted twice), and the drafts that touch the exercise.
  */
-export async function loadCouverture(db: Pool, { immeuble, debut, fin }: Exercice) {
+/** The start of the management of the building in the application (ADR 0023), when set. */
+export async function debutGestion(db: Pool, immeuble: number): Promise<string | null> {
+  const { rows: [i] } = await db.query<{ debut_gestion: string | null }>(
+    'SELECT debut_gestion::text FROM immeuble WHERE id = $1', [immeuble])
+  return i?.debut_gestion ?? null
+}
+
+export async function loadCouverture(db: Pool, { immeuble, debut: debutExercice, fin }: Exercice) {
+  // Before the start of the management (ADR 0023), invoices are not followed: no gap, no overlap there
+  const gestion = await debutGestion(db, immeuble)
+  if (gestion && gestion > fin) {
+    return { energies: [], chevauchements: [], brouillons: [] }
+  }
+  const debut = gestion && gestion > debutExercice ? gestion : debutExercice
   const params = [immeuble, debut, fin]
   const { rows: plages } = await db.query<{ energie: string, type: 'couvert' | 'trou' } & Plage>(
     `WITH exo AS (SELECT daterange($2::date, $3::date, '[]') AS r),

@@ -43,3 +43,10 @@ test('the years to look at start with the first regularisation and end with the 
     [2023, 2024, 2025])
   assert.deepEqual(anneesARegulariser([], '2026-10-19'), [])
 })
+
+test('nothing is missing before the start of the management of the building (ADR 0023)', () => {
+  const d = decompte([sejour(1, '2024-01-01', '2024-12-31', '1200', '1000')])
+  assert.deepEqual(regularisationsManquantes(d, [], '2025-03-01', '2025-01-01'), [])
+  assert.equal(regularisationsManquantes(d, [], '2025-03-01', '2024-01-01').length, 1)
+  assert.deepEqual(anneesARegulariser([], '2026-10-24', '2023-01-01'), [2023, 2024, 2025])
+})

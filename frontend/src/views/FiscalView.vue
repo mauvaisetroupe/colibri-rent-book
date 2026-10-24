@@ -100,7 +100,10 @@ const annees = [courante, courante - 1, courante - 2, courante - 3, courante - 4
           <tr class="sans-clic">
             <td>{{ d.lot }}</td>
             <td>{{ d.locataire }}</td>
-            <td>{{ dateFr(d.entree) }} → {{ dateFr(d.sortie) }}</td>
+            <td>
+              {{ dateFr(d.entree) }} → {{ dateFr(d.sortie) }}
+              <div v-if="d.debut_calcul > d.entree" class="discret">compté depuis le {{ dateFr(d.debut_calcul) }} (début de la gestion)</div>
+            </td>
             <td class="nombre">{{ euros(d.charges) }}</td>
             <td class="nombre">{{ euros(d.provisions) }}</td>
             <td class="nombre">{{ euros(d.versements) }}</td>

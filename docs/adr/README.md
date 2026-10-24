@@ -29,5 +29,6 @@ seed cités ici sont dans ce dépôt-là, qui lance aussi les tests sur ces donn
 | 0020 | [Authentification par passkey, dans l'application](0020-authentification-par-passkey.md) | Accepté |
 | 0021 | [Dépôt de garantie géré depuis le séjour, retenue en paiements](0021-depot-de-garantie-gere-depuis-le-sejour.md) | Accepté |
 | 0022 | [Factures réglées par la banque](0022-reglements-des-factures.md) | Accepté |
+| 0023 | [Début de la gestion d'un immeuble](0023-debut-de-la-gestion.md) | Accepté |
 
 La prochaine décision du logiciel prend le numéro 0022.

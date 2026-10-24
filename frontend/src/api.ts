@@ -31,6 +31,8 @@ export type Immeuble = {
   code: string
   nom: string
   adresse: string | null
+  // ADR 0023: start of the management in the application (before: an agency, or nothing)
+  debut_gestion: string | null
   nb_lots: number
   total_tantiemes: number
 }
@@ -284,6 +286,8 @@ export type SyntheseFiscale = {
     lot: string
     entree: string
     sortie: string
+    // The entry, or the start of the management when later (ADR 0023)
+    debut_calcul: string
     charges: string
     provisions: string
     versements: string
@@ -690,7 +694,7 @@ export const api = {
   immeubles: () => request<Immeuble[]>('GET', '/immeubles'),
   immeuble: (id: number) => request<ImmeubleDetail>('GET', `/immeubles/${id}`),
   creerImmeuble: (data: Pick<Immeuble, 'code' | 'nom' | 'adresse'>) => request<Immeuble>('POST', '/immeubles', data),
-  modifierImmeuble: (id: number, data: Pick<Immeuble, 'nom' | 'adresse'>) =>
+  modifierImmeuble: (id: number, data: Pick<Immeuble, 'nom' | 'adresse' | 'debut_gestion'>) =>
     request<Immeuble>('PUT', `/immeubles/${id}`, data),
   creerLot: (immeuble: number, lot: Omit<Lot, 'id' | 'immeuble_id'>) =>
     request<Lot>('POST', `/immeubles/${immeuble}/lots`, lot),

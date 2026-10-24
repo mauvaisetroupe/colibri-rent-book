@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 
 import { api, type Paiement, type Regularisation } from '../api'
 import { dateFr, euros, exerciceCourt } from '../format'
+import { useImmeuble } from '../immeuble'
 import { regularisationsManquantes, type Manquante } from '../regularisationsManquantes'
 
 // Control: the regularisations sent (current ones, not replaced) that concern the exercise: still to be paid, or paid
@@ -13,6 +14,7 @@ import { regularisationsManquantes, type Manquante } from '../regularisationsMan
 // missing for a finished exercise (regularisationsManquantes): a stay present without one, whichever way its balance goes.
 
 const props = defineProps<{ immeuble: number, debut: string, fin: string }>()
+const { immeubles } = useImmeuble()
 
 const regularisations = ref<Regularisation[]>([])
 const paiements = ref<Paiement[]>([])
@@ -45,7 +47,8 @@ async function charger() {
     ])
     regularisations.value = r
     paiements.value = lus.flat()
-    manquantes.value = regularisationsManquantes(d, r, new Date().toISOString().slice(0, 10))
+    manquantes.value = regularisationsManquantes(d, r, new Date().toISOString().slice(0, 10),
+      immeubles.value.find((i) => i.id === props.immeuble)?.debut_gestion ?? null)
     erreur.value = null
   } catch (e) {
     erreur.value = (e as Error).message

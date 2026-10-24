@@ -20,7 +20,8 @@ import { anneesARegulariser, regularisationsManquantes, type Manquante } from '.
 type Etat = 'ok' | 'attention' | 'a-faire'
 type Etape = { numero: number, titre: string, lien: string, etat: Etat, resume: string, details: string[] }
 
-const { immeubleId, pret } = useImmeuble()
+const { immeubles, immeubleId, pret } = useImmeuble()
+const debutGestion = () => immeubles.value.find((i) => i.id === immeubleId.value)?.debut_gestion ?? null
 const { debut, fin } = useExercice()
 const factures = ref<FactureResumee[]>([])
 const decompte = ref<Decompte | null>(null)
@@ -52,10 +53,10 @@ async function charger() {
     paiements.value = lus.flat()
     const aujourdhui = new Date().toISOString().slice(0, 10)
     // Calendar years only (the statement of the exercise chosen when it is one of them)
-    const decomptes = await Promise.all(anneesARegulariser(regularisations.value, aujourdhui).map((a) =>
+    const decomptes = await Promise.all(anneesARegulariser(regularisations.value, aujourdhui, debutGestion()).map((a) =>
       `${a}-01-01` === debut.value && `${a}-12-31` === fin.value
         ? decompte.value! : api.decompte({ immeuble: exercice.immeuble, debut: `${a}-01-01`, fin: `${a}-12-31` })))
-    aRegulariser.value = decomptes.flatMap((x) => regularisationsManquantes(x, regularisations.value, aujourdhui))
+    aRegulariser.value = decomptes.flatMap((x) => regularisationsManquantes(x, regularisations.value, aujourdhui, debutGestion()))
       .sort((a, b) => a.debut.localeCompare(b.debut) || a.sejour.lot.localeCompare(b.sejour.lot))
     erreur.value = null
   } catch (e) {

@@ -27,7 +27,9 @@ CREATE TABLE immeuble (
   id          serial PRIMARY KEY,
   code        text NOT NULL UNIQUE,              -- court et unique : 'IMM1', 'MAISON'…
   nom         text NOT NULL,
-  adresse     text
+  adresse     text,
+  -- ADR 0023 : début de la gestion dans l'application (avant : une agence, ou rien) ; facultatif
+  debut_gestion date
 );
 
 CREATE TABLE lot (
