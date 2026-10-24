@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Big from 'big.js'
 import { onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -84,15 +85,17 @@ const annees = [courante, courante - 1, courante - 2, courante - 3, courante - 4
 
     <h2>Locataires partis en {{ synthese.annee }}</h2>
     <p class="discret">
-      Sur toute la durée du séjour : charges − provisions − versements de régularisation reçus au 31/12/{{ synthese.annee }}.
-      Un montant négatif est dû au locataire et ne se déduit pas.
+      Depuis l'entrée du locataire, ou depuis le début de la gestion de l'immeuble s'il est plus tardif : charges − provisions
+      − versements de régularisation reçus au 31/12/{{ synthese.annee }} (la caution retenue n'en est pas un : elle est le
+      dépôt conservé, à ajouter aux recettes). Un montant négatif est dû au locataire et ne se déduit pas. Perte nette :
+      déductible − dépôt conservé.
     </p>
     <table v-if="synthese.departs.length" class="liste">
       <thead>
         <tr>
           <th>Lot</th><th>Locataire</th><th>Séjour</th><th class="nombre">Charges</th><th class="nombre">Provisions</th>
           <th class="nombre">Versements</th><th class="nombre">Non remboursé</th><th class="nombre">Déductible</th>
-          <th class="nombre">Dépôt conservé</th>
+          <th class="nombre">Dépôt conservé</th><th class="nombre">Perte nette</th>
         </tr>
       </thead>
       <tbody>
@@ -110,9 +113,10 @@ const annees = [courante, courante - 1, courante - 2, courante - 3, courante - 4
             <td class="nombre">{{ euros(d.non_rembourse) }}</td>
             <td class="nombre"><strong>{{ euros(d.deductible) }}</strong></td>
             <td class="nombre">{{ euros(d.depot_retenu) }}</td>
+            <td class="nombre">{{ euros(new Big(d.deductible).minus(d.depot_retenu).toString()) }}</td>
           </tr>
           <tr v-if="d.incomplet.length" class="sans-clic">
-            <td colspan="9" class="avertissement-ligne">
+            <td colspan="10" class="avertissement-ligne">
               Données incomplètes : pas de facture validée pour {{ d.incomplet.join(' ; ') }}. Les charges de ce séjour
               sont sous-estimées tant que ces factures ne sont pas importées.
             </td>
