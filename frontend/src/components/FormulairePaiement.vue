@@ -70,6 +70,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { aEncaisser, MODES_PAIEMENT, type Echeance, type Paiement, type Regularisation, type Sejour } from '../api'
 import { attendu } from '../echeances'
 import { dateFr, euros, exerciceCourt, nombreFr } from '../format'
+import { regularisationCourante } from '../rectification'
 import ChoixMois from './ChoixMois.vue'
 
 const props = defineProps<{
@@ -90,7 +91,12 @@ const b = defineModel<Brouillon>({ required: true })
 const emit = defineEmits<{ enregistrer: [suivant: boolean], fermer: [], supprimer: [] }>()
 
 const fenetre = ref<HTMLDialogElement | null>(null)
-onMounted(() => fenetre.value?.showModal())
+onMounted(() => {
+  // Edited, a payment made toward a regularisation since corrected goes to its corrective one: the one listed below
+  b.value.versements = b.value.versements.map((v) =>
+    ({ ...v, regularisation_id: regularisationCourante(v.regularisation_id, props.regularisations) }))
+  fenetre.value?.showModal()
+})
 
 const nouveau = computed(() => b.value.id === null)
 const aujourdhui = new Date().toISOString().slice(0, 10)

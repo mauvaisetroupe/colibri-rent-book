@@ -41,3 +41,14 @@ export function comparer(r: Regularisation, decomptes: Map<string, Decompte>): C
       : r.etat === 'brouillon' ? 'a_recreer' : 'a_rectifier'
   return { actuel, ecart: ecart.toString(), etat }
 }
+
+/** The regularisation in force in the chain of `id`: itself, or its last corrective one. A payment made before a
+ * correction counts for it (the amount received adds up the chain) and is moved to it when edited, the API taking
+ * payments on the current regularisation only. */
+export function regularisationCourante(id: number, regularisations: Regularisation[]): number {
+  let courante = id
+  for (let r = regularisations.find((x) => x.id === id); r?.remplacee_par; r = regularisations.find((x) => x.id === courante)) {
+    courante = r.remplacee_par
+  }
+  return courante
+}

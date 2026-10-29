@@ -97,9 +97,12 @@ const vide = (date = aujourdhui, mode: Brouillon['mode'] = 'virement'): Brouillo
 // Payment open in the modal form (new or edited), and the error the API gave for it
 const formulaire = ref<Brouillon | null>(null)
 const erreurFormulaire = ref<string | null>(null)
+// Bank movement of the payment edited: the payments added by its split (another regularisation) are linked to it too
+const mouvementDuPaiement = ref<number | null>(null)
 
-function ouvrir(b: Brouillon) {
+function ouvrir(b: Brouillon, mouvement: number | null = null) {
   formulaire.value = b
+  mouvementDuPaiement.value = mouvement
   erreurFormulaire.value = null
 }
 
@@ -115,14 +118,14 @@ function modifier(p: Paiement) {
     montant: nombreFr(new Big(total(p)).toFixed(2)), loyer: nombreFr(p.loyer), provision: nombreFr(p.provision),
     versements: p.regularisation_id ? [{ regularisation_id: p.regularisation_id, montant: nombreFr(p.regularisation) }] : [],
     mode: p.mode ?? '', note: p.note ?? '',
-  })
+  }, p.mouvement_id)
 }
 
 async function enregistrer(suivant: boolean) {
   const b = formulaire.value!
   occupe.value = true
   try {
-    await enregistrerBrouillon(b)
+    await enregistrerBrouillon(b, mouvementDuPaiement.value)
     // « Ajouter et en saisir un autre » keeps the date and the mode: several payments of one bank statement
     formulaire.value = suivant ? vide(b.date, b.mode) : null
     erreurFormulaire.value = null
