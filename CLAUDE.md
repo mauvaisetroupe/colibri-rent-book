@@ -40,7 +40,8 @@ première : `colibri`, privé), qui fixe la version de l'image et lance les test
   dans `views/`, `rapprochement.ts` (propositions de l'écran Banque), `extraction/` (`extractor.ts` = classe de base
   et aides des extracteurs de factures, `bank-extractor.ts` celle des relevés, `moteurReleve.ts` leur moteur ;
   regroupement des morceaux pdf.js en lignes, moteur, surlignage, éditeur Monaco, test sur les factures en base ;
-  copie jointe aux justificatifs : `masquage.ts` zones à masquer, `annexe.ts` PDF en images, ADR 0024).
+  copie jointe aux justificatifs : `masquage.ts` zones à masquer, `annexe.ts` PDF en images, ADR 0024 ; pages
+  scannées : `estScannee` dans `pdf.ts`, zones tracées avec `components/EditeurZones.vue`, ADR 0025).
   Navigation calquée sur le cycle d'un exercice ; tout nouvel écran ou changement de processus met à jour l'accueil
   (`AccueilView.vue`) et son mode d'emploi.
 

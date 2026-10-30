@@ -3,6 +3,7 @@
 - Statut : Proposé
 - Date : 2026-10-30
 - Complète l'ADR 0014 (factures jointes au justificatif) et l'ADR 0013 (extracteurs : une méthode de plus, facultative)
+- Pour les pages scannées : remplacé par l'ADR 0025 (zones tracées à la main, plus de zones fixes dans le code)
 
 ## Contexte
 
@@ -52,8 +53,8 @@ Le gris (JPEG ou PNG) n'apporte rien de lisible en plus, et pèse 3 à 7 fois pl
   masquer, sans coordonnées pour le texte :
   - `{ text: '…' }` : chaque occurrence de ce texte, sans tenir compte des espaces ni des majuscules ;
   - `{ pattern: /…/ }` : chaque correspondance de l'expression, ligne par ligne ;
-  - `{ page?, x0, y0, x1, y1 }` : une zone fixe, en fractions de la page depuis le coin haut gauche (scans sans texte,
-    TIP) ; sans page, sur toutes.
+  - ~~`{ page?, x0, y0, x1, y1 }` : une zone fixe~~ : retirée par l'ADR 0025, une page scannée se masque par des zones
+    tracées à la main.
 
   Par défaut, la méthode ne rend rien : les versions existantes ne changent pas, `MOTEUR` reste le même. Masquer de
   nouvelles références, c'est une nouvelle version de l'extracteur.
@@ -122,6 +123,8 @@ régularisations envoyées avant cet ADR (`NULL`), les copies vérifiées du mom
 ne change pas : il est figé à la création du brouillon, avant que les copies soient vérifiées.
 
 ## Plus tard : des zones tracées à la main
+
+Fait pour les pages scannées par l'ADR 0025 (modèle du fournisseur, ajusté par facture).
 
 Sur l'aperçu d'une facture, tracer un rectangle à la souris (un scan isolé sans texte, un oubli vu à la vérification),
 ou retirer une zone trouvée par l'extracteur qui masque à tort une information utile. Pour y venir sans rien changer :
