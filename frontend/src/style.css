@@ -395,6 +395,53 @@ select {
   border-radius: 6px;
 }
 
+/* Above the copy of an invoice joined to the supporting documents (ADR 0024): its state and what to do */
+.bandeau-copie {
+  padding: 0.5rem 0.7rem;
+  border-radius: 6px;
+  background: var(--fond-avertissement);
+}
+
+.bandeau-copie p {
+  margin: 0 0 0.3rem;
+}
+
+.bandeau-copie .actions {
+  margin: 0.3rem 0 0;
+}
+
+.bandeau-copie .probleme label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.bandeau-copie .probleme .rangee {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.bandeau-copie .probleme .rangee input {
+  flex: 1;
+}
+
+.bandeau-copie.verifiee {
+  background: var(--fond-ok);
+}
+
+.etat-ok {
+  color: var(--ok);
+}
+
+.etat-ko {
+  color: var(--ko);
+}
+
+button.principal .etat-ok,
+button.principal .etat-ko {
+  color: inherit;
+}
+
 .outils,
 .actions {
   display: flex;

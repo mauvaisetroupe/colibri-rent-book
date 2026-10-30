@@ -42,6 +42,8 @@ const METHODES: Record<string, string> = {
   findLine: 'methode-lignes',
   readLine: 'methode-lecture',
   after: 'methode-lecture',
+  // Copy joined to the supporting documents (ADR 0024)
+  redactions: 'methode-masquage',
   // Bank statements
   account: 'methode-numero',
   statementDate: 'methode-date',

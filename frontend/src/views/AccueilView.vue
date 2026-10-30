@@ -288,6 +288,15 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
         <em>hors immeuble</em> (un autre bien sur la même facture, comme les garages sur l'avis de taxe foncière).</li>
       <li>Ouvrir le brouillon : la grille montre chaque ligne avec sa période ; le PDF est à côté pour comparer. Corriger
         une cellule, coller des lignes depuis Excel, ajouter ou supprimer une ligne si besoin.</li>
+      <li><strong>Version locataire</strong> : une facture n'est jamais jointe au justificatif telle qu'elle a été
+        reçue, mais dans sa version locataire, en images noir et blanc, où sont masqués le nom et l'adresse du gérant,
+        les références client, le compte bancaire (termes de l'écran <strong>Fournisseurs</strong>, et ce que masque
+        l'extracteur du fournisseur). Elle est créée à l'import (« Créer la version locataire » pour une facture saisie
+        avec son PDF). L'afficher (« Version locataire », à côté de « Facture reçue »), la contrôler page par page,
+        puis <strong>Rien de personnel : à joindre</strong>. S'il reste quelque chose : « Il reste une information
+        personnelle… », recopier le texte (masqué ensuite sur toutes les factures) et « Masquer et recréer » ; pour un
+        texte qui change à chaque facture ou un scan, « Modifier le masquage du fournisseur ». Seule une version
+        contrôlée est jointe.</li>
       <li>Les contrôles tournent en direct : en rouge ce qui bloque (total qui ne retombe pas sur le montant imprimé,
         date invalide…), en jaune ce qui est à vérifier (période non imprimée, période inhabituelle).</li>
       <li><strong>Valider</strong> : seule une facture validée compte dans les décomptes. Une facture validée n'est plus
@@ -397,8 +406,9 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
         régularisation qui la couvre, que le solde du décompte soit à réclamer, à rembourser ou nul. Un séjour sans
         charges ni provisions n'en a pas besoin.</li>
       <li>Cliquer une régularisation ouvre sa fiche. <strong>Mail</strong> : le texte est prêt (étalement, nouvelle
-        provision, signature) ; le relire, l'ouvrir dans la messagerie, joindre le PDF (le justificatif, puis les
-        factures en annexe, sauf celles d'un fournisseur confidentiel, signalées), envoyer, puis
+        provision, signature) ; le relire, l'ouvrir dans la messagerie, joindre le PDF (le justificatif, puis la version
+        locataire des factures en annexe ; celles d'un fournisseur confidentiel ou sans version contrôlée sont signalées
+        « non jointe » : la fiche les liste avant l'envoi), envoyer, puis
         <strong>Marquer envoyée</strong> (« annuler l'envoi »
         reste possible tant qu'aucun versement n'est arrivé).</li>
       <li>La colonne « Écart avec le décompte » refait le décompte de chaque régularisation sur sa période :
@@ -455,21 +465,31 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
   </details>
 
   <details>
-    <summary><strong>Fournisseurs</strong> (menu ⚙ Réglages) : extracteurs, factures confidentielles</summary>
+    <summary><strong>Fournisseurs</strong> (menu ⚙ Réglages) : extracteurs, factures confidentielles, termes masqués</summary>
     <ol>
       <li>La liste montre chaque fournisseur, ses factures et la version de son extracteur. Sur la page d'un
         fournisseur : <strong>Confidentiel</strong> (ses factures, comme l'avis de taxe foncière, ne sont jamais jointes
         au justificatif d'une régularisation : elles y sont listées, « consultable sur demande »), et les versions de
         son extracteur, d'où s'ouvre l'éditeur (« Écrire un extracteur » s'il n'en a pas).</li>
+      <li><strong>Termes masqués</strong> (bas de la liste) : un par ligne, cherchés dans toutes les factures pour leur
+        version locataire (espaces et majuscules ignorés). Ce qui est propre à un fournisseur (références
+        client fixes, point de livraison) peut aussi y aller. Dans l'éditeur, l'onglet <strong>Masquage</strong> montre
+        en noir, dans le texte du PDF d'exemple, ce qui sera caché ; sélectionner un texte l'ajoute aux termes masqués.
+        Seul ce qui change d'une facture à l'autre (un motif) ou une zone fixe d'un scan demande du code : la méthode
+        <code>redactions()</code> (« Ajouter redactions() au code »). « Vérifier le masquage… » montre la version locataire
+        du PDF de travail. Après un changement, « Recréer les versions locataire » sur la page du fournisseur, puis les
+        contrôler.</li>
       <li>Un extracteur lit les PDF d'un fournisseur : une classe TypeScript qui étend <code>InvoiceExtractor</code>,
         surtout des expressions régulières, une méthode par information (reconnaître le PDF, numéro, date, total ;
         pour les lignes : où chercher, quelles lignes, comment lire chacune).</li>
-      <li>Dans l'éditeur (ou « Nouveau fournisseur », modèle commenté) : à droite, le texte du PDF
-        d'exemple ligne par ligne, tel que l'extracteur le reçoit, avec ce que le code trouve surligné (une ligne
-        trouvée mais mal lue en rouge) ; en dessous, le résultat en direct : chaque champ, les lignes lues, la somme
-        comparée au total. « Agrandir » met le code et le texte en plein écran.</li>
-      <li>Avant d'enregistrer, « Tester sur les factures » relance la version sur les PDF des factures déjà en base de
-        ce fournisseur : ✓ ou ✗ pour chacune, et ce qui change.</li>
+      <li>Dans l'éditeur (ou « Nouveau fournisseur », modèle commenté), onglet <strong>Extraction</strong> : à droite du
+        code, le texte du PDF de travail (« Changer… » en haut : une facture du fournisseur ou un autre PDF, et le
+        regroupement en lignes) tel que l'extracteur le reçoit, avec ce que le code trouve surligné (une ligne trouvée
+        mais mal lue en rouge) ; en dessous, un résumé en direct. « Agrandir » met le code et le texte en plein
+        écran.</li>
+      <li>Avant d'enregistrer, « Vérifier l'extraction… » relance le code sur les PDF des factures déjà en base de ce
+        fournisseur (✓ ou ✗ pour chacune, et ce qui change ; cliquer une facture la prend comme PDF de travail) et
+        détaille ce qu'il lit du PDF de travail.</li>
       <li>Une version enregistrée ne change plus : la corriger, c'est enregistrer la suivante. Chaque facture garde la
         version qui l'a lue ; seule la dernière version d'un fournisseur sert à l'import.</li>
     </ol>

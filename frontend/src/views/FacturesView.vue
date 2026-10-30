@@ -100,8 +100,9 @@ async function importer(files: FileList | File[] | null) {
     return
   }
   let extracteurs: ExtracteurEnregistre[]
+  let termes: string[]
   try {
-    extracteurs = await api.extracteurs()
+    [extracteurs, termes] = await Promise.all([api.extracteurs(), api.termesMasques()])
   } catch (e) {
     erreur.value = (e as Error).message
     return
@@ -110,17 +111,22 @@ async function importer(files: FileList | File[] | null) {
   for (const file of Array.from(files)) {
     const resultat: Resultat = { fichier: file.name, etat: 'en_cours', message: 'Lecture…' }
     resultats.value.unshift(resultat)
-    await lireEtImporter(resultat, file, extracteurs)
+    await lireEtImporter(resultat, file, extracteurs, undefined, termes)
     resultats.value = [...resultats.value]
   }
   await charger()
 }
 
-/** The PDF is read in the browser by the last version of each supplier's extractor, then sent with its draft. */
-async function lireEtImporter(resultat: Resultat, file: File, extracteurs: ExtracteurEnregistre[], choisi?: Candidat) {
+/**
+ * The PDF is read in the browser by the last version of each supplier's extractor, then sent with its draft; its copy
+ * joined to the supporting documents is made at once, to be verified on the invoice (ADR 0024).
+ */
+async function lireEtImporter(
+  resultat: Resultat, file: File, extracteurs: ExtracteurEnregistre[], choisi?: Candidat, termes?: string[],
+) {
   const echec = (message: string) => Object.assign(resultat, { etat: 'erreur', message, aSaisir: file, choix: undefined })
   // pdf.js is loaded with the first import only
-  const { brouillonDe, candidats, lire, morceauxDuPdf } = await import('../extraction/navigateur')
+  const { brouillonDe, candidats, lire, morceauxDuPdf, preparerAnnexe } = await import('../extraction/navigateur')
   let pages
   try {
     pages = await morceauxDuPdf(file)
@@ -147,12 +153,21 @@ async function lireEtImporter(resultat: Resultat, file: File, extracteurs: Extra
   }
   try {
     const { facture, controle } = await api.importer(immeuble.value!, file, brouillon)
+    let copie = ''
+    if (facture.annexe === 'a_faire') {
+      try {
+        await preparerAnnexe(facture, termes && extracteurs.length ? { termes, extracteurs } : undefined)
+        copie = ', version locataire à contrôler'
+      } catch (e) {
+        copie = `, version locataire non créée (${(e as Error).message})`
+      }
+    }
     Object.assign(resultat, {
       etat: 'importee',
       id: facture.id,
       choix: undefined,
       message: `${facture.fournisseur} n° ${facture.numero} : brouillon créé`
-        + (controle.validable ? '' : ' (contrôles en erreur)'),
+        + (controle.validable ? '' : ' (contrôles en erreur)') + copie,
     })
   } catch (e) {
     const doublon = e instanceof ApiError && e.status === 409

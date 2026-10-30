@@ -5,19 +5,40 @@ import { RouterLink, useRouter } from 'vue-router'
 import { api, ENERGIES, type Fournisseur } from '../api'
 
 // Suppliers (ADR 0013, 0014): every supplier of an invoice or of an extractor. A supplier opens on its page:
-// « confidentiel », and the versions of its extractor.
+// « confidentiel », and the versions of its extractor. The terms masked on the copies of every invoice joined to the
+// supporting documents (ADR 0024).
 
 const router = useRouter()
 const fournisseurs = ref<Fournisseur[]>([])
 const erreur = ref<string | null>(null)
+// One term per line, as typed
+const termes = ref('')
+const termesEnregistres = ref('')
+const messageTermes = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
 
 onMounted(async () => {
   try {
-    fournisseurs.value = await api.fournisseurs()
+    const [liste, masques] = await Promise.all([api.fournisseurs(), api.termesMasques()])
+    fournisseurs.value = liste
+    termes.value = termesEnregistres.value = masques.join('\n')
   } catch (e) {
     erreur.value = (e as Error).message
   }
 })
+
+async function enregistrerTermes() {
+  try {
+    const masques = await api.modifierTermesMasques(termes.value.split('\n'))
+    termes.value = termesEnregistres.value = masques.join('\n')
+    messageTermes.value = {
+      texte: 'Termes enregistrés : ils s\'appliquent aux versions locataire créées à partir de maintenant (recréer les autres '
+        + 'depuis la page de leur fournisseur)',
+      type: 'info',
+    }
+  } catch (e) {
+    messageTermes.value = { texte: (e as Error).message, type: 'erreur' }
+  }
+}
 
 const energies = (f: Fournisseur) => (f.energies ?? []).map((e) => ENERGIES[e]).join(', ')
 </script>
@@ -59,10 +80,34 @@ const energies = (f: Fournisseur) => (f.energies ?? []).map((e) => ENERGIES[e]).
     </tbody>
   </table>
   <p v-else-if="!erreur" class="discret">Aucun fournisseur.</p>
+
+  <h2>Termes masqués sur toutes les factures</h2>
+  <p class="discret">
+    Les factures jointes au justificatif d'une régularisation le sont dans leur version locataire, en images, où ces termes sont masqués
+    (en plus de ce que masque l'extracteur de chaque fournisseur) : nom et adresse du gérant, compte bancaire… Un terme
+    par ligne ; les espaces et les majuscules ne comptent pas.
+  </p>
+  <p v-if="messageTermes" class="message" :class="messageTermes.type">{{ messageTermes.texte }}</p>
+  <form class="termes" @submit.prevent="enregistrerTermes">
+    <textarea v-model="termes" rows="8" spellcheck="false" />
+    <button type="submit" class="principal" :disabled="termes === termesEnregistres">Enregistrer</button>
+  </form>
 </template>
 
 <style scoped>
 .liste tr {
   cursor: pointer;
+}
+
+.termes {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+  max-width: 40rem;
+}
+
+.termes textarea {
+  flex: 1;
+  font-family: monospace;
 }
 </style>

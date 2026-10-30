@@ -209,6 +209,8 @@ export const aEncaisser = (r: Regularisation) => r.etat === 'en_attente' && r.de
 
 export type RegularisationDetail = Regularisation & {
   suggestion: { provision_mensuelle: string | null, provision_a_partir_du: string }
+  // What becomes of each invoice in the annexes now (ADR 0024)
+  annexes: { facture_id: number, fournisseur: string, numero: string, etat: EtatAnnexe }[]
 }
 
 export type OptionsMail = {
@@ -531,6 +533,7 @@ export type FactureAvecPdf = {
   statut: Statut
   extracteur_id: number | null
   immeuble: string
+  annexe: EtatAnnexe
 }
 
 // A supplier (ADR 0014): its invoices, the last version of its extractor; « confidentiel »: never joined in annex
@@ -576,6 +579,37 @@ export type Facture = {
   paye: string
   reste: string
   date_paiement: string | null
+  fournisseur_id: number
+  // Version of the extractor that read it (null: typed by hand)
+  extracteur_id: number | null
+  // ADR 0024: what becomes of it in the annexes of a supporting document
+  annexe: EtatAnnexe
+}
+
+/**
+ * The invoice in the annexes (ADR 0024): never joined (confidential supplier), no PDF, its version in images to make
+ * (none, or made from another PDF), to verify by eye, or verified.
+ */
+export type EtatAnnexe = 'confidentiel' | 'sans_pdf' | 'a_faire' | 'a_verifier' | 'verifiee'
+
+/** The current version in images of an invoice. */
+export type AnnexeFacture = {
+  id: number
+  extracteur_id: number | null
+  termes: string[]
+  reglages: { dpi: number, seuil: number }
+  // Number of zones painted
+  zones: number
+  cree_le: string
+  verifiee_le: string | null
+}
+
+/** A version in images made in the browser, sent with its PDF. */
+export type AnnexeEnvoyee = {
+  zones: { page: number, x0: number, y0: number, x1: number, y1: number, origine: string }[]
+  extracteur_id: number | null
+  termes: string[]
+  reglages: { dpi: number, seuil: number }
 }
 
 export type ReglementFacture = { id: number, mouvement_id: number, date_paiement: string, libelle: string, montant: string }
@@ -618,7 +652,10 @@ export type Controle = {
   validable: boolean
 }
 
-export type FactureDetail = { facture: Facture, lignes: Ligne[], liens: LiensFacture, reglements: ReglementFacture[], controle: Controle }
+export type FactureDetail = {
+  facture: Facture, lignes: Ligne[], liens: LiensFacture, reglements: ReglementFacture[], controle: Controle,
+  annexe: AnnexeFacture | null
+}
 export type FactureRemplacee = FactureDetail & { regularisations: RegularisationTouchee[] }
 
 export type FactureEnTete = Pick<Facture, 'numero' | 'date_facture' | 'montant_ttc' | 'energie' | 'note'>
@@ -838,6 +875,19 @@ export const api = {
   supprimer: (id: number) => request<void>('DELETE', `/factures/${id}`),
   controler: (saisie: Pick<FactureSaisie, 'montant_ttc' | 'lignes'>) => request<Controle>('POST', '/controle', saisie),
   pdfUrl: (id: number) => `/api/factures/${id}/pdf`,
+
+  // Version in images joined to the supporting documents (ADR 0024)
+  annexePdfUrl: (id: number, version: number) => `/api/factures/${id}/annexe/pdf?v=${version}`,
+  async envoyerAnnexe(id: number, pdf: Uint8Array, annexe: AnnexeEnvoyee) {
+    const form = new FormData()
+    form.append('annexe', JSON.stringify(annexe))
+    form.append('file', new Blob([pdf as Uint8Array<ArrayBuffer>], { type: 'application/pdf' }), 'annexe.pdf')
+    return answer<FactureDetail>(await fetch(`/api/factures/${id}/annexe`, { method: 'POST', body: form }))
+  },
+  verifierAnnexe: (id: number, annexe: number) =>
+    request<FactureDetail>('POST', `/factures/${id}/annexe/verifiee`, { annexe_id: annexe }),
+  termesMasques: () => request<string[]>('GET', '/termes-masques'),
+  modifierTermesMasques: (termes: string[]) => request<string[]>('PUT', '/termes-masques', { termes }),
 
   async joindrePdf(id: number, file: File) {
     const form = new FormData()

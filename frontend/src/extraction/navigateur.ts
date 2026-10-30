@@ -1,8 +1,10 @@
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
-import type { Brouillon, ExtracteurEnregistre } from '../api'
-import type { ClasseExtracteur, Morceau } from './contrat'
+import { api, type Brouillon, type ExtracteurEnregistre, type Facture, type FactureDetail } from '../api'
+import { binariser, pdfEnImages, REGLAGES_ANNEXE, type PageImage } from './annexe'
+import { REGLAGES_PAR_DEFAUT, type ClasseExtracteur, type Morceau, type Reglages } from './contrat'
+import { masquage, type PageLue, type Zone } from './masquage'
 import { charger, documentDe, extraire, reconnait, type Extraction } from './moteur'
 import {
   chargerReleve, documentReleve, extraireReleve, reconnaitReleve, type ClasseExtracteurReleve, type ExtractionReleve,
@@ -101,3 +103,79 @@ export function candidatsReleve(pages: Morceau[][], enregistres: ExtracteurEnreg
 
 export const lireReleve = (pages: Morceau[][], { enregistre, extracteur }: CandidatReleve): ExtractionReleve =>
   extraireReleve(extracteur, documentReleve(pages, enregistre.reglages))
+
+// ---------------------------------------------------------------- copy joined to a supporting document (ADR 0024)
+
+/** The last version of the invoice extractor of a supplier, if it has one. */
+const extracteurDuFournisseur = (fournisseur: string, enregistres: ExtracteurEnregistre[]) =>
+  enregistres.find((e) => e.derniere && (e.type ?? 'facture') === 'facture' && e.fournisseur === fournisseur) ?? null
+
+/** Each page drawn by pdf.js, its zones painted black, in black and white. */
+async function pagesEnImages(pdf: pdfjs.PDFDocumentProxy, zones: Zone[]): Promise<PageImage[]> {
+  const { dpi, seuil } = REGLAGES_ANNEXE
+  const images: PageImage[] = []
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const page = await pdf.getPage(n)
+    const taille = page.getViewport({ scale: 1 })
+    const viewport = page.getViewport({ scale: dpi / 72 })
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.ceil(viewport.width)
+    canvas.height = Math.ceil(viewport.height)
+    const contexte = canvas.getContext('2d', { willReadFrequently: true })!
+    contexte.fillStyle = '#fff'
+    contexte.fillRect(0, 0, canvas.width, canvas.height)
+    await page.render({ canvas, canvasContext: contexte, viewport }).promise
+    contexte.fillStyle = '#000'
+    for (const z of zones.filter((z) => z.page === n)) {
+      contexte.fillRect(z.x0 * canvas.width, z.y0 * canvas.height, (z.x1 - z.x0) * canvas.width, (z.y1 - z.y0) * canvas.height)
+    }
+    const { data } = contexte.getImageData(0, 0, canvas.width, canvas.height)
+    images.push({
+      largeur: taille.width, hauteur: taille.height, largeurPx: canvas.width, hauteurPx: canvas.height,
+      bits: binariser(data, canvas.width, canvas.height, seuil),
+    })
+    canvas.width = canvas.height = 0
+    page.cleanup()
+  }
+  return images
+}
+
+/**
+ * The copy of a PDF joined to the supporting documents: the masked terms and the redactions of an extractor (with its
+ * grouping settings) found in its text, every page in images, the zones painted black.
+ */
+export async function copieEnImages(
+  contenu: Uint8Array, termes: string[], extracteur: { classe: ClasseExtracteur, reglages: Reglages } | null,
+): Promise<{ pdf: Uint8Array, zones: Zone[] }> {
+  const chargement = pdfjs.getDocument({ data: contenu, verbosity: 0 })
+  try {
+    const pdf = await chargement.promise
+    const pieces = await morceaux(pdf)
+    const pages: PageLue[] = []
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const { width, height } = (await pdf.getPage(n)).getViewport({ scale: 1 })
+      pages.push({ largeur: width, hauteur: height, morceaux: pieces[n - 1] ?? [] })
+    }
+    const zones = masquage(pages, extracteur?.reglages ?? REGLAGES_PAR_DEFAUT, termes, extracteur?.classe ?? null)
+    return { pdf: await pdfEnImages(await pagesEnImages(pdf, zones)), zones }
+  } finally {
+    await chargement.destroy()
+  }
+}
+
+/**
+ * Makes the copy of an invoice joined to the supporting documents and sends it, to be verified: the masked terms and
+ * the redactions of the last extractor of its supplier. `donnees`: the terms and the extractors, when several invoices
+ * are made at once.
+ */
+export async function preparerAnnexe(
+  facture: Pick<Facture, 'id' | 'fournisseur'>,
+  donnees?: { termes: string[], extracteurs: ExtracteurEnregistre[] },
+): Promise<FactureDetail> {
+  const [termes, extracteurs] = donnees ? [donnees.termes, donnees.extracteurs] : await Promise.all([api.termesMasques(), api.extracteurs()])
+  const enregistre = extracteurDuFournisseur(facture.fournisseur, extracteurs)
+  const contenu = new Uint8Array(await (await (await fetch(api.pdfUrl(facture.id))).blob()).arrayBuffer())
+  const { pdf, zones } = await copieEnImages(contenu, termes,
+    enregistre ? { classe: extracteurDe(enregistre), reglages: enregistre.reglages } : null)
+  return api.envoyerAnnexe(facture.id, pdf, { zones, extracteur_id: enregistre?.id ?? null, termes, reglages: REGLAGES_ANNEXE })
+}

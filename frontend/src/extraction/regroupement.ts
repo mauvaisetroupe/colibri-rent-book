@@ -8,8 +8,11 @@ import type { Row } from './bank-extractor'
 // each line with its pieces and their abscissa (debit or credit is a matter of column); their settings may set a
 // margin, left of which pieces are ignored (a code printed vertically).
 
-/** Lines of a page, with their pieces. */
-function rangeesDeLaPage(morceaux: Morceau[], reglages: Reglages, page: number): Omit<Row, 'index'>[] {
+/** A piece of a line of text and where its text is in the line (ADR 0024: what to mask is found in the lines). */
+export type Portion = { morceau: Morceau, debut: number, fin: number }
+
+/** The lines of a page as text, each with the pieces it is made of. */
+export function lignesAvecMorceaux(morceaux: Morceau[], reglages: Reglages): { texte: string, portions: Portion[] }[] {
   const marge = reglages.marge ?? null
   const tries = morceaux.filter((m) => m.texte.trim() && (marge === null || m.x >= marge)).sort((a, b) => a.y - b.y || a.x - b.x)
   const lignes: { y: number, morceaux: Morceau[] }[] = []
@@ -25,20 +28,27 @@ function rangeesDeLaPage(morceaux: Morceau[], reglages: Reglages, page: number):
     ligne.sort((a, b) => a.x - b.x)
     let texte = ''
     let fin: number | null = null
+    const portions: Portion[] = []
     for (const m of ligne) {
       if (fin !== null) {
         const ecart = m.x - fin
         texte += ecart <= reglages.collage ? '' : ecart > reglages.colonne ? '   ' : ' '
       }
+      portions.push({ morceau: m, debut: texte.length, fin: texte.length + m.texte.length })
       texte += m.texte
       fin = m.x + m.largeur
     }
-    return {
-      text: texte.trimEnd(),
-      pieces: ligne.map((m) => ({ text: m.texte.trim(), x: m.x, right: m.x + m.largeur })),
-      page,
-    }
+    return { texte: texte.trimEnd(), portions }
   })
+}
+
+/** Lines of a page, with their pieces. */
+function rangeesDeLaPage(morceaux: Morceau[], reglages: Reglages, page: number): Omit<Row, 'index'>[] {
+  return lignesAvecMorceaux(morceaux, reglages).map(({ texte, portions }) => ({
+    text: texte,
+    pieces: portions.map(({ morceau: m }) => ({ text: m.texte.trim(), x: m.x, right: m.x + m.largeur })),
+    page,
+  }))
 }
 
 /** Lines of text of a page. */

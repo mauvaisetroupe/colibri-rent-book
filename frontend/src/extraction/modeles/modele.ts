@@ -8,7 +8,9 @@
 // Invoice lines: linesZone() the lines to look at, findLine() which are invoice lines (highlighted), readLine() reads
 // each of them on its own (an error marks that line in red, the others go on).
 // The application completes: missing period = consumption period (R6), penalty borne by the owner.
-import { AMOUNT, DATE, InvoiceExtractor, rx, type Category } from 'extractor'
+// redactions(): what to mask on the copy joined to the supporting documents (customer reference…), on top of the terms
+// masked on every invoice (screen « Fournisseurs »); « Voir la copie de ce PDF » shows it.
+import { AMOUNT, DATE, InvoiceExtractor, rx, type Category, type Redaction } from 'extractor'
 
 const LINE = rx`^(.+?)\s+du (${DATE}) au (${DATE})\s.*?(${AMOUNT}) €$`
 
@@ -46,6 +48,10 @@ export default class NewSupplierExtractor extends InvoiceExtractor {
       end: this.frenchDate(end),
       amount: this.amount(amount),
     }
+  }
+
+  redactions(): Redaction[] {
+    return [{ pattern: /Référence client : .+/ }]
   }
 
   /** Category and normalised label, from the start of the printed label. */

@@ -5,6 +5,7 @@ import { RouterLink, useRouter } from 'vue-router'
 
 import {
   api, DECISIONS_REGULARISATION, libelleRegularisation, NOMS_MODES, type Decompte, type Paiement, type Regularisation,
+  type RegularisationDetail,
 } from '../api'
 import RedactionMail from '../components/RedactionMail.vue'
 import { dateFr, euros } from '../format'
@@ -25,6 +26,8 @@ const message = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
 const redaction = ref(false)
 const dateEnvoi = ref(new Date().toISOString().slice(0, 10))
 const occupe = ref(false)
+// Invoices whose copy is not verified: not joined to the supporting document (ADR 0024)
+const nonJointes = ref<RegularisationDetail['annexes']>([])
 
 async function charger() {
   try {
@@ -35,6 +38,7 @@ async function charger() {
       decomptesDesPeriodes(detail.immeuble_id, [detail]),
     ])
     r.value = detail
+    nonJointes.value = detail.annexes.filter((a) => a.etat === 'a_faire' || a.etat === 'a_verifier')
   } catch (e) {
     message.value = { texte: (e as Error).message, type: 'erreur' }
   }
@@ -248,6 +252,14 @@ async function supprimer() {
       <h2>Envoi et paiement</h2>
       <template v-if="r.etat === 'brouillon'">
         <p class="bilan">Pas encore envoyée</p>
+        <div v-if="nonJointes.length" class="message erreur">
+          {{ nonJointes.length }} facture(s) ne seront pas jointes au justificatif, leur version locataire n'étant pas contrôlée
+          (elles y sont listées « non jointe, consultable sur demande ») :
+          <template v-for="(a, i) in nonJointes" :key="a.facture_id">{{ i ? ', ' : ' ' }}<RouterLink
+            :to="{ name: 'facture', params: { id: a.facture_id } }">{{ a.fournisseur }} n° {{ a.numero }}</RouterLink>
+            ({{ a.etat === 'a_faire' ? 'à créer' : 'à contrôler' }})</template>.
+          Les contrôler avant de l'envoyer : le justificatif se refait à chaque ouverture.
+        </div>
         <div class="actions-page">
           <label class="aligne">Envoyée le <input v-model="dateEnvoi" type="date"></label>
           <button type="button" class="principal" :disabled="occupe" @click="envoyee">Marquer envoyée</button>

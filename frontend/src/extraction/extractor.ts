@@ -50,6 +50,17 @@ export type LineContext = {
 
 export type InvoiceHeader = { number: string | null, date: string | null, total: string | null }
 
+/**
+ * What to mask on the copy of the invoice joined to a supporting document (ADR 0024): every occurrence of a text
+ * (spaces ignored), every match of a regular expression on a line, or a fixed area of a page in fractions of its width
+ * and height from the top-left corner (a scan without text, a payment slip). Page: 1 for the first one; omitted, every
+ * page.
+ */
+export type Redaction =
+  | { text: string }
+  | { pattern: RegExp }
+  | { page?: number, x0: number, y0: number, x1: number, y1: number }
+
 /** A French amount: « 1 234,56 », « - 65,87 », « 0,07790 ». For rx`…`. */
 export const AMOUNT = String.raw`(?:- ?)?\d{1,3}(?: \d{3})*,\d+`
 
@@ -96,6 +107,14 @@ export abstract class InvoiceExtractor {
   /** Optional: last changes on the lines, once the header is read. */
   after(lines: ExtractedLine[], _header: InvoiceHeader): ExtractedLine[] {
     return lines
+  }
+
+  /**
+   * Optional: what to mask on the copy joined to a supporting document (ADR 0024), on top of the terms masked on every
+   * invoice (customer and contract references, delivery point…). Default: nothing more.
+   */
+  redactions(): Redaction[] {
+    return []
   }
 
   // ---------------------------------------------------------------- helpers

@@ -2,11 +2,12 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
-import { api, ENERGIES, type ExtracteurEnregistre, type Fournisseur } from '../api'
+import { api, ENERGIES, type ExtracteurEnregistre, type FactureAvecPdf, type Fournisseur } from '../api'
 import { dateFr } from '../format'
 
 // A supplier (ADR 0013, 0014): « confidentiel » (its invoices are never joined to a supporting document), and the
-// versions of its extractor, the last one reading the imports; a version opens in the editor.
+// versions of its extractor, the last one reading the imports; a version opens in the editor. The copies of its
+// invoices joined to the supporting documents, made again at once after a change of its extractor (ADR 0024).
 
 const props = defineProps<{ id: number }>()
 const router = useRouter()
@@ -18,6 +19,7 @@ async function charger() {
   try {
     fournisseur.value = await api.fournisseur(props.id)
     versions.value = (await api.extracteurs()).filter((e) => e.fournisseur === fournisseur.value?.nom)
+    factures.value = await api.facturesDuFournisseur(fournisseur.value.nom)
   } catch (e) {
     message.value = { texte: (e as Error).message, type: 'erreur' }
   }
@@ -27,6 +29,37 @@ onMounted(charger)
 watch(() => props.id, charger)
 
 const derniere = computed(() => versions.value[0] ?? null)
+
+// ---------------------------------------------------------------- copies joined to the supporting documents (ADR 0024)
+
+const factures = ref<FactureAvecPdf[]>([])
+// Invoices whose copy can be joined: not replaced, its supplier not confidential
+const aJoindre = computed(() => factures.value.filter((f) => f.statut !== 'remplacee' && f.annexe !== 'confidentiel'))
+const compte = (etat: FactureAvecPdf['annexe']) => aJoindre.value.filter((f) => f.annexe === etat).length
+const progression = ref<string | null>(null)
+
+async function refaireCopies() {
+  if (!fournisseur.value) {
+    return
+  }
+  const { preparerAnnexe } = await import('../extraction/navigateur')
+  const donnees = { termes: await api.termesMasques(), extracteurs: await api.extracteurs() }
+  const erreurs: string[] = []
+  const liste = aJoindre.value
+  for (const [i, f] of liste.entries()) {
+    progression.value = `Copie ${i + 1} sur ${liste.length} : n° ${f.numero}…`
+    try {
+      await preparerAnnexe({ id: f.id, fournisseur: fournisseur.value.nom }, donnees)
+    } catch (e) {
+      erreurs.push(`n° ${f.numero} : ${(e as Error).message}`)
+    }
+  }
+  progression.value = null
+  message.value = erreurs.length
+    ? { texte: `Copies non refaites : ${erreurs.join(' ; ')}`, type: 'erreur' }
+    : { texte: `${liste.length} version(s) locataire recréée(s) : à contrôler sur chaque facture`, type: 'info' }
+  await charger()
+}
 const energies = computed(() => (fournisseur.value?.energies ?? []).map((e) => ENERGIES[e]).join(', '))
 
 async function basculerConfidentiel(event: Event) {
@@ -74,6 +107,27 @@ const editeur = (id: number) => ({ name: releve.value ? 'extracteur-releve' : 'e
       Confidentiel : ne jamais joindre ses factures au justificatif d'une régularisation (elles y sont listées,
       « non jointe : document confidentiel, consultable sur demande »)
     </label>
+
+    <template v-if="!releve && !fournisseur.confidentiel && aJoindre.length">
+      <p class="discret">
+        Ses factures sont jointes au justificatif dans leur version locataire, en images, où sont masqués les termes de
+        l'écran « Fournisseurs » et ce que masque son extracteur ({{ compte('verifiee') }} contrôlée(s),
+        {{ compte('a_verifier') }} à contrôler, {{ compte('a_faire') }} à créer). Après un changement de l'extracteur ou
+        des termes, les recréer : chacune est alors à contrôler de nouveau.
+      </p>
+      <div class="actions-page">
+        <button type="button" :disabled="!!progression" @click="refaireCopies">
+          Recréer les versions locataire de ses {{ aJoindre.length }} facture(s)
+        </button>
+        <span v-if="progression" class="discret">{{ progression }}</span>
+      </div>
+      <ul v-if="compte('a_verifier') || compte('a_faire')" class="a-verifier">
+        <li v-for="f in aJoindre.filter((f) => f.annexe !== 'verifiee')" :key="f.id">
+          <RouterLink :to="{ name: 'facture', params: { id: f.id } }">n° {{ f.numero }}</RouterLink>
+          ({{ f.immeuble }}, {{ dateFr(f.date_facture) }}) : {{ f.annexe === 'a_faire' ? 'à créer' : 'à contrôler' }}
+        </li>
+      </ul>
+    </template>
 
     <h2>Extracteur</h2>
     <template v-if="derniere">

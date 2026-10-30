@@ -4,9 +4,11 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, RouterLink, useRouter } from 'vue-router'
 
 import {
-  api, ApiError, CATEGORIES, ENERGIES, STATUTS, type Controle, type Facture, type FactureDetail, type FactureResumee,
-  type FactureSaisie, type LiensFacture, type MouvementPourFacture, type ReglementFacture, type RegularisationTouchee,
+  api, ApiError, CATEGORIES, ENERGIES, STATUTS, type AnnexeFacture, type Controle, type Facture, type FactureDetail,
+  type FactureResumee, type FactureSaisie, type LiensFacture, type MouvementPourFacture, type ReglementFacture,
+  type RegularisationTouchee,
 } from '../api'
+import { preparerAnnexe } from '../extraction/navigateur'
 import { dateFr, depuisGrille, euros, ligneVide, nombreApi, nombreFr, versGrille, type LigneGrille } from '../format'
 
 const props = defineProps<{ id: number }>()
@@ -27,6 +29,9 @@ const reglements = ref<ReglementFacture[]>([])
 const reglement = ref<{ mouvements: MouvementPourFacture[], choisi: number | null } | null>(null)
 // Sent regularisations touched by a replacement just made: to check (ADR 0017)
 const touchees = ref<RegularisationTouchee[]>([])
+// Its copy joined to the supporting documents (ADR 0024), and whether the preview shows it instead of the original
+const annexe = ref<AnnexeFacture | null>(null)
+const voirCopie = ref(false)
 
 const validee = computed(() => facture.value?.statut === 'validee')
 // Paid by bank movements (ADR 0022): a validated invoice, or a draft whose total is known (an invoice still to find)
@@ -68,6 +73,11 @@ function appliquer(detail: FactureDetail) {
   facture.value = detail.facture
   liens.value = detail.liens
   reglements.value = detail.reglements
+  annexe.value = detail.annexe
+  probleme.value = null
+  if (!detail.annexe) {
+    voirCopie.value = false
+  }
   Object.assign(entete, {
     numero: detail.facture.numero,
     date_facture: detail.facture.date_facture,
@@ -280,6 +290,68 @@ async function corriger() {
   }
 }
 
+// ---------------------------------------------------------------- copy joined to the supporting documents (ADR 0024)
+
+// State of the version for the tenant, on its button above the preview
+const ETATS_ANNEXE: Record<Facture['annexe'], string> = {
+  confidentiel: 'jamais jointe',
+  sans_pdf: '',
+  a_faire: 'à créer',
+  a_verifier: 'à contrôler',
+  verifiee: '✓ contrôlée',
+}
+// The version for the tenant can be shown: made from the current PDF
+const copieAJour = computed(() => !!annexe.value && facture.value?.annexe !== 'a_faire')
+
+async function preparer(succes = 'Version locataire créée : la contrôler') {
+  if (await executer(() => preparerAnnexe(facture.value!), succes)) {
+    voirCopie.value = true
+  }
+}
+
+const verifier = () => executer(() => api.verifierAnnexe(props.id, annexe.value!.id),
+  'Version locataire contrôlée : elle sera jointe au justificatif')
+
+// « Il reste une information personnelle » : a text to mask on every invoice, or the masking of the supplier
+const probleme = ref<{ texte: string, extracteur: number | null } | null>(null)
+// Shorter, a text would be masked where it is useful (« FONTOY » would hide the address of the building)
+const LONGUEUR_MINIMALE = 5
+
+async function signalerProbleme() {
+  probleme.value = { texte: '', extracteur: null }
+  try {
+    const extracteurs = await api.extracteurs()
+    const dernier = extracteurs.find((e) => e.derniere && (e.type ?? 'facture') === 'facture' && e.fournisseur === facture.value?.fournisseur)
+    if (probleme.value) {
+      probleme.value.extracteur = dernier?.id ?? null
+    }
+  } catch {
+    // Without the list, the link goes to a new extractor of the supplier
+  }
+}
+
+const masquageDuFournisseur = computed(() => (probleme.value?.extracteur
+  ? { name: 'extracteur', params: { id: probleme.value.extracteur }, query: { onglet: 'masquage', facture: props.id } }
+  : { name: 'nouvel-extracteur', query: { fournisseur: facture.value?.fournisseur, onglet: 'masquage', facture: props.id } }))
+
+async function masquerEtRecreer() {
+  const texte = probleme.value?.texte.trim() ?? ''
+  if (texte.length < LONGUEUR_MINIMALE) {
+    return
+  }
+  occupe.value = true
+  try {
+    await api.modifierTermesMasques([...await api.termesMasques(), texte])
+  } catch (e) {
+    message.value = { texte: (e as Error).message, type: 'erreur' }
+    occupe.value = false
+    return
+  }
+  occupe.value = false
+  probleme.value = null
+  await preparer(`« ${texte} » est masqué sur toutes les factures ; version locataire recréée : la contrôler de nouveau`)
+}
+
 // ---------------------------------------------------------------- invoice PDF
 
 const survolPdf = ref(false)
@@ -299,6 +371,8 @@ async function joindre(files: FileList | null | undefined) {
     }
     const detail = await api.joindrePdf(props.id, file)
     facture.value = detail.facture
+    annexe.value = detail.annexe
+    voirCopie.value = false
     versionPdf.value++
     message.value = { texte: 'PDF de la facture enregistré', type: 'info' }
   } catch (e) {
@@ -538,13 +612,76 @@ onBeforeUnmount(() => {
       <div class="colonne-pdf">
         <template v-if="facture.pdf">
           <div class="outils">
-            <a class="bouton" :href="api.pdfUrl(facture.id)" target="_blank">Ouvrir dans un onglet</a>
+            <button type="button" :class="{ principal: !voirCopie }" @click="voirCopie = false">Facture reçue</button>
+            <button v-if="facture.annexe !== 'confidentiel'" type="button" :class="{ principal: voirCopie }"
+              @click="voirCopie = true">
+              Version locataire <span :class="facture.annexe === 'verifiee' ? 'etat-ok' : 'etat-ko'">({{ ETATS_ANNEXE[facture.annexe] }})</span>
+            </button>
+            <span v-else class="discret" title="Ses factures ne sont jamais jointes aux justificatifs (page du fournisseur)">
+              Fournisseur confidentiel : jamais jointe au justificatif
+            </span>
+            <a class="bouton" :href="voirCopie && copieAJour ? api.annexePdfUrl(facture.id, annexe!.id) : api.pdfUrl(facture.id)"
+              target="_blank">Ouvrir dans un onglet</a>
             <label class="bouton">
               Remplacer le PDF…
               <input type="file" accept="application/pdf" hidden @change="choisirPdf">
             </label>
           </div>
-          <iframe :key="versionPdf" class="apercu" :src="`${api.pdfUrl(facture.id)}?v=${versionPdf}`" title="Facture PDF" />
+          <!-- The version for the tenant (ADR 0024): what to do with it, then the version itself -->
+          <div v-if="voirCopie" class="bandeau-copie" :class="{ verifiee: facture.annexe === 'verifiee' }">
+            <template v-if="facture.annexe === 'a_faire'">
+              <p>{{ annexe ? 'La facture a changé : sa version locataire est à recréer.' : 'Pas encore de version locataire.' }}</p>
+              <div class="actions">
+                <button type="button" class="principal" :disabled="occupe" @click="preparer()">Créer la version locataire</button>
+              </div>
+            </template>
+            <template v-else>
+              <p v-if="facture.annexe === 'verifiee'">
+                ✓ Contrôlée le {{ dateFr(annexe!.verifiee_le!.slice(0, 10)) }} : c'est elle qui est jointe au justificatif
+                envoyé au locataire.
+              </p>
+              <p v-else>
+                Cette version est jointe au justificatif envoyé au locataire. Le nom, l'adresse, les références client et
+                le compte bancaire y sont masqués en noir : contrôlez, page par page, qu'il n'en reste aucun.
+              </p>
+              <div v-if="!probleme" class="actions">
+                <button v-if="facture.annexe === 'a_verifier'" type="button" class="principal" :disabled="occupe" @click="verifier">
+                  ✓ Rien de personnel : à joindre
+                </button>
+                <button type="button" :disabled="occupe" @click="signalerProbleme">✗ Il reste une information personnelle…</button>
+                <button type="button" class="lien discret" :disabled="occupe" @click="preparer()">Recréer la version locataire</button>
+              </div>
+              <form v-else class="probleme" @submit.prevent="masquerEtRecreer">
+                <label>Texte à masquer, recopié de la facture (un texte précis : n° client, IBAN, nom…)
+                  <span class="rangee">
+                    <input v-model="probleme.texte" size="30" autofocus>
+                    <button type="submit" class="principal" :disabled="occupe || probleme.texte.trim().length < LONGUEUR_MINIMALE">
+                      Masquer et recréer
+                    </button>
+                  </span>
+                </label>
+                <p class="discret">
+                  Il sera masqué sur toutes les factures, de tous les fournisseurs (au moins {{ LONGUEUR_MINIMALE }}
+                  caractères : un mot courant masquerait aussi ce qui est utile).
+                </p>
+                <p class="discret">
+                  Le texte change à chaque facture, ou c'est un scan sans texte ?
+                  <RouterLink :to="masquageDuFournisseur">Modifier le masquage du fournisseur</RouterLink>.
+                </p>
+                <p class="discret">
+                  Sinon, ne rien faire : la facture ne sera pas jointe au justificatif (elle y est mentionnée, « consultable
+                  sur demande »).
+                </p>
+                <div class="actions">
+                  <button type="button" @click="probleme = null">Annuler</button>
+                </div>
+              </form>
+            </template>
+          </div>
+          <iframe v-if="voirCopie && copieAJour" :key="`copie-${annexe!.id}`" class="apercu" :src="api.annexePdfUrl(facture.id, annexe!.id)"
+            title="Version locataire" />
+          <div v-else-if="voirCopie" class="apercu apercu-vide"><p class="discret">La version locataire s'affichera ici.</p></div>
+          <iframe v-else :key="versionPdf" class="apercu" :src="`${api.pdfUrl(facture.id)}?v=${versionPdf}`" title="Facture PDF" />
         </template>
         <div
           v-else
