@@ -68,7 +68,9 @@ CREATE TABLE fournisseur (
   id   serial PRIMARY KEY,
   nom  text NOT NULL UNIQUE,                     -- 'EDF', 'ENGIE', 'SEAFF', 'DGFiP (taxe foncière)'
   -- ADR 0014 : factures jamais jointes au justificatif (données fiscales, autres biens), « consultable sur demande »
-  confidentiel boolean NOT NULL DEFAULT false
+  confidentiel boolean NOT NULL DEFAULT false,
+  -- ADR 0025 : zones masquées sur ses scans, tracées à la main : [{ page, x0, y0, x1, y1 }] (fractions de la page)
+  zones_masquees jsonb NOT NULL DEFAULT '[]'
 );
 
 -- ADR 0013 : extracteurs de factures, code TypeScript écrit dans l'application et exécuté dans le navigateur ;
@@ -176,7 +178,8 @@ CREATE TABLE facture_annexe (
   termes         text[] NOT NULL,                 -- termes masqués du moment
   reglages       jsonb NOT NULL,                  -- dpi, seuil
   cree_le        timestamptz NOT NULL DEFAULT now(),
-  verifiee_le    timestamptz
+  verifiee_le    timestamptz,
+  pages_scannees int[] NOT NULL DEFAULT '{}'      -- ADR 0025 : pages qui étaient des scans (masquées par zones seules)
 );
 CREATE INDEX ON facture_annexe (facture_id);
 
@@ -194,6 +197,8 @@ CREATE TRIGGER facture_annexe_figee BEFORE UPDATE ON facture_annexe
   FOR EACH ROW EXECUTE FUNCTION facture_annexe_figee();
 
 ALTER TABLE facture ADD COLUMN annexe_id int REFERENCES facture_annexe(id);
+-- ADR 0025 : zones de ses scans ajustées à la main ; NULL : celles de son fournisseur
+ALTER TABLE facture ADD COLUMN zones_masquees jsonb;
 
 CREATE TABLE ligne_facture (
   id           serial PRIMARY KEY,

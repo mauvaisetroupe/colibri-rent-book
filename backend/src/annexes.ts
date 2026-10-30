@@ -3,6 +3,7 @@ import { join } from 'node:path'
 
 import type { Pool, PoolClient } from 'pg'
 
+import { InputError } from './http.js'
 import type { Annexe } from './justificatifPdf.js'
 
 // Invoices joined to a supporting document (ADR 0024): never as received, only their version in images, redacted in
@@ -10,6 +11,25 @@ import type { Annexe } from './justificatifPdf.js'
 
 /** What becomes of an invoice in the annexes, from its supplier, its PDF and its current version in images. */
 export type EtatAnnexe = 'confidentiel' | 'sans_pdf' | 'a_faire' | 'a_verifier' | 'verifiee'
+
+/** A zone drawn by hand on a scanned page (ADR 0025): page from 1, bounds in fractions of the page from its top-left. */
+export type ZoneSaisie = { page: number, x0: number, y0: number, x1: number, y1: number }
+
+/** The zones of a supplier or of an invoice, as sent: a list of rectangles inside the page; an InputError else. */
+export function zonesSaisies(valeur: unknown): ZoneSaisie[] {
+  if (!Array.isArray(valeur)) {
+    throw new InputError('« zones » : une liste attendue')
+  }
+  return valeur.map((z: Record<string, unknown> | null, i) => {
+    const { page, x0, y0, x1, y1 } = z ?? {}
+    const bornes = [x0, y0, x1, y1]
+    if (!Number.isInteger(page) || (page as number) < 1 || !bornes.every((v) => typeof v === 'number' && v >= 0 && v <= 1)
+      || (x0 as number) >= (x1 as number) || (y0 as number) >= (y1 as number)) {
+      throw new InputError(`Zone ${i + 1} invalide : page à partir de 1, bornes de 0 à 1, x0 < x1 et y0 < y1`)
+    }
+    return { page, x0, y0, x1, y1 } as ZoneSaisie
+  })
+}
 
 /** SQL of the state of the annex of invoice `f` (supplier `fo`). */
 export const ETAT_ANNEXE_SQL = `CASE

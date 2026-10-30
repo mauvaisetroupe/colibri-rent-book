@@ -64,7 +64,7 @@ const extracteurRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) =
     }
     const { rows } = await db.query(
       `SELECT f.id, f.numero, f.date_facture::text, f.montant_ttc::text, f.statut, f.extracteur_id, i.nom AS immeuble,
-              ${ETAT_ANNEXE_SQL} AS annexe
+              ${ETAT_ANNEXE_SQL} AS annexe, fo.id AS fournisseur_id, f.zones_masquees
        FROM facture f JOIN fournisseur fo ON fo.id = f.fournisseur_id JOIN immeuble i ON i.id = f.immeuble_id
        WHERE fo.nom = $1 AND f.fichier_pdf IS NOT NULL
        ORDER BY f.date_facture DESC NULLS LAST, f.id DESC`,

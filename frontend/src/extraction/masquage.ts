@@ -5,13 +5,18 @@ import { lignesAvecMorceaux, type Portion } from './regroupement'
 
 // What to mask on the copy of an invoice joined to a supporting document (ADR 0024): the terms masked on every invoice
 // and the redactions of the extractor of its supplier, found in the lines of text of pdf.js, become rectangles in
-// fractions of the page. Only rectangles leave the browser; the copy in images is painted from them (annexe.ts).
+// fractions of the page. A scanned page (ADR 0025) is not searched, its text read by the scanner is not trusted: the
+// zones drawn by hand are masked on it, those of the invoice or else those of its supplier. Only rectangles leave the
+// browser; the copy in images is painted from them (annexe.ts).
 
 /** A page as pdf.js gives it: its size in points and its pieces of text. */
 export type PageLue = { largeur: number, hauteur: number, morceaux: Morceau[] }
 
-/** Where a zone comes from; « main » (drawn by hand) is for later (ADR 0024). */
-export type Origine = 'termes' | 'extracteur'
+/** Where a zone comes from: found in the text, or drawn by hand on a scan (the model of the supplier, the invoice). */
+export type Origine = 'termes' | 'extracteur' | 'modele' | 'main'
+
+/** A zone drawn by hand on a scanned page (ADR 0025): page from 1, bounds in fractions of the page from its top-left. */
+export type ZoneSaisie = { page: number, x0: number, y0: number, x1: number, y1: number }
 
 /** A rectangle painted black, in fractions of the page from its top-left corner; page 1 is the first one. */
 export type Zone = { page: number, x0: number, y0: number, x1: number, y1: number, origine: Origine }
@@ -103,32 +108,23 @@ function zonesDuTexte(page: PageLue, numero: number, reglages: Reglages, cherche
 }
 
 /**
- * The zones to paint on the pages of an invoice: every occurrence of the masked terms, and the redactions of the
- * extractor (texts, regular expressions, fixed areas). An error of the extractor is thrown: nothing is masked half.
+ * The zones to paint on the pages of text of an invoice: every occurrence of the masked terms, and the redactions of
+ * the extractor (texts, regular expressions). The scanned pages (numbers from 1) are left out. An error of the
+ * extractor is thrown: nothing is masked half.
  */
-export function zonesAMasquer(pages: PageLue[], reglages: Reglages, termes: string[], regles: Redaction[] = []): Zone[] {
+export function zonesAMasquer(
+  pages: PageLue[], reglages: Reglages, termes: string[], regles: Redaction[] = [], scannees: number[] = [],
+): Zone[] {
   const cherches = [
     ...termes.map((t) => ({ regle: { text: t } as Redaction, origine: 'termes' as const })),
     ...regles.filter((r) => 'text' in r || 'pattern' in r).map((regle) => ({ regle, origine: 'extracteur' as const })),
   ]
-  const zones = pages.flatMap((page, i) => zonesDuTexte(page, i + 1, reglages, cherches))
-  for (const r of regles) {
-    if ('text' in r || 'pattern' in r) {
-      continue
-    }
-    const { x0, y0, x1, y1 } = r
-    if (![x0, y0, x1, y1].every((v) => typeof v === 'number' && v >= 0 && v <= 1) || x0 >= x1 || y0 >= y1) {
-      throw new Error(`redactions : zone invalide (${x0}, ${y0}, ${x1}, ${y1}) : fractions de 0 à 1, x0 < x1, y0 < y1`)
-    }
-    const numeros = r.page === undefined ? pages.map((_, i) => i + 1) : [r.page]
-    for (const page of numeros) {
-      if (page >= 1 && page <= pages.length) {
-        zones.push({ page, x0, y0, x1, y1, origine: 'extracteur' })
-      }
-    }
-  }
-  return zones
+  return pages.flatMap((page, i) => (scannees.includes(i + 1) ? [] : zonesDuTexte(page, i + 1, reglages, cherches)))
 }
+
+/** The zones drawn by hand on the scanned pages; those of another page are not used. */
+export const zonesDesScans = (zones: ZoneSaisie[], scannees: number[], origine: 'modele' | 'main'): Zone[] =>
+  zones.filter((z) => scannees.includes(z.page)).map(({ page, x0, y0, x1, y1 }) => ({ page, x0, y0, x1, y1, origine }))
 
 /** The redactions of an extractor for a document (the text of a PDF grouped with its settings). */
 export function reglesDuDocument(classe: ClasseExtracteur, document: Document): Redaction[] {
@@ -174,6 +170,16 @@ export function lignesMasquees(lignes: string[], termes: string[], regles: Redac
   })
 }
 
-/** The zones of an invoice: the masked terms, and the redactions of its extractor when there is one. */
-export const masquage = (pages: PageLue[], reglages: Reglages, termes: string[], classe: ClasseExtracteur | null = null) =>
-  zonesAMasquer(pages, reglages, termes, classe ? reglesDe(classe, pages, reglages) : [])
+/**
+ * The zones of an invoice: on its pages of text, the masked terms and the redactions of its extractor when there is
+ * one; on its scanned pages, the zones drawn by hand (`scans`: those of the invoice, `main`, or of its supplier).
+ */
+export function masquage(
+  pages: PageLue[], reglages: Reglages, termes: string[], classe: ClasseExtracteur | null = null,
+  scans: { pages: number[], zones: ZoneSaisie[], origine: 'modele' | 'main' } = { pages: [], zones: [], origine: 'modele' },
+): Zone[] {
+  return [
+    ...zonesAMasquer(pages, reglages, termes, classe ? reglesDe(classe, pages, reglages) : [], scans.pages),
+    ...zonesDesScans(scans.zones, scans.pages, scans.origine),
+  ]
+}

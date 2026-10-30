@@ -9,7 +9,7 @@ import type { Pool, PoolClient } from 'pg'
 import { checkInvoice, isDecimal } from '../invoices/checks.js'
 import { BadRequestError, readLines, readTotal } from '../invoices/requestBody.js'
 import type { InvoiceLine } from '../invoices/types.js'
-import { ETAT_ANNEXE_SQL } from '../annexes.js'
+import { ETAT_ANNEXE_SQL, zonesSaisies } from '../annexes.js'
 import { AVEC_FACTURE } from '../categories.js'
 import { COUVERT_SQL } from '../couverture.js'
 import { InputError, sendError } from '../http.js'
@@ -36,7 +36,7 @@ const LINE_COLUMNS = `
 const FACTURE_COLUMNS = `
   f.id, f.immeuble_id, fo.nom AS fournisseur, f.energie, f.numero, f.date_facture::text,
   f.montant_ttc::text, f.statut, f.note, f.fichier_pdf IS NOT NULL AS pdf, fo.id AS fournisseur_id, f.extracteur_id,
-  ${ETAT_ANNEXE_SQL} AS annexe,
+  ${ETAT_ANNEXE_SQL} AS annexe, f.zones_masquees,
   f.remplacee_par, f.remplacee_le::text, f.motif_remplacement, f.remplace_id,
   (SELECT coalesce(sum(rf.montant), 0) FROM reglement_facture rf WHERE rf.facture_id = f.id)::text AS paye,
   ${RESTE_FACTURE_SQL}::text AS reste,
@@ -113,7 +113,7 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     // Its current version in images (ADR 0024)
     const { rows: [annexe] } = await db.query(
       `SELECT a.id, a.extracteur_id, a.termes, a.reglages, jsonb_array_length(a.zones) AS zones, a.cree_le,
-              a.verifiee_le
+              a.verifiee_le, a.pages_scannees
        FROM facture f JOIN facture_annexe a ON a.id = f.annexe_id WHERE f.id = $1`, [id])
     return {
       facture, lignes, liens, reglements, annexe: annexe ?? null,
@@ -546,9 +546,9 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
       await client.query('BEGIN')
       const { rows: [copie] } = await client.query<{ id: number }>(
         `INSERT INTO facture (immeuble_id, fournisseur_id, energie, numero, date_facture, montant_ttc, fichier_pdf, note,
-                              extracteur_id, remplace_id, annexe_id)
+                              extracteur_id, remplace_id, annexe_id, zones_masquees)
          SELECT immeuble_id, fournisseur_id, energie, numero, date_facture, montant_ttc, fichier_pdf, note,
-                extracteur_id, id, annexe_id
+                extracteur_id, id, annexe_id, zones_masquees
          FROM facture WHERE id = $1 RETURNING id`,
         [id],
       )
@@ -662,9 +662,11 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
       return reply.code(415).send({ message: `${file.filename} n'est pas un PDF` })
     }
     const { fileName } = await storePdf(storageDir, content, 'factures')
-    // A new PDF: its version in images is to be made again (ADR 0024)
+    // A new PDF: its version in images is to be made again (ADR 0024), its zones drawn by hand were for the other one
     await db.query(
-      'UPDATE facture SET fichier_pdf = $2, annexe_id = CASE WHEN fichier_pdf = $2 THEN annexe_id END WHERE id = $1',
+      `UPDATE facture SET fichier_pdf = $2, annexe_id = CASE WHEN fichier_pdf = $2 THEN annexe_id END,
+                          zones_masquees = CASE WHEN fichier_pdf = $2 THEN zones_masquees END
+       WHERE id = $1`,
       [id, fileName])
     if (facture.fichier_pdf && facture.fichier_pdf !== fileName) {
       await removeIfUnused(facture.fichier_pdf)
@@ -675,7 +677,8 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
   // ---------------------------------------------------------------- version in images (ADR 0024)
 
   // The version in images of the invoice, made in the browser: multipart with the PDF « file » and the field
-  // « annexe », JSON { zones, extracteur_id (null: masked terms only), termes, reglages }. A new version, to verify.
+  // « annexe », JSON { zones, extracteur_id (null: masked terms only), termes, reglages, pages_scannees (ADR 0025) }.
+  // A new version, to verify.
   app.post('/factures/:id/annexe', async (request, reply) => {
     const id = Number((request.params as { id: string }).id)
     const { rows: [facture] } = await db.query<{ fichier_pdf: string | null }>(
@@ -708,15 +711,20 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     }
     const extracteurId = annexe.extracteur_id === null || annexe.extracteur_id === undefined
       ? null : Number(annexe.extracteur_id)
+    const scannees = annexe.pages_scannees ?? []
+    if (!Array.isArray(scannees) || !scannees.every((p) => Number.isInteger(p) && p >= 1)) {
+      return reply.code(400).send({ message: '« pages_scannees » : une liste de numéros de page attendue' })
+    }
     const { fileName } = await storePdf(storageDir, content, 'annexes')
     const client = await db.connect()
     try {
       await client.query('BEGIN')
       const { rows: [created] } = await client.query<{ id: number }>(
-        `INSERT INTO facture_annexe (facture_id, fichier_pdf, source_pdf, zones, extracteur_id, termes, reglages)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        `INSERT INTO facture_annexe (facture_id, fichier_pdf, source_pdf, zones, extracteur_id, termes, reglages,
+                                     pages_scannees)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
         [id, fileName, facture.fichier_pdf, JSON.stringify(annexe.zones), extracteurId,
-          annexe.termes.map(String), JSON.stringify(annexe.reglages)],
+          annexe.termes.map(String), JSON.stringify(annexe.reglages), scannees],
       )
       await client.query('UPDATE facture SET annexe_id = $2 WHERE id = $1', [id, created!.id])
       await client.query('COMMIT')
@@ -756,6 +764,20 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     return rowCount
       ? load(id)
       : reply.code(409).send({ message: 'Cette version n\'est plus celle de la facture, ou elle est déjà vérifiée' })
+  })
+
+  // The zones of its scans adjusted by hand (ADR 0025), whatever its status: they change only its version in images,
+  // to make again. null: back to those of its supplier
+  app.put('/factures/:id/zones', async (request, reply) => {
+    try {
+      const valeur = (request.body as { zones?: unknown } | null)?.zones
+      const zones = valeur === null ? null : JSON.stringify(zonesSaisies(valeur))
+      const id = Number((request.params as { id: string }).id)
+      const { rowCount } = await db.query('UPDATE facture SET zones_masquees = $2 WHERE id = $1', [id, zones])
+      return rowCount ? load(id) : reply.code(404).send({ message: 'Facture introuvable' })
+    } catch (error) {
+      return sendError(reply, error)
+    }
   })
 
   // Terms masked on every invoice (manager, address, bank account): data of the deployment, never in this repository

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { PDFDocument, StandardFonts } from 'pdf-lib'
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { PDFDocument, setTextRenderingMode, StandardFonts, TextRenderingMode } from 'pdf-lib'
+import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import ts from 'typescript'
 
 import { binariser, pdfEnImages } from './annexe'
@@ -10,10 +10,11 @@ import { compiler } from './compilation'
 import { REGLAGES_PAR_DEFAUT } from './contrat'
 import { lignesMasquees, masquage } from './masquage'
 import { charger } from './moteur'
-import { morceaux } from './pdf'
+import { estScannee, morceaux } from './pdf'
 
 // The copy of an invoice joined to a supporting document (ADR 0024), on a made-up invoice: where the masked terms and
-// the redactions of an extractor are, and the PDF in images, where no text is left.
+// the redactions of an extractor are, and the PDF in images, where no text is left. A scanned page (ADR 0025): told
+// apart, its text not searched, masked by the zones drawn by hand.
 
 const LARGEUR = 595
 const HAUTEUR = 842
@@ -55,7 +56,7 @@ export default class Exemple extends InvoiceExtractor {
   findLine() { return null }
   readLine() { return null }
   redactions(): Redaction[] {
-    return [{ pattern: /Référence client : ([\\d ]+)/ }, { page: 1, x0: 0, y0: 0.9, x1: 1, y1: 1 }]
+    return [{ pattern: /Référence client : ([\\d ]+)/ }]
   }
 }`
 
@@ -74,19 +75,41 @@ describe('zones to mask', () => {
     assert.ok(rue!.y0 > nom!.y1 - 0.01, 'second line below')
   })
 
-  test('the redactions of an extractor: a regular expression, a fixed area', async () => {
+  test('the redactions of an extractor: a regular expression', async () => {
     const classe = charger(compiler(EXTRACTEUR, ts))
     const pages = await pagesDe(await facture(FACTURE))
     const zones = masquage(pages, REGLAGES_PAR_DEFAUT, [], classe)
-    assert.deepEqual(zones.map((z) => z.origine), ['extracteur', 'extracteur'])
+    assert.deepEqual(zones.map((z) => z.origine), ['extracteur'])
     assert.ok(zones[0]!.x0 * LARGEUR < 41 && zones[0]!.x1 * LARGEUR > 150, 'the whole match')
-    assert.deepEqual(zones[1], { page: 1, x0: 0, y0: 0.9, x1: 1, y1: 1, origine: 'extracteur' })
   })
 
-  test('an invalid fixed area is an error, nothing is masked half', async () => {
-    const classe = charger(compiler(EXTRACTEUR.replace('x1: 1, y1: 1', 'x1: 2, y1: 1'), ts))
+  test('a scanned page: its text is not searched, the zones drawn by hand mask it', async () => {
+    const classe = charger(compiler(EXTRACTEUR, ts))
     const pages = await pagesDe(await facture(FACTURE))
-    assert.throws(() => masquage(pages, REGLAGES_PAR_DEFAUT, [], classe), /zone invalide/)
+    const dessinees = [{ page: 1, x0: 0.5, y0: 0.05, x1: 0.95, y1: 0.12 }, { page: 2, x0: 0, y0: 0, x1: 1, y1: 1 }]
+    assert.deepEqual(masquage(pages, REGLAGES_PAR_DEFAUT, ['MME EXEMPLE'], classe, { pages: [1], zones: dessinees, origine: 'main' }),
+      [{ page: 1, x0: 0.5, y0: 0.05, x1: 0.95, y1: 0.12, origine: 'main' }], 'neither the terms nor the extractor, no page 2')
+    assert.equal(masquage(pages, REGLAGES_PAR_DEFAUT, ['MME EXEMPLE'], classe, { pages: [], zones: dessinees, origine: 'modele' })
+      .filter((z) => z.origine === 'modele').length, 0, 'a page of text: no zones drawn by hand')
+  })
+})
+
+describe('scanned pages', () => {
+  /** Page 1: an image of the whole page under invisible text, as a scanner makes it; page 2: visible text. */
+  async function scanPuisTexte(): Promise<Uint8Array> {
+    const bits = new Uint8Array(Math.ceil(100 / 8) * 140).fill(0xff)
+    const pdf = await PDFDocument.load(await pdfEnImages([{ largeur: LARGEUR, hauteur: HAUTEUR, largeurPx: 100, hauteurPx: 140, bits }]))
+    const police = await pdf.embedFont(StandardFonts.Helvetica)
+    const scan = pdf.getPage(0)
+    scan.pushOperators(setTextRenderingMode(TextRenderingMode.Invisible))
+    scan.drawText('MME EXEMPLE CLAIRE', { x: 350, y: 800, size: 10, font: police })
+    pdf.addPage([LARGEUR, HAUTEUR]).drawText('Total TTC', { x: 40, y: 800, size: 10, font: police })
+    return pdf.save()
+  }
+
+  test('a page covered by an image whose text is invisible is a scan, not a page of text', async () => {
+    const pdf = await getDocument({ data: await scanPuisTexte(), verbosity: 0 }).promise
+    assert.deepEqual([await estScannee(await pdf.getPage(1), OPS), await estScannee(await pdf.getPage(2), OPS)], [true, false])
   })
 })
 

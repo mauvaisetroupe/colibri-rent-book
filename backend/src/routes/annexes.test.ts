@@ -141,6 +141,35 @@ describe('invoices joined as their version in images', { skip: skipWithoutDataba
     await assert.rejects(pool.query('UPDATE facture_annexe SET termes = \'{}\''), /jamais modifiée/)
   })
 
+  test('zones drawn by hand on scans (ADR 0025): of the supplier, of the invoice, reset by a new PDF', async () => {
+    const zone = { page: 1, x0: 0.5, y0: 0.1, x1: 0.9, y1: 0.2 }
+    const detail = (await app.inject(`/api/factures/${facture}`)).json()
+    const fournisseur = detail.facture.fournisseur_id
+    const r = await app.inject({ method: 'PUT', url: `/api/fournisseurs/${fournisseur}/zones`, payload: { zones: [zone] } })
+    assert.equal(r.statusCode, 200, r.body)
+    assert.deepEqual(r.json().zones_masquees, [zone])
+    assert.equal((await app.inject({ method: 'PUT', url: `/api/fournisseurs/${fournisseur}/zones`,
+      payload: { zones: [{ ...zone, x1: 0.4 }] } })).statusCode, 400, 'x0 < x1')
+
+    const propres = await app.inject({ method: 'PUT', url: `/api/factures/${facture}/zones`, payload: { zones: [{ ...zone, page: 2 }] } })
+    assert.equal(propres.statusCode, 200, propres.body)
+    assert.deepEqual(propres.json().facture.zones_masquees, [{ ...zone, page: 2 }])
+    assert.equal((await app.inject({ method: 'PUT', url: `/api/factures/${facture}/zones`,
+      payload: { zones: [{ ...zone, page: 0 }] } })).statusCode, 400, 'pages from 1')
+
+    // The version made of a scan says so
+    const fait = await app.inject({
+      method: 'POST', url: `/api/factures/${facture}/annexe`,
+      ...multipart({ annexe: JSON.stringify({ ...annexe, pages_scannees: [1] }) }, await pdf(1, 'scan')),
+    })
+    assert.equal(fait.statusCode, 201, fait.body)
+    assert.deepEqual(fait.json().annexe.pages_scannees, [1])
+
+    await app.inject({ method: 'POST', url: `/api/factures/${facture}/pdf`, ...multipart({}, await pdf(2, 'autre scan')) })
+    assert.equal((await app.inject(`/api/factures/${facture}`)).json().facture.zones_masquees, null,
+      'zones drawn for another PDF')
+  })
+
   test('masked terms: a list, trimmed, without duplicates', async () => {
     const r = await app.inject({ method: 'PUT', url: '/api/termes-masques',
       payload: { termes: [' NOM DU GÉRANT ', '', 'FR76 0000', 'NOM DU GÉRANT'] } })

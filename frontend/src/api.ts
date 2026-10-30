@@ -534,6 +534,9 @@ export type FactureAvecPdf = {
   extracteur_id: number | null
   immeuble: string
   annexe: EtatAnnexe
+  fournisseur_id: number
+  // ADR 0025: the zones of its scans adjusted by hand; null, those of its supplier
+  zones_masquees: ZoneSaisie[] | null
 }
 
 // A supplier (ADR 0014): its invoices, the last version of its extractor; « confidentiel »: never joined in annex
@@ -547,7 +550,12 @@ export type Fournisseur = {
   // A bank (ADR 0018): its statements
   nb_releves: number
   extracteur: { id: number, version: number, type: 'facture' | 'releve' } | null
+  // ADR 0025: the zones masked on the scans of its invoices, drawn by hand
+  zones_masquees: ZoneSaisie[]
 }
+
+/** A zone drawn by hand on a scanned page (ADR 0025): page from 1, bounds in fractions of the page from its top-left. */
+export type ZoneSaisie = { page: number, x0: number, y0: number, x1: number, y1: number }
 
 // What the browser read from a PDF, sent with it on import
 export type Brouillon = {
@@ -584,6 +592,8 @@ export type Facture = {
   extracteur_id: number | null
   // ADR 0024: what becomes of it in the annexes of a supporting document
   annexe: EtatAnnexe
+  // ADR 0025: the zones of its scans adjusted by hand; null, those of its supplier
+  zones_masquees: ZoneSaisie[] | null
 }
 
 /**
@@ -602,6 +612,8 @@ export type AnnexeFacture = {
   zones: number
   cree_le: string
   verifiee_le: string | null
+  // ADR 0025: its pages that were scans, masked by zones drawn by hand
+  pages_scannees: number[]
 }
 
 /** A version in images made in the browser, sent with its PDF. */
@@ -610,6 +622,7 @@ export type AnnexeEnvoyee = {
   extracteur_id: number | null
   termes: string[]
   reglages: { dpi: number, seuil: number }
+  pages_scannees: number[]
 }
 
 export type ReglementFacture = { id: number, mouvement_id: number, date_paiement: string, libelle: string, montant: string }
@@ -886,6 +899,8 @@ export const api = {
   },
   verifierAnnexe: (id: number, annexe: number) =>
     request<FactureDetail>('POST', `/factures/${id}/annexe/verifiee`, { annexe_id: annexe }),
+  // ADR 0025: the zones of its scans adjusted by hand (null: those of its supplier)
+  modifierZonesFacture: (id: number, zones: ZoneSaisie[] | null) => request<FactureDetail>('PUT', `/factures/${id}/zones`, { zones }),
   termesMasques: () => request<string[]>('GET', '/termes-masques'),
   modifierTermesMasques: (termes: string[]) => request<string[]>('PUT', '/termes-masques', { termes }),
 
@@ -920,6 +935,7 @@ export const api = {
   fournisseurs: () => request<Fournisseur[]>('GET', '/fournisseurs'),
   fournisseur: (id: number) => request<Fournisseur>('GET', `/fournisseurs/${id}`),
   modifierFournisseur: (id: number, modif: { confidentiel: boolean }) => request<Fournisseur>('PATCH', `/fournisseurs/${id}`, modif),
+  modifierZonesFournisseur: (id: number, zones: ZoneSaisie[]) => request<Fournisseur>('PUT', `/fournisseurs/${id}/zones`, { zones }),
   extracteurs: () => request<ExtracteurEnregistre[]>('GET', '/extracteurs'),
   extracteur: (id: number) => request<ExtracteurEnregistre>('GET', `/extracteurs/${id}`),
   nouvelleVersion: (version: NouvelleVersion) => request<ExtracteurEnregistre>('POST', '/extracteurs', version),

@@ -475,10 +475,15 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
         version locataire (espaces et majuscules ignorés). Ce qui est propre à un fournisseur (références
         client fixes, point de livraison) peut aussi y aller. Dans l'éditeur, l'onglet <strong>Masquage</strong> montre
         en noir, dans le texte du PDF d'exemple, ce qui sera caché ; sélectionner un texte l'ajoute aux termes masqués.
-        Seul ce qui change d'une facture à l'autre (un motif) ou une zone fixe d'un scan demande du code : la méthode
+        Seul ce qui change d'une facture à l'autre (un motif) demande du code : la méthode
         <code>redactions()</code> (« Ajouter redactions() au code »). « Vérifier le masquage… » montre la version locataire
         du PDF de travail. Après un changement, « Recréer les versions locataire » sur la page du fournisseur, puis les
         contrôler.</li>
+      <li><strong>Factures scannées</strong> : le texte lu par le scanner n'est pas fiable, une page scannée n'est
+        masquée que par des zones tracées à la souris. Sur la page du fournisseur, « Zones masquées sur ses scans » :
+        choisir une de ses factures, tracer les zones (les déplacer, les redimensionner par le coin, les retirer avec ×
+        ou Suppr), les enregistrer, puis recréer les versions locataire. Sur une facture, « Il reste une information
+        personnelle : ajuster les zones… » les ajuste pour elle seule.</li>
       <li>Un extracteur lit les PDF d'un fournisseur : une classe TypeScript qui étend <code>InvoiceExtractor</code>,
         surtout des expressions régulières, une méthode par information (reconnaître le PDF, numéro, date, total ;
         pour les lignes : où chercher, quelles lignes, comment lire chacune).</li>

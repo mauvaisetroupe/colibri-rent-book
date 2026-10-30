@@ -156,7 +156,9 @@ async function lireEtImporter(
     let copie = ''
     if (facture.annexe === 'a_faire') {
       try {
-        await preparerAnnexe(facture, termes && extracteurs.length ? { termes, extracteurs } : undefined)
+        await preparerAnnexe(facture, termes && extracteurs.length
+          ? { termes, extracteurs, modele: (await api.fournisseur(facture.fournisseur_id)).zones_masquees }
+          : undefined)
         copie = ', version locataire à contrôler'
       } catch (e) {
         copie = `, version locataire non créée (${(e as Error).message})`

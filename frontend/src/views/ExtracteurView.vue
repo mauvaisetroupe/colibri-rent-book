@@ -245,7 +245,6 @@ const REDACTIONS = `
     return [
       // { text: 'a printed text' },
       // { pattern: /a regular expression, on one line/ },
-      // { page: 1, x0: 0, y0: 0.9, x1: 1, y1: 1 }, // a fixed area: fractions of the page from its top-left corner
     ]
   }
 `
@@ -315,8 +314,10 @@ async function apercuCopie() {
   occupe.value = true
   try {
     const contenu = new Uint8Array(await (await fetch(exemple.value.url)).arrayBuffer())
+    // A scanned page is masked by the zones drawn on the page of the supplier (ADR 0025)
+    const modele = (await api.fournisseurs()).find((f) => f.nom === form.fournisseur.trim())?.zones_masquees ?? []
     const { pdf, zones } = await copieEnImages(contenu, await api.termesMasques(),
-      { classe: charger(code.value), reglages: form.reglages })
+      { classe: charger(code.value), reglages: form.reglages }, { zones: modele, origine: 'modele' })
     oublierCopie()
     copie.value = { url: URL.createObjectURL(new Blob([pdf as Uint8Array<ArrayBuffer>], { type: 'application/pdf' })), zones: zones.length }
   } catch (e) {
@@ -650,8 +651,8 @@ async function enregistrer() {
       <h2 tabindex="-1" autofocus>Masquage : copie jointe aux justificatifs de {{ exemple?.nom }}</h2>
       <p class="discret">
         Chaque page en image noir et blanc, où sont peints en noir les termes masqués (toutes les factures, tous
-        fournisseurs) et ce que rend <code>redactions()</code> (ce fournisseur : un texte qui change à chaque facture, une
-        zone fixe d'un scan). C'est ce que reçoit le locataire.
+        fournisseurs) et ce que rend <code>redactions()</code> (ce fournisseur : un texte qui change à chaque facture). Une
+        page scannée n'est masquée que par les zones tracées sur la page du fournisseur. C'est ce que reçoit le locataire.
       </p>
       <div class="termes">
         <strong>Termes masqués :</strong>

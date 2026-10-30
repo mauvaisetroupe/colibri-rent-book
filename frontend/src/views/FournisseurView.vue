@@ -2,12 +2,14 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
-import { api, ENERGIES, type ExtracteurEnregistre, type FactureAvecPdf, type Fournisseur } from '../api'
+import { api, ENERGIES, type ExtracteurEnregistre, type FactureAvecPdf, type Fournisseur, type ZoneSaisie } from '../api'
+import EditeurZones from '../components/EditeurZones.vue'
 import { dateFr } from '../format'
 
 // A supplier (ADR 0013, 0014): « confidentiel » (its invoices are never joined to a supporting document), and the
 // versions of its extractor, the last one reading the imports; a version opens in the editor. The copies of its
-// invoices joined to the supporting documents, made again at once after a change of its extractor (ADR 0024).
+// invoices joined to the supporting documents, made again at once after a change of its extractor (ADR 0024); the
+// zones masked on its scans, drawn on one of its invoices (ADR 0025).
 
 const props = defineProps<{ id: number }>()
 const router = useRouter()
@@ -20,6 +22,7 @@ async function charger() {
     fournisseur.value = await api.fournisseur(props.id)
     versions.value = (await api.extracteurs()).filter((e) => e.fournisseur === fournisseur.value?.nom)
     factures.value = await api.facturesDuFournisseur(fournisseur.value.nom)
+    zones.value = fournisseur.value.zones_masquees.map((z) => ({ ...z }))
   } catch (e) {
     message.value = { texte: (e as Error).message, type: 'erreur' }
   }
@@ -43,13 +46,13 @@ async function refaireCopies() {
     return
   }
   const { preparerAnnexe } = await import('../extraction/navigateur')
-  const donnees = { termes: await api.termesMasques(), extracteurs: await api.extracteurs() }
+  const donnees = { termes: await api.termesMasques(), extracteurs: await api.extracteurs(), modele: fournisseur.value.zones_masquees }
   const erreurs: string[] = []
   const liste = aJoindre.value
   for (const [i, f] of liste.entries()) {
     progression.value = `Copie ${i + 1} sur ${liste.length} : n° ${f.numero}…`
     try {
-      await preparerAnnexe({ id: f.id, fournisseur: fournisseur.value.nom }, donnees)
+      await preparerAnnexe({ ...f, fournisseur: fournisseur.value.nom }, donnees)
     } catch (e) {
       erreurs.push(`n° ${f.numero} : ${(e as Error).message}`)
     }
@@ -60,6 +63,31 @@ async function refaireCopies() {
     : { texte: `${liste.length} version(s) locataire recréée(s) : à contrôler sur chaque facture`, type: 'info' }
   await charger()
 }
+
+// ---------------------------------------------------------------- zones of its scans (ADR 0025)
+
+const zones = ref<ZoneSaisie[]>([])
+// The invoice the zones are drawn on, and its PDF
+const factureZones = ref<number | null>(null)
+const contenuZones = ref<Uint8Array | null>(null)
+const zonesModifiees = computed(() => JSON.stringify(zones.value) !== JSON.stringify(fournisseur.value?.zones_masquees ?? []))
+
+watch(factureZones, async (id) => {
+  contenuZones.value = id === null ? null : new Uint8Array(await (await fetch(api.pdfUrl(id))).arrayBuffer())
+})
+
+async function enregistrerZones() {
+  if (!fournisseur.value) {
+    return
+  }
+  try {
+    fournisseur.value = await api.modifierZonesFournisseur(fournisseur.value.id, zones.value)
+    message.value = { texte: 'Zones enregistrées : recréer les versions locataire pour les appliquer', type: 'info' }
+  } catch (e) {
+    message.value = { texte: (e as Error).message, type: 'erreur' }
+  }
+}
+
 const energies = computed(() => (fournisseur.value?.energies ?? []).map((e) => ENERGIES[e]).join(', '))
 
 async function basculerConfidentiel(event: Event) {
@@ -121,6 +149,25 @@ const editeur = (id: number) => ({ name: releve.value ? 'extracteur-releve' : 'e
         </button>
         <span v-if="progression" class="discret">{{ progression }}</span>
       </div>
+      <h3>Zones masquées sur ses scans</h3>
+      <p class="discret">
+        Sur une facture scannée, le texte lu par le scanner n'est pas fiable : seules ces zones y sont masquées
+        ({{ fournisseur.zones_masquees.length }} enregistrée(s)). Les tracer à la souris sur une de ses factures ; chaque
+        facture peut ensuite ajuster les siennes (onglet « Version locataire »).
+      </p>
+      <div class="actions-page">
+        <label>Tracer sur la facture
+          <select v-model="factureZones">
+            <option :value="null">—</option>
+            <option v-for="f in aJoindre" :key="f.id" :value="f.id">n° {{ f.numero }} ({{ dateFr(f.date_facture) }})</option>
+          </select>
+        </label>
+        <button type="button" :disabled="!zonesModifiees" @click="enregistrerZones">Enregistrer les zones</button>
+        <button type="button" :disabled="!zonesModifiees" @click="zones = fournisseur.zones_masquees.map((z) => ({ ...z }))">
+          Annuler
+        </button>
+      </div>
+      <EditeurZones v-if="contenuZones" v-model="zones" :contenu="contenuZones" />
       <ul v-if="compte('a_verifier') || compte('a_faire')" class="a-verifier">
         <li v-for="f in aJoindre.filter((f) => f.annexe !== 'verifiee')" :key="f.id">
           <RouterLink :to="{ name: 'facture', params: { id: f.id } }">n° {{ f.numero }}</RouterLink>

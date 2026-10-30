@@ -4,19 +4,22 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { api, type Brouillon, type ExtracteurEnregistre, type Facture, type FactureDetail } from '../api'
 import { binariser, pdfEnImages, REGLAGES_ANNEXE, type PageImage } from './annexe'
 import { REGLAGES_PAR_DEFAUT, type ClasseExtracteur, type Morceau, type Reglages } from './contrat'
-import { masquage, type PageLue, type Zone } from './masquage'
+import { masquage, type PageLue, type Zone, type ZoneSaisie } from './masquage'
 import { charger, documentDe, extraire, reconnait, type Extraction } from './moteur'
 import {
   chargerReleve, documentReleve, extraireReleve, reconnaitReleve, type ClasseExtracteurReleve, type ExtractionReleve,
 } from './moteurReleve'
-import { morceaux } from './pdf'
+import { estScannee, morceaux } from './pdf'
 
 // Reading an invoice PDF in the browser (ADR 0013): pdf.js, then the last version of each supplier's extractor.
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
+/** Opening a PDF: its decoders of images in WebAssembly (the scans), else their images are left out (vite.config.ts). */
+const ouvrir = (data: Uint8Array) => pdfjs.getDocument({ data, verbosity: 0, wasmUrl: __PDFJS_WASM__ })
+
 export async function morceauxDuPdf(fichier: Blob): Promise<Morceau[][]> {
-  const chargement = pdfjs.getDocument({ data: new Uint8Array(await fichier.arrayBuffer()), verbosity: 0 })
+  const chargement = ouvrir(new Uint8Array(await fichier.arrayBuffer()))
   try {
     return await morceaux(await chargement.promise)
   } finally {
@@ -140,14 +143,30 @@ async function pagesEnImages(pdf: pdfjs.PDFDocumentProxy, zones: Zone[]): Promis
   return images
 }
 
+/** The numbers (from 1) of the scanned pages of a PDF: their text is not trusted, zones drawn by hand mask them. */
+async function scanneesDe(pdf: pdfjs.PDFDocumentProxy): Promise<number[]> {
+  const scannees: number[] = []
+  for (let n = 1; n <= pdf.numPages; n++) {
+    if (await estScannee(await pdf.getPage(n), pdfjs.OPS)) {
+      scannees.push(n)
+    }
+  }
+  return scannees
+}
+
+/** Zones drawn by hand for the scans of an invoice: its own (`main`), or else those of its supplier (`modele`). */
+export type ZonesDesScans = { zones: ZoneSaisie[], origine: 'modele' | 'main' }
+
 /**
- * The copy of a PDF joined to the supporting documents: the masked terms and the redactions of an extractor (with its
- * grouping settings) found in its text, every page in images, the zones painted black.
+ * The copy of a PDF joined to the supporting documents: on its pages of text, the masked terms and the redactions of
+ * an extractor (with its grouping settings) found in its text; on its scanned pages, the zones drawn by hand. Every page
+ * in images, the zones painted black.
  */
 export async function copieEnImages(
   contenu: Uint8Array, termes: string[], extracteur: { classe: ClasseExtracteur, reglages: Reglages } | null,
-): Promise<{ pdf: Uint8Array, zones: Zone[] }> {
-  const chargement = pdfjs.getDocument({ data: contenu, verbosity: 0 })
+  scans: ZonesDesScans = { zones: [], origine: 'modele' },
+): Promise<{ pdf: Uint8Array, zones: Zone[], scannees: number[] }> {
+  const chargement = ouvrir(contenu)
   try {
     const pdf = await chargement.promise
     const pieces = await morceaux(pdf)
@@ -156,8 +175,10 @@ export async function copieEnImages(
       const { width, height } = (await pdf.getPage(n)).getViewport({ scale: 1 })
       pages.push({ largeur: width, hauteur: height, morceaux: pieces[n - 1] ?? [] })
     }
-    const zones = masquage(pages, extracteur?.reglages ?? REGLAGES_PAR_DEFAUT, termes, extracteur?.classe ?? null)
-    return { pdf: await pdfEnImages(await pagesEnImages(pdf, zones)), zones }
+    const scannees = await scanneesDe(pdf)
+    const zones = masquage(pages, extracteur?.reglages ?? REGLAGES_PAR_DEFAUT, termes, extracteur?.classe ?? null,
+      { pages: scannees, ...scans })
+    return { pdf: await pdfEnImages(await pagesEnImages(pdf, zones)), zones, scannees }
   } finally {
     await chargement.destroy()
   }
@@ -165,17 +186,56 @@ export async function copieEnImages(
 
 /**
  * Makes the copy of an invoice joined to the supporting documents and sends it, to be verified: the masked terms and
- * the redactions of the last extractor of its supplier. `donnees`: the terms and the extractors, when several invoices
- * are made at once.
+ * the redactions of the last extractor of its supplier, the zones of its scans (its own, else those of its supplier).
+ * `donnees`: the terms, the extractors and the zones of the supplier, when several invoices are made at once.
  */
 export async function preparerAnnexe(
-  facture: Pick<Facture, 'id' | 'fournisseur'>,
-  donnees?: { termes: string[], extracteurs: ExtracteurEnregistre[] },
+  facture: Pick<Facture, 'id' | 'fournisseur' | 'fournisseur_id' | 'zones_masquees'>,
+  donnees?: { termes: string[], extracteurs: ExtracteurEnregistre[], modele: ZoneSaisie[] },
 ): Promise<FactureDetail> {
-  const [termes, extracteurs] = donnees ? [donnees.termes, donnees.extracteurs] : await Promise.all([api.termesMasques(), api.extracteurs()])
+  const [termes, extracteurs, modele] = donnees
+    ? [donnees.termes, donnees.extracteurs, donnees.modele]
+    : await Promise.all([api.termesMasques(), api.extracteurs(),
+      api.fournisseur(facture.fournisseur_id).then((f) => f.zones_masquees)])
   const enregistre = extracteurDuFournisseur(facture.fournisseur, extracteurs)
   const contenu = new Uint8Array(await (await (await fetch(api.pdfUrl(facture.id))).blob()).arrayBuffer())
-  const { pdf, zones } = await copieEnImages(contenu, termes,
-    enregistre ? { classe: extracteurDe(enregistre), reglages: enregistre.reglages } : null)
-  return api.envoyerAnnexe(facture.id, pdf, { zones, extracteur_id: enregistre?.id ?? null, termes, reglages: REGLAGES_ANNEXE })
+  const { pdf, zones, scannees } = await copieEnImages(contenu, termes,
+    enregistre ? { classe: extracteurDe(enregistre), reglages: enregistre.reglages } : null,
+    facture.zones_masquees ? { zones: facture.zones_masquees, origine: 'main' } : { zones: modele, origine: 'modele' })
+  return api.envoyerAnnexe(facture.id, pdf, {
+    zones, extracteur_id: enregistre?.id ?? null, termes, reglages: REGLAGES_ANNEXE, pages_scannees: scannees,
+  })
+}
+
+/** A page drawn for the editor of zones: its image, its size in points, whether it is a scan (ADR 0025). */
+export type ApercuPage = { url: string, largeur: number, hauteur: number, scannee: boolean }
+
+/** The pages of a PDF drawn `largeurPx` wide, in colour as received, to draw zones on. */
+export async function apercuPages(contenu: Uint8Array, largeurPx: number): Promise<ApercuPage[]> {
+  const chargement = ouvrir(contenu)
+  try {
+    const pdf = await chargement.promise
+    const scannees = await scanneesDe(pdf)
+    const pages: ApercuPage[] = []
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n)
+      const taille = page.getViewport({ scale: 1 })
+      const viewport = page.getViewport({ scale: (largeurPx * window.devicePixelRatio) / taille.width })
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.ceil(viewport.width)
+      canvas.height = Math.ceil(viewport.height)
+      const contexte = canvas.getContext('2d')!
+      contexte.fillStyle = '#fff'
+      contexte.fillRect(0, 0, canvas.width, canvas.height)
+      await page.render({ canvas, canvasContext: contexte, viewport }).promise
+      const url = URL.createObjectURL(await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('page non dessinée'))), 'image/png')))
+      pages.push({ url, largeur: taille.width, hauteur: taille.height, scannee: scannees.includes(n) })
+      canvas.width = canvas.height = 0
+      page.cleanup()
+    }
+    return pages
+  } finally {
+    await chargement.destroy()
+  }
 }

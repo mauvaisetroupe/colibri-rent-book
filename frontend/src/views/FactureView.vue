@@ -6,8 +6,9 @@ import { onBeforeRouteLeave, RouterLink, useRouter } from 'vue-router'
 import {
   api, ApiError, CATEGORIES, ENERGIES, STATUTS, type AnnexeFacture, type Controle, type Facture, type FactureDetail,
   type FactureResumee, type FactureSaisie, type LiensFacture, type MouvementPourFacture, type ReglementFacture,
-  type RegularisationTouchee,
+  type RegularisationTouchee, type ZoneSaisie,
 } from '../api'
+import EditeurZones from '../components/EditeurZones.vue'
 import { preparerAnnexe } from '../extraction/navigateur'
 import { dateFr, depuisGrille, euros, ligneVide, nombreApi, nombreFr, versGrille, type LigneGrille } from '../format'
 
@@ -330,6 +331,40 @@ async function signalerProbleme() {
   }
 }
 
+// ---------------------------------------------------------------- zones of a scan (ADR 0025)
+
+// Its version was made from a scan: masked by zones drawn by hand only
+const scannee = computed(() => copieAJour.value && !!annexe.value?.pages_scannees.length)
+// The zones being adjusted, in a window over the pages of the PDF
+const zonesFacture = ref<{ zones: ZoneSaisie[], contenu: Uint8Array } | null>(null)
+const fenetreZones = ref<HTMLDialogElement | null>(null)
+
+async function ajusterZones() {
+  try {
+    const [contenu, fournisseur] = await Promise.all([
+      fetch(api.pdfUrl(props.id)).then(async (r) => new Uint8Array(await r.arrayBuffer())),
+      api.fournisseur(facture.value!.fournisseur_id),
+    ])
+    zonesFacture.value = { contenu, zones: (facture.value!.zones_masquees ?? fournisseur.zones_masquees).map((z) => ({ ...z })) }
+    fenetreZones.value?.showModal()
+  } catch (e) {
+    message.value = { texte: (e as Error).message, type: 'erreur' }
+  }
+}
+
+function fermerZones() {
+  fenetreZones.value?.close()
+  zonesFacture.value = null
+}
+
+/** Its own zones (null: those of its supplier), then its version made again with them. */
+async function enregistrerZones(zones: ZoneSaisie[] | null) {
+  fermerZones()
+  if (await executer(() => api.modifierZonesFacture(props.id, zones), 'Zones enregistrées')) {
+    await preparer('Version locataire recréée avec ces zones : la contrôler')
+  }
+}
+
 const masquageDuFournisseur = computed(() => (probleme.value?.extracteur
   ? { name: 'extracteur', params: { id: probleme.value.extracteur }, query: { onglet: 'masquage', facture: props.id } }
   : { name: 'nouvel-extracteur', query: { fournisseur: facture.value?.fournisseur, onglet: 'masquage', facture: props.id } }))
@@ -644,11 +679,18 @@ onBeforeUnmount(() => {
                 Cette version est jointe au justificatif envoyé au locataire. Le nom, l'adresse, les références client et
                 le compte bancaire y sont masqués en noir : contrôlez, page par page, qu'il n'en reste aucun.
               </p>
+              <p v-if="scannee">
+                Facture scannée : seules les zones tracées y sont masquées,
+                {{ facture.zones_masquees ? 'ajustées pour cette facture' : 'celles du fournisseur' }}.
+              </p>
               <div v-if="!probleme" class="actions">
                 <button v-if="facture.annexe === 'a_verifier'" type="button" class="principal" :disabled="occupe" @click="verifier">
                   ✓ Rien de personnel : à joindre
                 </button>
-                <button type="button" :disabled="occupe" @click="signalerProbleme">✗ Il reste une information personnelle…</button>
+                <button v-if="scannee" type="button" :disabled="occupe" @click="ajusterZones">
+                  ✗ Il reste une information personnelle : ajuster les zones…
+                </button>
+                <button v-else type="button" :disabled="occupe" @click="signalerProbleme">✗ Il reste une information personnelle…</button>
                 <button type="button" class="lien discret" :disabled="occupe" @click="preparer()">Recréer la version locataire</button>
               </div>
               <form v-else class="probleme" @submit.prevent="masquerEtRecreer">
@@ -665,7 +707,7 @@ onBeforeUnmount(() => {
                   caractères : un mot courant masquerait aussi ce qui est utile).
                 </p>
                 <p class="discret">
-                  Le texte change à chaque facture, ou c'est un scan sans texte ?
+                  Le texte change à chaque facture ?
                   <RouterLink :to="masquageDuFournisseur">Modifier le masquage du fournisseur</RouterLink>.
                 </p>
                 <p class="discret">
@@ -703,4 +745,21 @@ onBeforeUnmount(() => {
   </template>
 
   <p v-else-if="message" class="message erreur">{{ message.texte }}</p>
+
+  <dialog ref="fenetreZones" class="fenetre large" @close="zonesFacture = null">
+    <template v-if="zonesFacture && facture">
+      <h2 tabindex="-1" autofocus>Zones masquées sur ce scan</h2>
+      <p class="discret">
+        Tracer à la souris ce qui est à masquer, déplacer ou redimensionner une zone, la retirer avec × ou la touche
+        Suppr. Ces zones ne valent que pour cette facture ; celles de toutes les factures du fournisseur se tracent sur sa
+        page.
+      </p>
+      <div class="actions">
+        <button type="button" class="principal" @click="enregistrerZones(zonesFacture.zones)">Enregistrer et recréer la version locataire</button>
+        <button v-if="facture.zones_masquees" type="button" @click="enregistrerZones(null)">Revenir aux zones du fournisseur</button>
+        <button type="button" @click="fermerZones">Annuler</button>
+      </div>
+      <EditeurZones v-model="zonesFacture.zones" :contenu="zonesFacture.contenu" />
+    </template>
+  </dialog>
 </template>
