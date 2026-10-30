@@ -8,7 +8,7 @@ import pdfmake from './pdfmake.js'
 
 // PDF of the supporting document (SPEC § 8, ADR 0007, 0014): the statement of the tenant composed with pdfmake, a page
 // « Annexes » listing the invoices taken into account, then the PDFs of the invoices joined, put together with
-// pdf-lib. No browser.
+// pdf-lib. No browser. The invoices are joined as their version in images, redacted (ADR 0024).
 
 const ENERGIES: Record<string, string> = {
   gaz: 'Gaz', electricite: 'Électricité', eau: 'Eau', ordures_menageres: 'Ordures ménagères',
@@ -33,12 +33,13 @@ export type Annexe = {
   raison: Raison | null
 }
 
-type Raison = 'confidentiel' | 'sans_pdf' | 'illisible'
+type Raison = 'confidentiel' | 'sans_pdf' | 'illisible' | 'non_verifiee'
 
 const RAISONS: Record<Raison, string> = {
   confidentiel: 'Non jointe : document confidentiel (données fiscales du propriétaire), consultable sur demande',
   sans_pdf: 'Non jointe : facture sans PDF (reçue sur papier), consultable sur demande',
   illisible: 'Non jointe : PDF illisible, consultable sur demande',
+  non_verifiee: 'Non jointe, consultable sur demande',
 }
 
 const nomFacture = (f: Justificatif['factures'][number]) =>
@@ -196,6 +197,12 @@ function definition(j: Justificatif, entete: Entete, sorts: string[], total: num
         },
         layout: LIGNES,
         fontSize: 8,
+      },
+      {
+        text: 'Les factures jointes le sont en images : les données personnelles du bailleur (nom, adresse, références '
+          + 'client, compte bancaire) y sont masquées. Les originaux sont consultables sur demande.',
+        style: 'petit',
+        margin: [0, 6, 0, 0],
       },
     ],
   }

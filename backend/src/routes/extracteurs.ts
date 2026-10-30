@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify'
 import type { Pool } from 'pg'
 
+import { ETAT_ANNEXE_SQL } from '../annexes.js'
 import { body, idParam, InputError, optionalText, requiredText, sendError } from '../http.js'
 
 // Invoice extractors (ADR 0013): TypeScript code written in the « Extracteurs » screen and run in the browser only;
@@ -62,7 +63,8 @@ const extracteurRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) =
       return reply.code(400).send({ message: 'Paramètre « fournisseur » manquant' })
     }
     const { rows } = await db.query(
-      `SELECT f.id, f.numero, f.date_facture::text, f.montant_ttc::text, f.statut, f.extracteur_id, i.nom AS immeuble
+      `SELECT f.id, f.numero, f.date_facture::text, f.montant_ttc::text, f.statut, f.extracteur_id, i.nom AS immeuble,
+              ${ETAT_ANNEXE_SQL} AS annexe
        FROM facture f JOIN fournisseur fo ON fo.id = f.fournisseur_id JOIN immeuble i ON i.id = f.immeuble_id
        WHERE fo.nom = $1 AND f.fichier_pdf IS NOT NULL
        ORDER BY f.date_facture DESC NULLS LAST, f.id DESC`,

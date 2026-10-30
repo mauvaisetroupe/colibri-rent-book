@@ -161,6 +161,40 @@ CREATE TABLE facture (
 -- Numéro unique chez un fournisseur parmi les factures validées : le brouillon d'une correction garde le numéro
 CREATE UNIQUE INDEX facture_numero_validee ON facture (fournisseur_id, numero) WHERE statut = 'validee';
 
+-- ADR 0024 : factures jointes en images, caviardées ; termes masqués sur toutes les factures
+CREATE TABLE terme_masque (
+  terme text PRIMARY KEY CHECK (length(trim(terme)) > 0)
+);
+
+CREATE TABLE facture_annexe (
+  id             serial PRIMARY KEY,
+  facture_id     int  NOT NULL REFERENCES facture(id) ON DELETE CASCADE,
+  fichier_pdf    text NOT NULL,                   -- version en images : annexes/<empreinte>.pdf
+  source_pdf     text NOT NULL,                   -- PDF de la facture dont elle est faite (à refaire s'il change)
+  zones          jsonb NOT NULL,                  -- rectangles peints : page, x0, y0, x1, y1 (fractions), origine
+  extracteur_id  int REFERENCES extracteur(id),   -- version qui a donné les règles (vide : termes seuls)
+  termes         text[] NOT NULL,                 -- termes masqués du moment
+  reglages       jsonb NOT NULL,                  -- dpi, seuil
+  cree_le        timestamptz NOT NULL DEFAULT now(),
+  verifiee_le    timestamptz
+);
+CREATE INDEX ON facture_annexe (facture_id);
+
+CREATE FUNCTION facture_annexe_figee() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.verifiee_le IS NULL AND NEW.verifiee_le IS NOT NULL
+     AND (to_jsonb(NEW) - 'verifiee_le') = (to_jsonb(OLD) - 'verifiee_le') THEN
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'Une annexe n''est jamais modifiée : la refaire (ADR 0024)';
+END $$;
+
+CREATE TRIGGER facture_annexe_figee BEFORE UPDATE ON facture_annexe
+  FOR EACH ROW EXECUTE FUNCTION facture_annexe_figee();
+
+ALTER TABLE facture ADD COLUMN annexe_id int REFERENCES facture_annexe(id);
+
 CREATE TABLE ligne_facture (
   id           serial PRIMARY KEY,
   facture_id   int  NOT NULL REFERENCES facture(id) ON DELETE CASCADE,
@@ -211,6 +245,7 @@ CREATE TABLE regularisation (
   remplace_id    int REFERENCES regularisation(id),  -- rectificatif d'une régularisation précédente
   note           text,
   instantane     jsonb,                              -- ce qui a été envoyé, figé (NULL : saisie manuelle), ADR 0007
+  annexes_envoyees jsonb,                            -- annexe jointe par facture à l'envoi (ADR 0024)
   cree_le        timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT regularisation_decision_envoyee CHECK (decision IS NULL OR date_envoi IS NOT NULL)
 );

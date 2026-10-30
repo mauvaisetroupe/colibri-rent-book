@@ -1,17 +1,15 @@
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
-
 import Big from 'big.js'
 import type { FastifyPluginAsync, FastifyReply } from 'fastify'
 import type { Pool } from 'pg'
 
+import { annexesJointes, annexesVerifiees, etatsAnnexes } from '../annexes.js'
 import { euros, frenchDate } from '../format.js'
 import {
   body, exercise, idParam, InputError, optionalDecimal, optionalText, query, requiredDate, requiredDecimal, requiredId,
   sendError,
 } from '../http.js'
 import { buildJustificatif, SejourHorsExercice, type Justificatif } from '../justificatif.js'
-import { justificatifPdf, type Annexe, type Entete } from '../justificatifPdf.js'
+import { justificatifPdf, type Entete } from '../justificatifPdf.js'
 import { mailRectificatif, mailRegularisation, suggestionProvision, type MailOptions, type RegulMail } from '../mails.js'
 import { inclusiveBounds, inclusiveRange } from '../periods.js'
 
@@ -70,36 +68,22 @@ const nextMonth = () => {
 
 const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async (app, { db, storageDir }) => {
   async function load(id: number) {
-    const { rows: [r] } = await db.query<Regularisation & { instantane: Justificatif | null }>(
-      `SELECT ${COLUMNS}, r.instantane FROM ${FROM} WHERE r.id = $1`,
+    const { rows: [r] } = await db.query<Regularisation & {
+      instantane: Justificatif | null, annexes_envoyees: Record<string, number> | null
+    }>(
+      `SELECT ${COLUMNS}, r.instantane, r.annexes_envoyees FROM ${FROM} WHERE r.id = $1`,
       [id],
     )
     return r ?? null
   }
 
-  /** The PDFs of the invoices of a supporting document, but those of a confidential supplier (ADR 0014). */
-  async function annexes(j: Justificatif): Promise<Annexe[]> {
-    const { rows } = await db.query<{ id: number, fichier_pdf: string | null, confidentiel: boolean }>(
-      `SELECT f.id, f.fichier_pdf, fo.confidentiel FROM facture f JOIN fournisseur fo ON fo.id = f.fournisseur_id
-       WHERE f.id = ANY($1)`,
-      [j.factures.map((f) => f.facture_id)],
-    )
-    return Promise.all(rows.map(async (f): Promise<Annexe> => {
-      if (f.confidentiel) {
-        return { facture_id: f.id, pdf: null, raison: 'confidentiel' }
-      }
-      if (!f.fichier_pdf) {
-        return { facture_id: f.id, pdf: null, raison: 'sans_pdf' }
-      }
-      const pdf = await readFile(join(storageDir, f.fichier_pdf)).catch(() => null)
-      return { facture_id: f.id, pdf, raison: pdf ? null : 'sans_pdf' }
-    }))
-  }
-
-  const pdf = async (reply: FastifyReply, j: Justificatif, entete: Entete, nom: string) => reply
+  /** The PDF; `envoyees`: the versions in images joined at sending (ADR 0024), null: the current verified ones. */
+  const pdf = async (reply: FastifyReply, j: Justificatif, entete: Entete, nom: string,
+    envoyees: Record<string, number> | null = null) => reply
     .type('application/pdf')
     .header('content-disposition', `inline; filename="${nom}.pdf"`)
-    .send(await justificatifPdf(j, entete, await annexes(j)))
+    .send(await justificatifPdf(j, entete,
+      await annexesJointes(db, storageDir, j.factures.map((f) => f.facture_id), envoyees)))
 
   /** Statement row of a stay frozen into a new regularisation (draft). */
   async function create(sejourId: number, debut: string, fin: string, remplace: number | null) {
@@ -151,10 +135,12 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
     if (!r) {
       return reply.code(404).send({ message: 'Régularisation introuvable' })
     }
-    const { instantane, ...rest } = r
+    const { instantane, annexes_envoyees: _, ...rest } = r
     return {
       ...rest,
       instantane,
+      // What becomes of each invoice in the annexes now (ADR 0024): shown before sending
+      annexes: instantane ? await etatsAnnexes(db, instantane.factures.map((f) => f.facture_id)) : [],
       suggestion: {
         provision_mensuelle: instantane ? suggestionProvision(instantane.total, instantane.sejour.jours) : null,
         provision_a_partir_du: nextMonth(),
@@ -240,9 +226,12 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
   app.post('/regularisations/:id/envoi', async (request, reply) => {
     try {
       const date = requiredDate(body(request).date_envoi, 'Date d\'envoi')
+      const r = await load(idParam(request))
+      // The versions in images joined now are those the tenant receives (ADR 0024)
+      const envoyees = r?.instantane ? await annexesVerifiees(db, r.instantane.factures.map((f) => f.facture_id)) : null
       const { rowCount } = await db.query(
-        'UPDATE regularisation SET date_envoi = $2 WHERE id = $1 AND date_envoi IS NULL',
-        [idParam(request), date],
+        'UPDATE regularisation SET date_envoi = $2, annexes_envoyees = $3 WHERE id = $1 AND date_envoi IS NULL',
+        [idParam(request), date, envoyees && JSON.stringify(envoyees)],
       )
       return rowCount ? load(idParam(request)) : reply.code(409).send({ message: 'Seul un brouillon peut être marqué envoyé' })
     } catch (error) {
@@ -267,7 +256,7 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
     if (refus) {
       return reply.code(409).send({ message: refus })
     }
-    await db.query('UPDATE regularisation SET date_envoi = NULL WHERE id = $1', [id])
+    await db.query('UPDATE regularisation SET date_envoi = NULL, annexes_envoyees = NULL WHERE id = $1', [id])
     return load(id)
   })
 
@@ -342,7 +331,8 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
           + 'qui comportait une erreur.',
       }
       : { titre: 'Régularisation des charges' }
-    return pdf(reply, r.instantane, entete, `justificatif-${r.lot}-${r.debut}-${r.fin}`.replace(/\s+/g, '-'))
+    return pdf(reply, r.instantane, entete, `justificatif-${r.lot}-${r.debut}-${r.fin}`.replace(/\s+/g, '-'),
+      r.annexes_envoyees)
   })
 
   // Preview from the current statement, nothing stored

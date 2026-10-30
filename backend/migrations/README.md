@@ -43,3 +43,4 @@ après une mise à jour qui les change ; le fichier est rejouable.
 | `020_reglement_facture.sql` | 0022 | Règlements des factures des charges (gaz, électricité, eau, taxe foncière) par des mouvements bancaires |
 | `021_reglement_facture_remboursement.sql` | 0022 | Un crédit qui rembourse une facture des charges est un règlement négatif |
 | `022_immeuble_debut_gestion.sql` | 0023 | Date de début de la gestion d'un immeuble dans l'application |
+| `023_facture_annexe.sql` | 0024 | Factures jointes en images, caviardées (`facture_annexe`, `facture.annexe_id`), annexes jointes à l'envoi, termes masqués |

@@ -9,6 +9,7 @@ import type { Pool, PoolClient } from 'pg'
 import { checkInvoice, isDecimal } from '../invoices/checks.js'
 import { BadRequestError, readLines, readTotal } from '../invoices/requestBody.js'
 import type { InvoiceLine } from '../invoices/types.js'
+import { ETAT_ANNEXE_SQL } from '../annexes.js'
 import { AVEC_FACTURE } from '../categories.js'
 import { COUVERT_SQL } from '../couverture.js'
 import { InputError, sendError } from '../http.js'
@@ -17,7 +18,8 @@ import { inclusiveBounds, inclusiveRange } from '../periods.js'
 import { IntrouvableError, RESTE_FACTURE_SQL, reglerFacture, transfererReglements } from '../reglementsFacture.js'
 
 // Invoices: import of a PDF read in the browser (draft), editing, validation (ADR 0003, 0005, 0013), replacement of
-// a validated invoice (ADR 0017), payments by bank movements (ADR 0022). Periods: see periods.ts.
+// a validated invoice (ADR 0017), payments by bank movements (ADR 0022), version in images joined to the supporting
+// documents (ADR 0024). Periods: see periods.ts.
 
 export type FactureOptions = {
   db: Pool
@@ -33,7 +35,8 @@ const LINE_COLUMNS = `
 
 const FACTURE_COLUMNS = `
   f.id, f.immeuble_id, fo.nom AS fournisseur, f.energie, f.numero, f.date_facture::text,
-  f.montant_ttc::text, f.statut, f.note, f.fichier_pdf IS NOT NULL AS pdf,
+  f.montant_ttc::text, f.statut, f.note, f.fichier_pdf IS NOT NULL AS pdf, fo.id AS fournisseur_id, f.extracteur_id,
+  ${ETAT_ANNEXE_SQL} AS annexe,
   f.remplacee_par, f.remplacee_le::text, f.motif_remplacement, f.remplace_id,
   (SELECT coalesce(sum(rf.montant), 0) FROM reglement_facture rf WHERE rf.facture_id = f.id)::text AS paye,
   ${RESTE_FACTURE_SQL}::text AS reste,
@@ -107,7 +110,15 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
       `SELECT rf.id, rf.mouvement_id, m.date_operation::text AS date_paiement, m.libelle, rf.montant::text
        FROM reglement_facture rf JOIN mouvement m ON m.id = rf.mouvement_id
        WHERE rf.facture_id = $1 ORDER BY m.date_operation, rf.id`, [id])
-    return { facture, lignes, liens, reglements, controle: checkInvoice({ montant_ttc: facture.montant_ttc, lignes }) }
+    // Its current version in images (ADR 0024)
+    const { rows: [annexe] } = await db.query(
+      `SELECT a.id, a.extracteur_id, a.termes, a.reglages, jsonb_array_length(a.zones) AS zones, a.cree_le,
+              a.verifiee_le
+       FROM facture f JOIN facture_annexe a ON a.id = f.annexe_id WHERE f.id = $1`, [id])
+    return {
+      facture, lignes, liens, reglements, annexe: annexe ?? null,
+      controle: checkInvoice({ montant_ttc: facture.montant_ttc, lignes }),
+    }
   }
 
   /** Sent regularisations, not rectified yet, whose period touches recoverable lines of these invoices: to check. */
@@ -535,9 +546,9 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
       await client.query('BEGIN')
       const { rows: [copie] } = await client.query<{ id: number }>(
         `INSERT INTO facture (immeuble_id, fournisseur_id, energie, numero, date_facture, montant_ttc, fichier_pdf, note,
-                              extracteur_id, remplace_id)
+                              extracteur_id, remplace_id, annexe_id)
          SELECT immeuble_id, fournisseur_id, energie, numero, date_facture, montant_ttc, fichier_pdf, note,
-                extracteur_id, id
+                extracteur_id, id, annexe_id
          FROM facture WHERE id = $1 RETURNING id`,
         [id],
       )
@@ -608,6 +619,8 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
   // Only a draft can be deleted (to import it again, for instance)
   app.delete('/factures/:id', async (request, reply) => {
     const id = Number((request.params as { id: string }).id)
+    const { rows: annexes } = await db.query<{ fichier_pdf: string }>(
+      'SELECT fichier_pdf FROM facture_annexe WHERE facture_id = $1', [id])
     const { rows: [deleted] } = await db.query<{ fichier_pdf: string | null }>(
       'DELETE FROM facture WHERE id = $1 AND statut = \'a_verifier\' RETURNING fichier_pdf',
       [id],
@@ -618,8 +631,10 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
         ? reply.code(409).send({ message: 'Facture validée : suppression impossible (« Remplacer par… »)' })
         : reply.code(404).send({ message: 'Facture introuvable' })
     }
-    if (deleted.fichier_pdf) {
-      await removeIfUnused(deleted.fichier_pdf)
+    for (const fichier of [deleted.fichier_pdf, ...annexes.map((a) => a.fichier_pdf)]) {
+      if (fichier) {
+        await removeIfUnused(fichier)
+      }
     }
     return reply.code(204).send()
   })
@@ -647,11 +662,125 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
       return reply.code(415).send({ message: `${file.filename} n'est pas un PDF` })
     }
     const { fileName } = await storePdf(storageDir, content, 'factures')
-    await db.query('UPDATE facture SET fichier_pdf = $2 WHERE id = $1', [id, fileName])
+    // A new PDF: its version in images is to be made again (ADR 0024)
+    await db.query(
+      'UPDATE facture SET fichier_pdf = $2, annexe_id = CASE WHEN fichier_pdf = $2 THEN annexe_id END WHERE id = $1',
+      [id, fileName])
     if (facture.fichier_pdf && facture.fichier_pdf !== fileName) {
       await removeIfUnused(facture.fichier_pdf)
     }
     return load(id)
+  })
+
+  // ---------------------------------------------------------------- version in images (ADR 0024)
+
+  // The version in images of the invoice, made in the browser: multipart with the PDF « file » and the field
+  // « annexe », JSON { zones, extracteur_id (null: masked terms only), termes, reglages }. A new version, to verify.
+  app.post('/factures/:id/annexe', async (request, reply) => {
+    const id = Number((request.params as { id: string }).id)
+    const { rows: [facture] } = await db.query<{ fichier_pdf: string | null }>(
+      'SELECT fichier_pdf FROM facture WHERE id = $1', [id])
+    if (!facture) {
+      return reply.code(404).send({ message: 'Facture introuvable' })
+    }
+    if (!facture.fichier_pdf) {
+      return reply.code(409).send({ message: 'Facture sans PDF : rien à joindre' })
+    }
+    let content: Buffer | null = null
+    let annexe: Record<string, unknown> | null = null
+    for await (const part of request.parts()) {
+      if (part.type === 'file') {
+        content = await part.toBuffer()
+      } else if (part.fieldname === 'annexe') {
+        try {
+          annexe = JSON.parse(String(part.value))
+        } catch {
+          return reply.code(400).send({ message: '« annexe » doit être du JSON' })
+        }
+      }
+    }
+    if (!content || !isPdf(content)) {
+      return reply.code(400).send({ message: 'PDF de l\'annexe manquant' })
+    }
+    if (!annexe || !Array.isArray(annexe.zones) || !Array.isArray(annexe.termes)
+      || typeof annexe.reglages !== 'object' || annexe.reglages === null) {
+      return reply.code(400).send({ message: 'Annexe incomplète : zones, termes et réglages attendus' })
+    }
+    const extracteurId = annexe.extracteur_id === null || annexe.extracteur_id === undefined
+      ? null : Number(annexe.extracteur_id)
+    const { fileName } = await storePdf(storageDir, content, 'annexes')
+    const client = await db.connect()
+    try {
+      await client.query('BEGIN')
+      const { rows: [created] } = await client.query<{ id: number }>(
+        `INSERT INTO facture_annexe (facture_id, fichier_pdf, source_pdf, zones, extracteur_id, termes, reglages)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [id, fileName, facture.fichier_pdf, JSON.stringify(annexe.zones), extracteurId,
+          annexe.termes.map(String), JSON.stringify(annexe.reglages)],
+      )
+      await client.query('UPDATE facture SET annexe_id = $2 WHERE id = $1', [id, created!.id])
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      await removeIfUnused(fileName)
+      throw error
+    } finally {
+      client.release()
+    }
+    return reply.code(201).send(await load(id))
+  })
+
+  app.get('/factures/:id/annexe/pdf', async (request, reply) => {
+    const { rows: [annexe] } = await db.query<{ fichier_pdf: string }>(
+      'SELECT a.fichier_pdf FROM facture f JOIN facture_annexe a ON a.id = f.annexe_id WHERE f.id = $1',
+      [Number((request.params as { id: string }).id)],
+    )
+    if (!annexe) {
+      return reply.code(404).send({ message: 'Pas de version en images pour cette facture' })
+    }
+    return reply
+      .type('application/pdf')
+      .header('content-disposition', 'inline')
+      .send(createReadStream(join(storageDir, annexe.fichier_pdf)))
+  })
+
+  // Checked by eye: nothing personal left. Only the current version, made from the current PDF.
+  app.post('/factures/:id/annexe/verifiee', async (request, reply) => {
+    const id = Number((request.params as { id: string }).id)
+    const annexeId = Number((request.body as { annexe_id?: unknown } | null)?.annexe_id)
+    const { rowCount } = await db.query(
+      `UPDATE facture_annexe a SET verifiee_le = now() FROM facture f
+       WHERE f.id = $1 AND a.id = f.annexe_id AND a.id = $2 AND a.source_pdf = f.fichier_pdf AND a.verifiee_le IS NULL`,
+      [id, annexeId],
+    )
+    return rowCount
+      ? load(id)
+      : reply.code(409).send({ message: 'Cette version n\'est plus celle de la facture, ou elle est déjà vérifiée' })
+  })
+
+  // Terms masked on every invoice (manager, address, bank account): data of the deployment, never in this repository
+  app.get('/termes-masques', async () =>
+    (await db.query<{ terme: string }>('SELECT terme FROM terme_masque ORDER BY terme')).rows.map((r) => r.terme))
+
+  app.put('/termes-masques', async (request, reply) => {
+    const termes = (request.body as { termes?: unknown } | null)?.termes
+    if (!Array.isArray(termes)) {
+      return reply.code(400).send({ message: '« termes » : une liste attendue' })
+    }
+    const propres = [...new Set(termes.map((t) => String(t).trim()).filter(Boolean))]
+    const client = await db.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query('DELETE FROM terme_masque')
+      await client.query('INSERT INTO terme_masque (terme) SELECT unnest($1::text[])', [propres])
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+    return propres.sort()
   })
 }
 

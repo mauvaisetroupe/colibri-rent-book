@@ -7,11 +7,12 @@ import type { Pool } from 'pg'
 // PDFs archived on disk (STORAGE_DIR), named by the SHA-256 of their content: the same PDF is stored once per kind.
 // One folder per kind (ADR 0018); the columns hold the path relative to the storage: « factures/<sha>.pdf ».
 
-export type Dossier = 'factures' | 'releves' | 'travaux' | 'assemblees'
+export type Dossier = 'factures' | 'annexes' | 'releves' | 'travaux' | 'assemblees'
 
 // Every column that refers to an archived PDF
 const REFERENCES = `
   SELECT fichier_pdf AS chemin FROM facture WHERE fichier_pdf IS NOT NULL
+  UNION ALL SELECT fichier_pdf FROM facture_annexe
   UNION ALL SELECT fichier_pdf FROM travaux WHERE fichier_pdf IS NOT NULL
   UNION ALL SELECT pv_signe FROM assemblee WHERE pv_signe IS NOT NULL
   UNION ALL SELECT fichier_pdf FROM releve_bancaire WHERE fichier_pdf IS NOT NULL`
