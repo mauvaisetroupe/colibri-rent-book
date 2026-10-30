@@ -6,7 +6,9 @@
 //   05/05 au 31/12/23
 // Start year sometimes left out (« du 05/05 au 30/06/23 »); CTA and TICGN sometimes without period (consumption
 // period, given by the application); late payment penalties (borne by the owner, dated on the invoice).
-import { AMOUNT, DATE, InvoiceExtractor, rx, type Category, type LineContext } from 'extractor'
+// Masked on the copy joined to the supporting documents: the customer's references, the direct debit (account holder,
+// bank account, mandate) and the code « ZISUBILL » (invoice number then customer reference); labels stay readable.
+import { AMOUNT, DATE, InvoiceExtractor, rx, type Category, type LineContext, type Redaction } from 'extractor'
 
 const AMOUNTS = rx`(?:^|\s)(${AMOUNT})\s+(\d+,\d)\s+(${AMOUNT})$`
 const PERIOD = /du (\d\d\/\d\d(?:\/\d\d)?) au (\d\d\/\d\d\/\d\d)/
@@ -57,6 +59,18 @@ export default class EngieExtractor extends InvoiceExtractor {
       end,
       amount: this.amount(match[3]),
     }
+  }
+
+  redactions(): Redaction[] {
+    return [
+      { pattern: /ZISUBILL\d+/ },
+      { pattern: /(?<=Référence client :)\s*[\d ]*\d/ },
+      { pattern: /(?<=Compte de contrats :)\s*\d+/ },
+      { pattern: /(?<=Nom du titulaire du compte :).*?(?=\s{3}|$)/ },
+      { pattern: /(?<=Référence Unique du Mandat :)\s*\S+/ },
+      // The bank account, its last digits replaced by X
+      { pattern: /\b\d{10,}X+\b/ },
+    ]
   }
 
   /** Category and normalised label, from the start of the printed label (rentals are printed in capitals). */

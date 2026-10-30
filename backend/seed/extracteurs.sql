@@ -7,7 +7,10 @@ SELECT fo.id, coalesce((SELECT max(version) FROM extracteur WHERE fournisseur_id
   '{"toleranceHauteur":2,"collage":0.8,"colonne":15}', $extracteur$// EDF électricité (Tarif Bleu), mises en page 2023-2026. Each line of the detail holds on one text line:
 // « label   du DD/MM/YYYY au DD/MM/YYYY   …   excl. VAT €   VAT % ». EDF prints no amount including VAT per line:
 // excl. VAT × (1 + VAT), rounded to the cent (a 0.01 € gap with the total is possible).
-import { AMOUNT, DATE, InvoiceExtractor, rx, type Category } from 'extractor'
+// Masked on the copy joined to the supporting documents: the customer's accounts and contract, the bank account, the
+// mail sorting code; labels stay readable, and so do the delivery point and the meter (they name the building, not the
+// customer).
+import { AMOUNT, DATE, InvoiceExtractor, rx, type Category, type Redaction } from 'extractor'
 
 const LINE = rx`^(.+?)\s+du (${DATE}) au (${DATE})\s.*?(${AMOUNT}) €\s+(${AMOUNT}) %$`
 
@@ -47,6 +50,17 @@ export default class EdfExtractor extends InvoiceExtractor {
     }
   }
 
+  redactions(): Redaction[] {
+    return [
+      // Mail sorting code, printed above the address
+      { pattern: /\bFLX\d+-\w+/ },
+      { pattern: /(?<=Compte de facturation :)\s*\S+/ },
+      { pattern: /(?<=Compte commercial :)\s*\S+/ },
+      { pattern: /(?<=Réf\. de votre contrat)\s*\S+/ },
+      { pattern: /(?<=sur le compte bancaire :)\s*FR[\dX ]*\d[\dX ]*/ },
+    ]
+  }
+
   /** Category and normalised label, from the start of the printed label. */
   private categorize(label: string): { category: Category, label: string } {
     if (label.startsWith('Electricit')) return { category: 'consommation', label: 'Consommation électricité' }
@@ -66,6 +80,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 // EDF électricité (Tarif Bleu), mises en page 2023-2026. Each line of the detail holds on one text line:
 // « label   du DD/MM/YYYY au DD/MM/YYYY   …   excl. VAT €   VAT % ». EDF prints no amount including VAT per line:
 // excl. VAT × (1 + VAT), rounded to the cent (a 0.01 € gap with the total is possible).
+// Masked on the copy joined to the supporting documents: the customer's accounts and contract, the bank account, the
+// mail sorting code; labels stay readable, and so do the delivery point and the meter (they name the building, not the
+// customer).
 const extractor_1 = require("extractor");
 const LINE = (0, extractor_1.rx) `^(.+?)\s+du (${extractor_1.DATE}) au (${extractor_1.DATE})\s.*?(${extractor_1.AMOUNT}) €\s+(${extractor_1.AMOUNT}) %$`;
 class EdfExtractor extends extractor_1.InvoiceExtractor {
@@ -99,6 +116,16 @@ class EdfExtractor extends extractor_1.InvoiceExtractor {
             amount: this.withVat(excludingVat, vat),
         };
     }
+    redactions() {
+        return [
+            // Mail sorting code, printed above the address
+            { pattern: /\bFLX\d+-\w+/ },
+            { pattern: /(?<=Compte de facturation :)\s*\S+/ },
+            { pattern: /(?<=Compte commercial :)\s*\S+/ },
+            { pattern: /(?<=Réf\. de votre contrat)\s*\S+/ },
+            { pattern: /(?<=sur le compte bancaire :)\s*FR[\dX ]*\d[\dX ]*/ },
+        ];
+    }
     /** Category and normalised label, from the start of the printed label. */
     categorize(label) {
         if (label.startsWith('Electricit'))
@@ -121,7 +148,10 @@ FROM fournisseur fo WHERE fo.nom = 'EDF'
   AND NOT EXISTS (SELECT 1 FROM extracteur e WHERE e.fournisseur_id = fo.id AND e.source = $extracteur$// EDF électricité (Tarif Bleu), mises en page 2023-2026. Each line of the detail holds on one text line:
 // « label   du DD/MM/YYYY au DD/MM/YYYY   …   excl. VAT €   VAT % ». EDF prints no amount including VAT per line:
 // excl. VAT × (1 + VAT), rounded to the cent (a 0.01 € gap with the total is possible).
-import { AMOUNT, DATE, InvoiceExtractor, rx, type Category } from 'extractor'
+// Masked on the copy joined to the supporting documents: the customer's accounts and contract, the bank account, the
+// mail sorting code; labels stay readable, and so do the delivery point and the meter (they name the building, not the
+// customer).
+import { AMOUNT, DATE, InvoiceExtractor, rx, type Category, type Redaction } from 'extractor'
 
 const LINE = rx`^(.+?)\s+du (${DATE}) au (${DATE})\s.*?(${AMOUNT}) €\s+(${AMOUNT}) %$`
 
@@ -161,6 +191,17 @@ export default class EdfExtractor extends InvoiceExtractor {
     }
   }
 
+  redactions(): Redaction[] {
+    return [
+      // Mail sorting code, printed above the address
+      { pattern: /\bFLX\d+-\w+/ },
+      { pattern: /(?<=Compte de facturation :)\s*\S+/ },
+      { pattern: /(?<=Compte commercial :)\s*\S+/ },
+      { pattern: /(?<=Réf\. de votre contrat)\s*\S+/ },
+      { pattern: /(?<=sur le compte bancaire :)\s*FR[\dX ]*\d[\dX ]*/ },
+    ]
+  }
+
   /** Category and normalised label, from the start of the printed label. */
   private categorize(label: string): { category: Category, label: string } {
     if (label.startsWith('Electricit')) return { category: 'consommation', label: 'Consommation électricité' }
@@ -188,7 +229,9 @@ SELECT fo.id, coalesce((SELECT max(version) FROM extracteur WHERE fournisseur_id
 //   05/05 au 31/12/23
 // Start year sometimes left out (« du 05/05 au 30/06/23 »); CTA and TICGN sometimes without period (consumption
 // period, given by the application); late payment penalties (borne by the owner, dated on the invoice).
-import { AMOUNT, DATE, InvoiceExtractor, rx, type Category, type LineContext } from 'extractor'
+// Masked on the copy joined to the supporting documents: the customer's references, the direct debit (account holder,
+// bank account, mandate) and the code « ZISUBILL » (invoice number then customer reference); labels stay readable.
+import { AMOUNT, DATE, InvoiceExtractor, rx, type Category, type LineContext, type Redaction } from 'extractor'
 
 const AMOUNTS = rx`(?:^|\s)(${AMOUNT})\s+(\d+,\d)\s+(${AMOUNT})$`
 const PERIOD = /du (\d\d\/\d\d(?:\/\d\d)?) au (\d\d\/\d\d\/\d\d)/
@@ -241,6 +284,18 @@ export default class EngieExtractor extends InvoiceExtractor {
     }
   }
 
+  redactions(): Redaction[] {
+    return [
+      { pattern: /ZISUBILL\d+/ },
+      { pattern: /(?<=Référence client :)\s*[\d ]*\d/ },
+      { pattern: /(?<=Compte de contrats :)\s*\d+/ },
+      { pattern: /(?<=Nom du titulaire du compte :).*?(?=\s{3}|$)/ },
+      { pattern: /(?<=Référence Unique du Mandat :)\s*\S+/ },
+      // The bank account, its last digits replaced by X
+      { pattern: /\b\d{10,}X+\b/ },
+    ]
+  }
+
   /** Category and normalised label, from the start of the printed label (rentals are printed in capitals). */
   private categorize(label: string): { category: Category, label: string } {
     const upper = label.toUpperCase()
@@ -268,6 +323,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 //   05/05 au 31/12/23
 // Start year sometimes left out (« du 05/05 au 30/06/23 »); CTA and TICGN sometimes without period (consumption
 // period, given by the application); late payment penalties (borne by the owner, dated on the invoice).
+// Masked on the copy joined to the supporting documents: the customer's references, the direct debit (account holder,
+// bank account, mandate) and the code « ZISUBILL » (invoice number then customer reference); labels stay readable.
 const extractor_1 = require("extractor");
 const AMOUNTS = (0, extractor_1.rx) `(?:^|\s)(${extractor_1.AMOUNT})\s+(\d+,\d)\s+(${extractor_1.AMOUNT})$`;
 const PERIOD = /du (\d\d\/\d\d(?:\/\d\d)?) au (\d\d\/\d\d\/\d\d)/;
@@ -313,6 +370,17 @@ class EngieExtractor extends extractor_1.InvoiceExtractor {
             amount: this.amount(match[3]),
         };
     }
+    redactions() {
+        return [
+            { pattern: /ZISUBILL\d+/ },
+            { pattern: /(?<=Référence client :)\s*[\d ]*\d/ },
+            { pattern: /(?<=Compte de contrats :)\s*\d+/ },
+            { pattern: /(?<=Nom du titulaire du compte :).*?(?=\s{3}|$)/ },
+            { pattern: /(?<=Référence Unique du Mandat :)\s*\S+/ },
+            // The bank account, its last digits replaced by X
+            { pattern: /\b\d{10,}X+\b/ },
+        ];
+    }
     /** Category and normalised label, from the start of the printed label (rentals are printed in capitals). */
     categorize(label) {
         const upper = label.toUpperCase();
@@ -348,7 +416,9 @@ FROM fournisseur fo WHERE fo.nom = 'ENGIE'
 //   05/05 au 31/12/23
 // Start year sometimes left out (« du 05/05 au 30/06/23 »); CTA and TICGN sometimes without period (consumption
 // period, given by the application); late payment penalties (borne by the owner, dated on the invoice).
-import { AMOUNT, DATE, InvoiceExtractor, rx, type Category, type LineContext } from 'extractor'
+// Masked on the copy joined to the supporting documents: the customer's references, the direct debit (account holder,
+// bank account, mandate) and the code « ZISUBILL » (invoice number then customer reference); labels stay readable.
+import { AMOUNT, DATE, InvoiceExtractor, rx, type Category, type LineContext, type Redaction } from 'extractor'
 
 const AMOUNTS = rx`(?:^|\s)(${AMOUNT})\s+(\d+,\d)\s+(${AMOUNT})$`
 const PERIOD = /du (\d\d\/\d\d(?:\/\d\d)?) au (\d\d\/\d\d\/\d\d)/
@@ -399,6 +469,18 @@ export default class EngieExtractor extends InvoiceExtractor {
       end,
       amount: this.amount(match[3]),
     }
+  }
+
+  redactions(): Redaction[] {
+    return [
+      { pattern: /ZISUBILL\d+/ },
+      { pattern: /(?<=Référence client :)\s*[\d ]*\d/ },
+      { pattern: /(?<=Compte de contrats :)\s*\d+/ },
+      { pattern: /(?<=Nom du titulaire du compte :).*?(?=\s{3}|$)/ },
+      { pattern: /(?<=Référence Unique du Mandat :)\s*\S+/ },
+      // The bank account, its last digits replaced by X
+      { pattern: /\b\d{10,}X+\b/ },
+    ]
   }
 
   /** Category and normalised label, from the start of the printed label (rentals are printed in capitals). */

@@ -1,7 +1,10 @@
 // EDF électricité (Tarif Bleu), mises en page 2023-2026. Each line of the detail holds on one text line:
 // « label   du DD/MM/YYYY au DD/MM/YYYY   …   excl. VAT €   VAT % ». EDF prints no amount including VAT per line:
 // excl. VAT × (1 + VAT), rounded to the cent (a 0.01 € gap with the total is possible).
-import { AMOUNT, DATE, InvoiceExtractor, rx, type Category } from 'extractor'
+// Masked on the copy joined to the supporting documents: the customer's accounts and contract, the bank account, the
+// mail sorting code; labels stay readable, and so do the delivery point and the meter (they name the building, not the
+// customer).
+import { AMOUNT, DATE, InvoiceExtractor, rx, type Category, type Redaction } from 'extractor'
 
 const LINE = rx`^(.+?)\s+du (${DATE}) au (${DATE})\s.*?(${AMOUNT}) €\s+(${AMOUNT}) %$`
 
@@ -39,6 +42,17 @@ export default class EdfExtractor extends InvoiceExtractor {
       end: this.frenchDate(end),
       amount: this.withVat(excludingVat, vat),
     }
+  }
+
+  redactions(): Redaction[] {
+    return [
+      // Mail sorting code, printed above the address
+      { pattern: /\bFLX\d+-\w+/ },
+      { pattern: /(?<=Compte de facturation :)\s*\S+/ },
+      { pattern: /(?<=Compte commercial :)\s*\S+/ },
+      { pattern: /(?<=Réf\. de votre contrat)\s*\S+/ },
+      { pattern: /(?<=sur le compte bancaire :)\s*FR[\dX ]*\d[\dX ]*/ },
+    ]
   }
 
   /** Category and normalised label, from the start of the printed label. */
