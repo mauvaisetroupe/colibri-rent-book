@@ -651,8 +651,9 @@ async function enregistrer() {
       <h2 tabindex="-1" autofocus>Masquage : copie jointe aux justificatifs de {{ exemple?.nom }}</h2>
       <p class="discret">
         Chaque page en image noir et blanc, où sont peints en noir les termes masqués (toutes les factures, tous
-        fournisseurs) et ce que rend <code>redactions()</code> (ce fournisseur : un texte qui change à chaque facture). Une
-        page scannée n'est masquée que par les zones tracées sur la page du fournisseur. C'est ce que reçoit le locataire.
+        fournisseurs), ce que rend <code>redactions()</code> (ce fournisseur : un texte qui change à chaque facture) et les
+        zones tracées à la main sur la page du fournisseur, seules à masquer une page scannée. C'est ce que reçoit le
+        locataire.
       </p>
       <div class="termes">
         <strong>Termes masqués :</strong>

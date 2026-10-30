@@ -4,9 +4,9 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import type { ZoneSaisie } from '../api'
 import type { ApercuPage } from '../extraction/navigateur'
 
-// Zones masked on the scans of an invoice, drawn with the mouse (ADR 0025): on a scanned page, dragging on the page
-// draws a zone, dragging a zone moves it, its corner resizes it, × or the Delete key removes the selected one. A page of
-// text is shown without zones: the masked terms and the extractor mask it. Bounds in fractions of the page.
+// Zones masked on the pages of an invoice, drawn with the mouse (ADR 0025): dragging on a page draws a zone, dragging a
+// zone moves it, its corner resizes it, × or the Delete key removes the selected one. On a scan they are the only ones;
+// on a page of text they are added to the masked terms and the extractor. Bounds in fractions of the page.
 
 const props = defineProps<{ modelValue: ZoneSaisie[], contenu: Uint8Array | null, largeur?: number }>()
 const emit = defineEmits<{ 'update:modelValue': [zones: ZoneSaisie[]] }>()
@@ -143,29 +143,27 @@ const pourcent = (v: number) => `${(v * 100).toFixed(3)}%`
     <div v-for="(page, i) in pages" :key="page.url" class="page-zones">
       <p class="discret">
         Page {{ i + 1 }} :
-        <template v-if="page.scannee">scan, tracer à la souris ce qui est à masquer</template>
-        <template v-else>texte, masquée par les termes et l'extracteur (pas de zones)</template>
+        <template v-if="page.scannee">scan, seules les zones tracées y sont masquées</template>
+        <template v-else>texte, masquée par les termes et l'extracteur, et par les zones tracées</template>
       </p>
       <div
-        class="surface" :class="{ scannee: page.scannee }" :style="{ width: `${LARGEUR}px`, aspectRatio: `${page.largeur} / ${page.hauteur}` }"
-        @pointerdown="page.scannee && commencer($event, i + 1, 'tracer', null)" @pointermove="suivre" @pointerup="finir"
+        class="surface" :style="{ width: `${LARGEUR}px`, aspectRatio: `${page.largeur} / ${page.hauteur}` }"
+        @pointerdown="commencer($event, i + 1, 'tracer', null)" @pointermove="suivre" @pointerup="finir"
         @pointercancel="finir"
       >
         <img :src="page.url" alt="" draggable="false">
-        <template v-if="page.scannee">
-          <template v-for="(z, index) in modelValue" :key="index">
-            <div
-              v-if="z.page === i + 1" class="zone" :class="{ choisie: choisie === index }"
-              :style="{ left: pourcent(z.x0), top: pourcent(z.y0), width: pourcent(z.x1 - z.x0), height: pourcent(z.y1 - z.y0) }"
-              @pointerdown="commencer($event, i + 1, 'deplacer', index)"
-            >
-              <button
-                v-if="choisie === index" type="button" class="retirer" title="Retirer cette zone"
-                @pointerdown.stop @click="supprimer(index)"
-              >×</button>
-              <span class="coin" title="Redimensionner" @pointerdown="commencer($event, i + 1, 'coin', index)"></span>
-            </div>
-          </template>
+        <template v-for="(z, index) in modelValue" :key="index">
+          <div
+            v-if="z.page === i + 1" class="zone" :class="{ choisie: choisie === index }"
+            :style="{ left: pourcent(z.x0), top: pourcent(z.y0), width: pourcent(z.x1 - z.x0), height: pourcent(z.y1 - z.y0) }"
+            @pointerdown="commencer($event, i + 1, 'deplacer', index)"
+          >
+            <button
+              v-if="choisie === index" type="button" class="retirer" title="Retirer cette zone"
+              @pointerdown.stop @click="supprimer(index)"
+            >×</button>
+            <span class="coin" title="Redimensionner" @pointerdown="commencer($event, i + 1, 'coin', index)"></span>
+          </div>
         </template>
       </div>
     </div>
@@ -183,7 +181,7 @@ const pourcent = (v: number) => `${(v * 100).toFixed(3)}%`
   user-select: none;
   touch-action: none;
 }
-.surface.scannee {
+.surface {
   cursor: crosshair;
 }
 .surface img {

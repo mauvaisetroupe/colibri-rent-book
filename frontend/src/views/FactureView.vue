@@ -331,15 +331,16 @@ async function signalerProbleme() {
   }
 }
 
-// ---------------------------------------------------------------- zones of a scan (ADR 0025)
+// ---------------------------------------------------------------- zones drawn by hand (ADR 0025)
 
-// Its version was made from a scan: masked by zones drawn by hand only
+// Its version was made from a scan: masked by zones drawn by hand only; on a page of text, they are added to the terms
 const scannee = computed(() => copieAJour.value && !!annexe.value?.pages_scannees.length)
 // The zones being adjusted, in a window over the pages of the PDF
 const zonesFacture = ref<{ zones: ZoneSaisie[], contenu: Uint8Array } | null>(null)
 const fenetreZones = ref<HTMLDialogElement | null>(null)
 
 async function ajusterZones() {
+  probleme.value = null
   try {
     const [contenu, fournisseur] = await Promise.all([
       fetch(api.pdfUrl(props.id)).then(async (r) => new Uint8Array(await r.arrayBuffer())),
@@ -683,6 +684,9 @@ onBeforeUnmount(() => {
                 Facture scannée : seules les zones tracées y sont masquées,
                 {{ facture.zones_masquees ? 'ajustées pour cette facture' : 'celles du fournisseur' }}.
               </p>
+              <p v-else-if="copieAJour && facture.zones_masquees">
+                Des zones tracées pour cette facture s'ajoutent aux termes et à l'extracteur.
+              </p>
               <div v-if="!probleme" class="actions">
                 <button v-if="facture.annexe === 'a_verifier'" type="button" class="principal" :disabled="occupe" @click="verifier">
                   ✓ Rien de personnel : à joindre
@@ -709,6 +713,11 @@ onBeforeUnmount(() => {
                 <p class="discret">
                   Le texte change à chaque facture ?
                   <RouterLink :to="masquageDuFournisseur">Modifier le masquage du fournisseur</RouterLink>.
+                </p>
+                <p class="discret">
+                  Une image, un QR code, un texte que la recherche ne trouve pas ?
+                  <button type="button" class="lien" :disabled="occupe" @click="ajusterZones">Tracer une zone à la main…</button>
+                  (pour cette facture ; pour toutes celles du fournisseur, sur sa page).
                 </p>
                 <p class="discret">
                   Sinon, ne rien faire : la facture ne sera pas jointe au justificatif (elle y est mentionnée, « consultable
@@ -748,11 +757,11 @@ onBeforeUnmount(() => {
 
   <dialog ref="fenetreZones" class="fenetre large" @close="zonesFacture = null">
     <template v-if="zonesFacture && facture">
-      <h2 tabindex="-1" autofocus>Zones masquées sur ce scan</h2>
+      <h2 tabindex="-1" autofocus>Zones masquées à la main</h2>
       <p class="discret">
         Tracer à la souris ce qui est à masquer, déplacer ou redimensionner une zone, la retirer avec × ou la touche
-        Suppr. Ces zones ne valent que pour cette facture ; celles de toutes les factures du fournisseur se tracent sur sa
-        page.
+        Suppr. Sur une page de texte, elles s'ajoutent aux termes et à l'extracteur. Ces zones ne valent que pour cette
+        facture ; celles de toutes les factures du fournisseur se tracent sur sa page.
       </p>
       <div class="actions">
         <button type="button" class="principal" @click="enregistrerZones(zonesFacture.zones)">Enregistrer et recréer la version locataire</button>

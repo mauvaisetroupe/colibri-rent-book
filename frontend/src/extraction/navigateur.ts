@@ -159,8 +159,8 @@ export type ZonesDesScans = { zones: ZoneSaisie[], origine: 'modele' | 'main' }
 
 /**
  * The copy of a PDF joined to the supporting documents: on its pages of text, the masked terms and the redactions of
- * an extractor (with its grouping settings) found in its text; on its scanned pages, the zones drawn by hand. Every page
- * in images, the zones painted black.
+ * an extractor (with its grouping settings) found in its text, but not on its scanned pages; on every page, the zones
+ * drawn by hand. Every page in images, the zones painted black.
  */
 export async function copieEnImages(
   contenu: Uint8Array, termes: string[], extracteur: { classe: ClasseExtracteur, reglages: Reglages } | null,
@@ -186,7 +186,7 @@ export async function copieEnImages(
 
 /**
  * Makes the copy of an invoice joined to the supporting documents and sends it, to be verified: the masked terms and
- * the redactions of the last extractor of its supplier, the zones of its scans (its own, else those of its supplier).
+ * the redactions of the last extractor of its supplier, the zones drawn by hand (its own, else those of its supplier).
  * `donnees`: the terms, the extractors and the zones of the supplier, when several invoices are made at once.
  */
 export async function preparerAnnexe(

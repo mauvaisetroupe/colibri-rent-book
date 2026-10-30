@@ -89,8 +89,14 @@ describe('zones to mask', () => {
     const dessinees = [{ page: 1, x0: 0.5, y0: 0.05, x1: 0.95, y1: 0.12 }, { page: 2, x0: 0, y0: 0, x1: 1, y1: 1 }]
     assert.deepEqual(masquage(pages, REGLAGES_PAR_DEFAUT, ['MME EXEMPLE'], classe, { pages: [1], zones: dessinees, origine: 'main' }),
       [{ page: 1, x0: 0.5, y0: 0.05, x1: 0.95, y1: 0.12, origine: 'main' }], 'neither the terms nor the extractor, no page 2')
-    assert.equal(masquage(pages, REGLAGES_PAR_DEFAUT, ['MME EXEMPLE'], classe, { pages: [], zones: dessinees, origine: 'modele' })
-      .filter((z) => z.origine === 'modele').length, 0, 'a page of text: no zones drawn by hand')
+  })
+
+  test('a page of text: the zones drawn by hand are added to the terms and the extractor', async () => {
+    const classe = charger(compiler(EXTRACTEUR, ts))
+    const pages = await pagesDe(await facture(FACTURE))
+    const zones = masquage(pages, REGLAGES_PAR_DEFAUT, ['MME EXEMPLE'], classe,
+      { pages: [], zones: [{ page: 1, x0: 0.1, y0: 0.8, x1: 0.3, y1: 0.95 }], origine: 'modele' })
+    assert.deepEqual(zones.map((z) => z.origine).sort(), ['extracteur', 'modele', 'termes'])
   })
 })
 

@@ -479,11 +479,12 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
         <code>redactions()</code> (« Ajouter redactions() au code »). « Vérifier le masquage… » montre la version locataire
         du PDF de travail. Après un changement, « Recréer les versions locataire » sur la page du fournisseur, puis les
         contrôler.</li>
-      <li><strong>Factures scannées</strong> : le texte lu par le scanner n'est pas fiable, une page scannée n'est
-        masquée que par des zones tracées à la souris. Sur la page du fournisseur, « Zones masquées sur ses scans » :
-        choisir une de ses factures, tracer les zones (les déplacer, les redimensionner par le coin, les retirer avec ×
-        ou Suppr), les enregistrer, puis recréer les versions locataire. Sur une facture, « Il reste une information
-        personnelle : ajuster les zones… » les ajuste pour elle seule.</li>
+      <li><strong>Zones tracées à la main</strong> : le texte lu par le scanner n'est pas fiable, une page scannée n'est
+        masquée que par des zones tracées à la souris ; sur une page de texte, elles masquent ce que la recherche ne
+        trouve pas (une image, un QR code) et s'ajoutent aux termes et à l'extracteur. Sur la page du fournisseur,
+        « Zones masquées à la main » : choisir une de ses factures, tracer les zones (les déplacer, les redimensionner
+        par le coin, les retirer avec × ou Suppr), les enregistrer, puis recréer les versions locataire. Sur une facture,
+        « Il reste une information personnelle » permet de les ajuster pour elle seule.</li>
       <li>Un extracteur lit les PDF d'un fournisseur : une classe TypeScript qui étend <code>InvoiceExtractor</code>,
         surtout des expressions régulières, une méthode par information (reconnaître le PDF, numéro, date, total ;
         pour les lignes : où chercher, quelles lignes, comment lire chacune).</li>

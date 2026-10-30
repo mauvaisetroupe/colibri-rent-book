@@ -9,7 +9,7 @@ import { dateFr } from '../format'
 // A supplier (ADR 0013, 0014): « confidentiel » (its invoices are never joined to a supporting document), and the
 // versions of its extractor, the last one reading the imports; a version opens in the editor. The copies of its
 // invoices joined to the supporting documents, made again at once after a change of its extractor (ADR 0024); the
-// zones masked on its scans, drawn on one of its invoices (ADR 0025).
+// zones masked by hand on its invoices, drawn on one of them (ADR 0025).
 
 const props = defineProps<{ id: number }>()
 const router = useRouter()
@@ -64,7 +64,7 @@ async function refaireCopies() {
   await charger()
 }
 
-// ---------------------------------------------------------------- zones of its scans (ADR 0025)
+// ---------------------------------------------------------------- zones drawn by hand (ADR 0025)
 
 const zones = ref<ZoneSaisie[]>([])
 // The invoice the zones are drawn on, and its PDF
@@ -149,11 +149,12 @@ const editeur = (id: number) => ({ name: releve.value ? 'extracteur-releve' : 'e
         </button>
         <span v-if="progression" class="discret">{{ progression }}</span>
       </div>
-      <h3>Zones masquées sur ses scans</h3>
+      <h3>Zones masquées à la main</h3>
       <p class="discret">
-        Sur une facture scannée, le texte lu par le scanner n'est pas fiable : seules ces zones y sont masquées
-        ({{ fournisseur.zones_masquees.length }} enregistrée(s)). Les tracer à la souris sur une de ses factures ; chaque
-        facture peut ensuite ajuster les siennes (onglet « Version locataire »).
+        Sur une facture scannée, le texte lu par le scanner n'est pas fiable : seules ces zones y sont masquées. Sur une
+        facture en texte, elles masquent ce que la recherche ne trouve pas (une image, un QR code), en plus des termes et
+        de l'extracteur ({{ fournisseur.zones_masquees.length }} enregistrée(s)). Les tracer à la souris sur une de ses
+        factures ; chaque facture peut ensuite ajuster les siennes (onglet « Version locataire »).
       </p>
       <div class="actions-page">
         <label>Tracer sur la facture
