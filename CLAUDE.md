@@ -14,7 +14,8 @@ première : `colibri`, privé), qui fixe la version de l'image et lance les test
   l'éditeur (écran « Fournisseurs »), enregistrée en base par version et jamais modifiée ; le serveur n'exécute jamais
   ce code
 - Justificatifs et procès-verbaux PDF : pdfmake (police Roboto embarquée, réglée dans `pdfmake.ts`), factures jointes
-  en annexe par pdf-lib, sauf celles d'un fournisseur confidentiel (ADR 0014) ; pas de navigateur côté serveur
+  en annexe par pdf-lib, sauf celles d'un fournisseur confidentiel (ADR 0014) ; pas de navigateur côté serveur. Une
+  facture n'est jointe qu'en copie en images, caviardée et vérifiée, faite dans le navigateur (ADR 0024)
 - Image : `Dockerfile`, publiée par la CI sur GHCR à chaque push sur `main` (étiquette = commit court, et `latest`)
 - `backend/` et `frontend/` en paquets npm indépendants ; `schema.sql` complet + `migrations/NNN_*.sql` appliquées à
   la main ; ADR dans `docs/adr/` ; Conventional Commits ; pas de Prettier (pas de point-virgule, guillemets simples)
@@ -27,17 +28,19 @@ première : `colibri`, privé), qui fixe la version de l'image et lance les test
 - `backend/src/` : `app.ts` (routes), `routes/` (factures, contrôle, extracteurs, fournisseurs, immeubles, séjours,
   décompte, régularisations, paiements, fiscal, travaux (ADR 0015), société et assemblées (ADR 0016), relevés
   bancaires et mouvements (ADR 0018), santé),
-  `statements.ts` (lectures SQL du décompte), `justificatif.ts` (données) et `justificatifPdf.ts` (PDF), `mails.ts`,
+  `statements.ts` (lectures SQL du décompte), `justificatif.ts` (données) et `justificatifPdf.ts` (PDF), `annexes.ts`
+  (état et choix des copies jointes, ADR 0024), `mails.ts`,
   `fiscal.ts`, `assemblees.ts` (quorum, votes, modèle de l'assemblée annuelle) et `pvPdf.ts` (procès-verbal), `periods.ts` (**seule** conversion `daterange` ↔
   dates incluses), `invoices/checks.ts` (contrôles du § 6, sans dépendance à Node), `pdfStorage.ts` (PDF par empreinte, un dossier
-  par type : `factures/`, `releves/`, `travaux/`, `assemblees/` ; rangement au démarrage).
+  par type : `factures/`, `annexes/`, `releves/`, `travaux/`, `assemblees/` ; rangement au démarrage).
   Le moteur de répartition est en SQL (`repartition`, `decompte`, `synthese`) : ne pas le réimplémenter en TypeScript.
 - `backend/seed/extracteurs.sql` : extracteurs livrés (EDF, ENGIE ; relevés du Crédit Mutuel, ADR 0018), généré par `npm run extracteurs:sql` dans
   `frontend/` depuis `frontend/src/extraction/modeles/` ; rejouable (une source déjà en base n'est pas ajoutée).
 - `frontend/src/` : `api.ts` (client et types), `format.ts` (seule conversion affichage ↔ API), un écran par fichier
   dans `views/`, `rapprochement.ts` (propositions de l'écran Banque), `extraction/` (`extractor.ts` = classe de base
   et aides des extracteurs de factures, `bank-extractor.ts` celle des relevés, `moteurReleve.ts` leur moteur ;
-  regroupement des morceaux pdf.js en lignes, moteur, surlignage, éditeur Monaco, test sur les factures en base).
+  regroupement des morceaux pdf.js en lignes, moteur, surlignage, éditeur Monaco, test sur les factures en base ;
+  copie jointe aux justificatifs : `masquage.ts` zones à masquer, `annexe.ts` PDF en images, ADR 0024).
   Navigation calquée sur le cycle d'un exercice ; tout nouvel écran ou changement de processus met à jour l'accueil
   (`AccueilView.vue`) et son mode d'emploi.
 
