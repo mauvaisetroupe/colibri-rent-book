@@ -8,7 +8,7 @@ import FactureView from './views/FactureView.vue'
 import FiscalView from './views/FiscalView.vue'
 import ImmeubleView from './views/ImmeubleView.vue'
 import NouvelleRegularisationView from './views/NouvelleRegularisationView.vue'
-import PaiementsView from './views/PaiementsView.vue'
+import PaymentsView from './views/PaymentsView.vue'
 import ProvisionsView from './views/ProvisionsView.vue'
 import RegularisationsView from './views/RegularisationsView.vue'
 import RegularisationView from './views/RegularisationView.vue'
@@ -35,7 +35,7 @@ export default createRouter({
       props: (route) => ({ id: Number(route.params.id) }),
     },
     { path: '/sejours', name: 'sejours', component: SejoursView },
-    { path: '/paiements', name: 'paiements', component: PaiementsView },
+    { path: '/paiements', name: 'paiements', component: PaymentsView },
     { path: '/travaux', name: 'travaux', component: () => import('./views/TravauxView.vue') },
     { path: '/societe', name: 'societe', component: () => import('./views/SocieteView.vue') },
     { path: '/assemblees', name: 'assemblees', component: () => import('./views/AssembleesView.vue') },

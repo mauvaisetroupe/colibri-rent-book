@@ -870,19 +870,6 @@ h3 {
   margin: 1.2rem 0 0.4rem;
 }
 
-/* ---------------------------------------------------------------- payments */
-
-table.paiements td.note {
-  max-width: 11rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-table.paiements tfoot td {
-  border-top: 2px solid var(--bord);
-}
-
 /* ---------------------------------------------------------------- regularisations: payments under the open row */
 
 .sans-retour {
