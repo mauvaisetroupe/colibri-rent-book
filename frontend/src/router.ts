@@ -36,7 +36,7 @@ export default createRouter({
     },
     { path: '/sejours', name: 'sejours', component: SejoursView },
     { path: '/paiements', name: 'paiements', component: PaymentsView },
-    { path: '/travaux', name: 'travaux', component: () => import('./views/TravauxView.vue') },
+    { path: '/travaux', name: 'travaux', component: () => import('./views/WorksView.vue') },
     { path: '/societe', name: 'societe', component: () => import('./views/SocieteView.vue') },
     { path: '/assemblees', name: 'assemblees', component: () => import('./views/AssembleesView.vue') },
     {
