@@ -79,8 +79,12 @@ function garderOuvert(event: MouseEvent, root: boolean) {
   }
 }
 
-// The commit of colibri-rent-book running, at the bottom of « Réglages » (linked to GitHub); « dev » in development
+// The version of colibri-rent-book running, at the bottom of « Réglages » (linked to GitHub: the release of a version
+// X.Y.Z, otherwise the commit); « dev » in development
 const version = ref<string | null>(null)
+const versionUrl = (v: string) => /^\d+\.\d+\.\d+$/.test(v)
+  ? `https://github.com/mauvaisetroupe/colibri-rent-book/releases/tag/v${v}`
+  : `https://github.com/mauvaisetroupe/colibri-rent-book/commit/${v}`
 onMounted(async () => {
   version.value = (await api.sante().catch(() => null))?.version ?? null
 })
@@ -90,7 +94,7 @@ const menuReglages = computed<MenuItem[]>(() => [
   ...REGLAGES.map((r) => ({ ...r, class: { actif: actif(r.route!) } })),
   { separator: true },
   version.value && version.value !== 'dev'
-    ? { label: `version ${version.value}`, icon: 'oi oi-github', url: `https://github.com/mauvaisetroupe/colibri-rent-book/commit/${version.value}`, target: '_blank', class: 'version' }
+    ? { label: `version ${version.value}`, icon: 'oi oi-github', url: versionUrl(version.value), target: '_blank', class: 'version' }
     : { label: 'version de développement', disabled: true, class: 'version' },
 ])
 const reglageActif = computed(() => REGLAGES.some((r) => actif(r.route!)))

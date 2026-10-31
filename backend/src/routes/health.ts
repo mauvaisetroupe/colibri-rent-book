@@ -1,7 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify'
 import type { Pool } from 'pg'
 
-// The commit of colibri-rent-book running (APP_VERSION, set in the image by the CI), « dev » outside the image
+// The version of colibri-rent-book running (APP_VERSION, set in the image by the CI: X.Y.Z or the commit), « dev »
+// outside the image
 const version = process.env.APP_VERSION || 'dev'
 
 const healthRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {

@@ -24,7 +24,7 @@ describe('GET /api/health', { skip: skipWithoutDatabase }, () => {
     const response = await app.inject({ method: 'GET', url: '/api/health' })
     assert.equal(response.statusCode, 200)
     assert.equal(response.json().status, 'ok')
-    assert.match(response.json().version, /^(dev|[0-9a-f]{7})$/)
+    assert.match(response.json().version, /^(dev|[0-9a-f]{7}|\d+\.\d+\.\d+)$/)
   })
 
   test('reaches the database', async () => {
