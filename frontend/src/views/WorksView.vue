@@ -19,11 +19,11 @@ import { contains, distinctOptions, equals, optionsOf, stateKey, withDefaults, t
 const { immeubleId: building, pret: ready } = useImmeuble()
 const works = ref<Travaux[]>([])
 const currentBuilding = ref<Immeuble | null>(null)
-const lots = ref<Lot[]>([])
+const units = ref<Lot[]>([])
 const form = ref<BrouillonTravaux | null>(null)
 const formError = ref<string | null>(null)
 const busy = ref(false)
-const message = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
+const message = ref<{ text: string, type: 'info' | 'erreur' } | null>(null)
 
 onMounted(async () => {
   await ready
@@ -36,12 +36,12 @@ async function load() {
     return
   }
   try {
-    const [w, b] = await Promise.all([api.travaux(building.value), api.immeuble(building.value)])
+    const [w, b] = await Promise.all([api.works_invoice(building.value), api.building(building.value)])
     works.value = w
-    currentBuilding.value = { ...b, nb_lots: b.lots.length }
-    lots.value = b.lots
+    currentBuilding.value = { ...b, unit_count: b.units.length }
+    units.value = b.units
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 
@@ -49,40 +49,40 @@ async function load() {
 
 // The only field computed here: the dates of its payments (« 2025-12-05 », « 2027-02-15, 2028-01-10 » for an invoice
 // paid in several times), shown and filtered under « Payée le »; empty while it is to pay
-const rows = computed(() => works.value.map((w) => ({ ...w, paid_on: w.reglements.map((r) => r.date_paiement).join(', ') })))
+const rows = computed(() => works.value.map((w) => ({ ...w, paid_on: w.payments.map((r) => r.payment_date).join(', ') })))
 type Row = (typeof rows.value)[number]
 
 const defaultFilters = (): Filters => ({
-  paid_on: contains(), date_facture: contains(), fournisseur: equals(), description: contains(), lot: equals(),
-  nature: equals(), montant_ttc: contains(), reste: contains(),
+  paid_on: contains(), invoice_date: contains(), supplier: equals(), description: contains(), unit: equals(),
+  nature: equals(), total_incl_tax: contains(), remaining: contains(),
 })
 const filters = ref<Filters>(defaultFilters())
 const table = ref<FilteredTable<Row>>(null)
 const shown = computed(() => table.value?.processedData ?? [])
 
-const total = (list: Travaux[]) => list.reduce((s, w) => s.plus(w.montant_ttc), new Big(0)).toFixed(2)
+const total = (list: Travaux[]) => list.reduce((s, w) => s.plus(w.total_incl_tax), new Big(0)).toFixed(2)
 // Text typed under « Payée le » (« 2025 »): the deductible payments counted are those whose date contains it
 const paidOn = computed(() => ((filters.value.paid_on as { value: string | null } | undefined)?.value ?? '').trim())
-const deductible = computed(() => shown.value.filter((w) => w.deductible).flatMap((w) => w.reglements)
-  .filter((r) => r.date_paiement.includes(paidOn.value))
-  .reduce((s, r) => s.plus(r.montant), new Big(0)).toFixed(2))
+const deductible = computed(() => shown.value.filter((w) => w.deductible).flatMap((w) => w.payments)
+  .filter((r) => r.payment_date.includes(paidOn.value))
+  .reduce((s, r) => s.plus(r.amount), new Big(0)).toFixed(2))
 
-const lotsByBuilding = computed(() => new Map(building.value === null ? [] : [[building.value, lots.value]]))
+const lotsByBuilding = computed(() => new Map(building.value === null ? [] : [[building.value, units.value]]))
 
 // ---------------------------------------------------------------- entry and editing
 
 function add() {
   form.value = {
-    id: null, immeuble_id: building.value, lot_id: null, fournisseur: '', description: '', nature: 'entretien',
-    date_facture: '', montant_ttc: '', note: '', pdf: null,
+    id: null, building_id: building.value, unit_id: null, supplier: '', description: '', nature: 'maintenance',
+    invoice_date: '', total_incl_tax: '', note: '', pdf: null,
   }
   formError.value = null
 }
 
 function edit(w: Travaux) {
   form.value = {
-    id: w.id, immeuble_id: w.immeuble_id, lot_id: w.lot_id, fournisseur: w.fournisseur, description: w.description,
-    nature: w.nature, date_facture: w.date_facture, montant_ttc: nombreFr(w.montant_ttc), note: w.note ?? '', pdf: null,
+    id: w.id, building_id: w.building_id, unit_id: w.unit_id, supplier: w.supplier, description: w.description,
+    nature: w.nature, invoice_date: w.invoice_date, total_incl_tax: nombreFr(w.total_incl_tax), note: w.note ?? '', pdf: null,
   }
   formError.value = null
 }
@@ -103,7 +103,7 @@ async function save(next: boolean) {
     if (b.pdf) {
       w = await api.joindrePdfTravaux(w.id, b.pdf)
     }
-    message.value = { texte: `${w.description} : enregistrée`, type: 'info' }
+    message.value = { text: `${w.description} : enregistrée`, type: 'info' }
     await load()
     if (next) {
       add()
@@ -120,7 +120,7 @@ async function save(next: boolean) {
 }
 
 async function remove(w: Travaux | undefined) {
-  if (!w || !confirm(`Supprimer « ${w.description} » (${euros(w.montant_ttc)}) et ses règlements ?`)) {
+  if (!w || !confirm(`Supprimer « ${w.description} » (${euros(w.total_incl_tax)}) et ses règlements ?`)) {
     return
   }
   await api.supprimerTravaux(w.id)
@@ -137,10 +137,10 @@ async function attach(w: Travaux, event: Event) {
   }
   try {
     await api.joindrePdfTravaux(w.id, file)
-    message.value = { texte: `PDF joint à « ${w.description} »`, type: 'info' }
+    message.value = { text: `PDF joint à « ${w.description} »`, type: 'info' }
     await load()
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 </script>
@@ -157,7 +157,7 @@ async function attach(w: Travaux, event: Event) {
     (acompte, solde) peut se partager entre deux déclarations.
   </p>
 
-  <p v-if="message" class="message" :class="message.type">{{ message.texte }}</p>
+  <p v-if="message" class="message" :class="message.type">{{ message.text }}</p>
 
   <div class="actions-page">
     <button type="button" @click="add">+ Ajouter une facture de travaux</button>
@@ -166,11 +166,11 @@ async function attach(w: Travaux, event: Event) {
   <FormulaireTravaux
     v-if="form && currentBuilding"
     v-model="form"
-    :immeubles="[currentBuilding]"
-    :lots="lotsByBuilding"
+    :buildings="[currentBuilding]"
+    :units="lotsByBuilding"
     :occupe="busy"
     :erreur="formError"
-    :travaux="recorded"
+    :works_invoice="recorded"
     @change="load"
     @enregistrer="save"
     @fermer="form = null"
@@ -188,7 +188,7 @@ async function attach(w: Travaux, event: Event) {
   <!-- Short columns at a fixed width; the supplier and the description take the rest -->
   <DataTable
     ref="table" v-model:filters="filters" :value="rows" data-key="id" filter-display="row" size="small"
-    sort-field="date_facture" :sort-order="-1" state-storage="session" :state-key="stateKey('works')" class="clickable"
+    sort-field="invoice_date" :sort-order="-1" state-storage="session" :state-key="stateKey('works')" class="clickable"
     @row-click="edit($event.data)" @state-restore="filters = withDefaults(defaultFilters(), $event.filters)"
   >
     <template #empty>Aucune facture de travaux.</template>
@@ -196,20 +196,20 @@ async function attach(w: Travaux, event: Event) {
       <template #body="{ data }"><span :class="{ discret: !data.paid_on }">{{ data.paid_on || 'à payer' }}</span></template>
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
-    <Column field="date_facture" header="Facture du" sortable :show-filter-menu="false" style="width: 7.5rem">
+    <Column field="invoice_date" header="Facture du" sortable :show-filter-menu="false" style="width: 7.5rem">
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
-    <Column field="fournisseur" header="Fournisseur" sortable :show-filter-menu="false">
+    <Column field="supplier" header="Fournisseur" sortable :show-filter-menu="false">
       <template #filter="{ filterModel, filterCallback }">
-        <ColumnFilter :model="filterModel" :apply="filterCallback" :options="distinctOptions(works.map((w) => w.fournisseur))" />
+        <ColumnFilter :model="filterModel" :apply="filterCallback" :options="distinctOptions(works.map((w) => w.supplier))" />
       </template>
     </Column>
     <Column field="description" header="Description" :show-filter-menu="false">
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
-    <Column field="lot" header="Logement" :show-filter-menu="false" style="width: 8rem">
+    <Column field="unit" header="Logement" :show-filter-menu="false" style="width: 8rem">
       <template #filter="{ filterModel, filterCallback }">
-        <ColumnFilter :model="filterModel" :apply="filterCallback" :options="distinctOptions(works.map((w) => w.lot))" />
+        <ColumnFilter :model="filterModel" :apply="filterCallback" :options="distinctOptions(works.map((w) => w.unit))" />
       </template>
     </Column>
     <Column field="nature" header="Nature" :show-filter-menu="false" style="width: 11rem">
@@ -222,11 +222,11 @@ async function attach(w: Travaux, event: Event) {
         <ColumnFilter :model="filterModel" :apply="filterCallback" :options="optionsOf(NATURES_TRAVAUX)" />
       </template>
     </Column>
-    <Column field="montant_ttc" header="Montant TTC" sortable body-class="nombre" header-class="nombre" :show-filter-menu="false" style="width: 8rem">
+    <Column field="total_incl_tax" header="Montant TTC" sortable body-class="nombre" header-class="nombre" :show-filter-menu="false" style="width: 8rem">
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
-    <Column field="reste" header="Reste à payer" body-class="nombre" header-class="nombre" :show-filter-menu="false" style="width: 8rem">
-      <template #body="{ data }"><span :class="Number(data.reste) > 0 ? 'ko' : 'discret'">{{ data.reste }}</span></template>
+    <Column field="remaining" header="Reste à payer" body-class="nombre" header-class="nombre" :show-filter-menu="false" style="width: 8rem">
+      <template #body="{ data }"><span :class="Number(data.remaining) > 0 ? 'ko' : 'discret'">{{ data.remaining }}</span></template>
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
     <Column header="PDF" style="width: 9rem">

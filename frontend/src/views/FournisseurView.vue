@@ -14,54 +14,54 @@ import { dateFr } from '../format'
 
 const props = defineProps<{ id: number }>()
 const router = useRouter()
-const fournisseur = ref<Fournisseur | null>(null)
+const supplier = ref<Fournisseur | null>(null)
 const versions = ref<ExtracteurEnregistre[]>([])
-const message = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
+const message = ref<{ text: string, type: 'info' | 'erreur' } | null>(null)
 
 async function charger() {
   try {
-    fournisseur.value = await api.fournisseur(props.id)
-    versions.value = (await api.extracteurs()).filter((e) => e.fournisseur === fournisseur.value?.nom)
-    factures.value = await api.facturesDuFournisseur(fournisseur.value.nom)
-    zones.value = fournisseur.value.zones_masquees.map((z) => ({ ...z }))
+    supplier.value = await api.supplier(props.id)
+    versions.value = (await api.extractors()).filter((e) => e.supplier === supplier.value?.name)
+    invoices.value = await api.facturesDuFournisseur(supplier.value.name)
+    zones.value = supplier.value.masked_zones.map((z) => ({ ...z }))
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 
 onMounted(charger)
 watch(() => props.id, charger)
 
-const derniere = computed(() => versions.value[0] ?? null)
+const latest = computed(() => versions.value[0] ?? null)
 
 // ---------------------------------------------------------------- copies joined to the supporting documents (ADR 0024)
 
-const factures = ref<FactureAvecPdf[]>([])
+const invoices = ref<FactureAvecPdf[]>([])
 // Invoices whose copy can be joined: not replaced, its supplier not confidential
-const aJoindre = computed(() => factures.value.filter((f) => f.statut !== 'remplacee' && f.annexe !== 'confidentiel'))
-const compte = (etat: FactureAvecPdf['annexe']) => aJoindre.value.filter((f) => f.annexe === etat).length
+const aJoindre = computed(() => invoices.value.filter((f) => f.status !== 'replaced' && f.tenant_copy !== 'confidential'))
+const account = (state: FactureAvecPdf['tenant_copy']) => aJoindre.value.filter((f) => f.tenant_copy === state).length
 const progression = ref<string | null>(null)
 
 async function refaireCopies() {
-  if (!fournisseur.value) {
+  if (!supplier.value) {
     return
   }
   const { preparerAnnexe } = await import('../extraction/navigateur')
-  const donnees = { termes: await api.termesMasques(), extracteurs: await api.extracteurs(), modele: fournisseur.value.zones_masquees }
+  const donnees = { terms: await api.termesMasques(), extractors: await api.extractors(), modele: supplier.value.masked_zones }
   const erreurs: string[] = []
   const liste = aJoindre.value
   for (const [i, f] of liste.entries()) {
-    progression.value = `Copie ${i + 1} sur ${liste.length} : n° ${f.numero}…`
+    progression.value = `Copie ${i + 1} sur ${liste.length} : n° ${f.number}…`
     try {
-      await preparerAnnexe({ ...f, fournisseur: fournisseur.value.nom }, donnees)
+      await preparerAnnexe({ ...f, supplier: supplier.value.name }, donnees)
     } catch (e) {
-      erreurs.push(`n° ${f.numero} : ${(e as Error).message}`)
+      erreurs.push(`n° ${f.number} : ${(e as Error).message}`)
     }
   }
   progression.value = null
   message.value = erreurs.length
-    ? { texte: `Copies non refaites : ${erreurs.join(' ; ')}`, type: 'erreur' }
-    : { texte: `${liste.length} version(s) locataire recréée(s) : à contrôler sur chaque facture`, type: 'info' }
+    ? { text: `Copies non refaites : ${erreurs.join(' ; ')}`, type: 'erreur' }
+    : { text: `${liste.length} version(s) locataire recréée(s) : à contrôler sur chaque facture`, type: 'info' }
   await charger()
 }
 
@@ -73,15 +73,15 @@ const factureZones = ref<number | null>(null)
 const contenuZones = ref<Uint8Array | null>(null)
 // What the terms and its extractor already mask on that invoice
 const automatiques = ref<Zone[]>([])
-const zonesModifiees = computed(() => JSON.stringify(zones.value) !== JSON.stringify(fournisseur.value?.zones_masquees ?? []))
+const zonesModifiees = computed(() => JSON.stringify(zones.value) !== JSON.stringify(supplier.value?.masked_zones ?? []))
 
 watch(factureZones, async (id) => {
   automatiques.value = []
   const contenu = id === null ? null : new Uint8Array(await (await fetch(api.pdfUrl(id))).arrayBuffer())
   contenuZones.value = contenu
-  if (contenu && fournisseur.value) {
+  if (contenu && supplier.value) {
     const { zonesAutomatiques } = await import('../extraction/navigateur')
-    const zones = await zonesAutomatiques(contenu.slice(), fournisseur.value.nom)
+    const zones = await zonesAutomatiques(contenu.slice(), supplier.value.name)
     if (contenuZones.value === contenu) {
       automatiques.value = zones
     }
@@ -89,70 +89,70 @@ watch(factureZones, async (id) => {
 })
 
 async function enregistrerZones() {
-  if (!fournisseur.value) {
+  if (!supplier.value) {
     return
   }
   try {
-    fournisseur.value = await api.modifierZonesFournisseur(fournisseur.value.id, zones.value)
-    message.value = { texte: 'Zones enregistrées : recréer les versions locataire pour les appliquer', type: 'info' }
+    supplier.value = await api.modifierZonesFournisseur(supplier.value.id, zones.value)
+    message.value = { text: 'Zones enregistrées : recréer les versions locataire pour les appliquer', type: 'info' }
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 
-const energies = computed(() => (fournisseur.value?.energies ?? []).map((e) => ENERGIES[e]).join(', '))
+const energies = computed(() => (supplier.value?.energies ?? []).map((e) => ENERGIES[e]).join(', '))
 
 async function basculerConfidentiel(event: Event) {
-  if (!fournisseur.value) {
+  if (!supplier.value) {
     return
   }
-  const confidentiel = (event.target as HTMLInputElement).checked
+  const confidential = (event.target as HTMLInputElement).checked
   try {
-    fournisseur.value = await api.modifierFournisseur(fournisseur.value.id, { confidentiel })
+    supplier.value = await api.modifierFournisseur(supplier.value.id, { confidential })
     message.value = {
-      texte: confidentiel ? 'Ses factures ne seront plus jointes aux justificatifs' : 'Ses factures seront jointes aux justificatifs',
+      text: confidential ? 'Ses factures ne seront plus jointes aux justificatifs' : 'Ses factures seront jointes aux justificatifs',
       type: 'info',
     }
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 
-function ecrireExtracteur(type: 'facture' | 'releve') {
-  router.push({ name: type === 'releve' ? 'nouvel-extracteur-releve' : 'nouvel-extracteur', query: { fournisseur: fournisseur.value?.nom } })
+function ecrireExtracteur(type: 'invoice' | 'bank_statement') {
+  router.push({ name: type === 'bank_statement' ? 'nouvel-extracteur-releve' : 'nouvel-extracteur', query: { supplier: supplier.value?.name } })
 }
 
 // A bank: its extractor reads statements, edited in its own editor (ADR 0018)
-const releve = computed(() => derniere.value?.type === 'releve')
-const editeur = (id: number) => ({ name: releve.value ? 'extracteur-releve' : 'extracteur', params: { id } })
+const releve = computed(() => latest.value?.type === 'bank_statement')
+const editeur = (id: number) => ({ name: releve.value ? 'extracteur-releve' : 'extractor', params: { id } })
 </script>
 
 <template>
-  <RouterLink :to="{ name: 'fournisseurs' }">← Fournisseurs</RouterLink>
-  <template v-if="fournisseur">
+  <RouterLink :to="{ name: 'suppliers' }">← Fournisseurs</RouterLink>
+  <template v-if="supplier">
     <section class="entete-page">
-      <h1>{{ fournisseur.nom }}</h1>
+      <h1>{{ supplier.name }}</h1>
     </section>
-    <p v-if="releve" class="discret">Banque · {{ fournisseur.nb_releves }} relevé(s) importé(s) (écran Banque)</p>
+    <p v-if="releve" class="discret">Banque · {{ supplier.statement_count }} relevé(s) importé(s) (écran Banque)</p>
     <p v-else class="discret">
       {{ energies || 'Énergie non connue' }} ·
-      {{ fournisseur.nb_factures }} facture(s), dont {{ fournisseur.nb_pdf }} avec PDF
+      {{ supplier.invoice_count }} facture(s), dont {{ supplier.pdf_count }} avec PDF
     </p>
 
-    <p v-if="message" class="message" :class="message.type">{{ message.texte }}</p>
+    <p v-if="message" class="message" :class="message.type">{{ message.text }}</p>
 
     <h2 v-if="!releve">Justificatifs des régularisations</h2>
     <label v-if="!releve" class="case">
-      <input type="checkbox" :checked="fournisseur.confidentiel" @change="basculerConfidentiel">
+      <input type="checkbox" :checked="supplier.confidential" @change="basculerConfidentiel">
       Confidentiel : ne jamais joindre ses factures au justificatif d'une régularisation (elles y sont listées,
       « non jointe : document confidentiel, consultable sur demande »)
     </label>
 
-    <template v-if="!releve && !fournisseur.confidentiel && aJoindre.length">
+    <template v-if="!releve && !supplier.confidential && aJoindre.length">
       <p class="discret">
         Ses factures sont jointes au justificatif dans leur version locataire, en images, où sont masqués les termes de
-        l'écran « Fournisseurs » et ce que masque son extracteur ({{ compte('verifiee') }} contrôlée(s),
-        {{ compte('a_verifier') }} à contrôler, {{ compte('a_faire') }} à créer). Après un changement de l'extracteur ou
+        l'écran « Fournisseurs » et ce que masque son extracteur ({{ account('checked') }} contrôlée(s),
+        {{ account('to_check') }} à contrôler, {{ account('to_make') }} à créer). Après un changement de l'extracteur ou
         des termes, les recréer : chacune est alors à contrôler de nouveau.
       </p>
       <div class="actions-page">
@@ -165,39 +165,39 @@ const editeur = (id: number) => ({ name: releve.value ? 'extracteur-releve' : 'e
       <p class="discret">
         Sur une facture scannée, le texte lu par le scanner n'est pas fiable : seules ces zones y sont masquées. Sur une
         facture en texte, elles masquent ce que la recherche ne trouve pas (une image, un QR code), en plus des termes et
-        de l'extracteur ({{ fournisseur.zones_masquees.length }} enregistrée(s)). Les tracer à la souris sur une de ses
+        de l'extracteur ({{ supplier.masked_zones.length }} enregistrée(s)). Les tracer à la souris sur une de ses
         factures ; chaque facture peut ensuite ajuster les siennes (onglet « Version locataire »).
       </p>
       <div class="actions-page">
         <label>Tracer sur la facture
           <select v-model="factureZones">
             <option :value="null">—</option>
-            <option v-for="f in aJoindre" :key="f.id" :value="f.id">n° {{ f.numero }} ({{ dateFr(f.date_facture) }})</option>
+            <option v-for="f in aJoindre" :key="f.id" :value="f.id">n° {{ f.number }} ({{ dateFr(f.invoice_date) }})</option>
           </select>
         </label>
         <button type="button" :disabled="!zonesModifiees" @click="enregistrerZones">Enregistrer les zones</button>
-        <button type="button" :disabled="!zonesModifiees" @click="zones = fournisseur.zones_masquees.map((z) => ({ ...z }))">
+        <button type="button" :disabled="!zonesModifiees" @click="zones = supplier.masked_zones.map((z) => ({ ...z }))">
           Annuler
         </button>
       </div>
       <EditeurZones v-if="contenuZones" v-model="zones" :contenu="contenuZones" :automatiques="automatiques" />
-      <ul v-if="compte('a_verifier') || compte('a_faire')" class="a-verifier">
-        <li v-for="f in aJoindre.filter((f) => f.annexe !== 'verifiee')" :key="f.id">
-          <RouterLink :to="{ name: 'facture', params: { id: f.id } }">n° {{ f.numero }}</RouterLink>
-          ({{ f.immeuble }}, {{ dateFr(f.date_facture) }}) : {{ f.annexe === 'a_faire' ? 'à créer' : 'à contrôler' }}
+      <ul v-if="account('to_check') || account('to_make')" class="a-verifier">
+        <li v-for="f in aJoindre.filter((f) => f.tenant_copy !== 'checked')" :key="f.id">
+          <RouterLink :to="{ name: 'invoice', params: { id: f.id } }">n° {{ f.number }}</RouterLink>
+          ({{ f.building }}, {{ dateFr(f.invoice_date) }}) : {{ f.tenant_copy === 'to_make' ? 'à créer' : 'à contrôler' }}
         </li>
       </ul>
     </template>
 
     <h2>Extracteur</h2>
-    <template v-if="derniere">
+    <template v-if="latest">
       <p class="discret">
         La dernière version lit les PDF de ce {{ releve ? 'banque (relevés)' : 'fournisseur' }} à l'import. Une version
         ne change plus : la modifier, c'est enregistrer la suivante.
       </p>
       <div class="actions-page">
-        <RouterLink :to="editeur(derniere.id)" class="bouton">
-          Modifier l'extracteur (à partir de la v{{ derniere.version }})
+        <RouterLink :to="editeur(latest.id)" class="bouton">
+          Modifier l'extracteur (à partir de la v{{ latest.version }})
         </RouterLink>
       </div>
       <table class="liste">
@@ -206,10 +206,10 @@ const editeur = (id: number) => ({ name: releve.value ? 'extracteur-releve' : 'e
         </thead>
         <tbody>
           <tr v-for="v in versions" :key="v.id" @click="router.push(editeur(v.id))">
-            <td>v{{ v.version }}{{ v.derniere ? ' (utilisée)' : '' }}</td>
-            <td>{{ dateFr(v.cree_le.slice(0, 10)) }}</td>
+            <td>v{{ v.version }}{{ v.latest ? ' (utilisée)' : '' }}</td>
+            <td>{{ dateFr(v.created_at.slice(0, 10)) }}</td>
             <td class="discret">{{ v.note }}</td>
-            <td class="nombre">{{ releve ? v.nb_releves : v.nb_factures }}</td>
+            <td class="nombre">{{ releve ? v.statement_count : v.invoice_count }}</td>
             <td><RouterLink :to="editeur(v.id)">ouvrir</RouterLink></td>
           </tr>
         </tbody>
@@ -218,12 +218,12 @@ const editeur = (id: number) => ({ name: releve.value ? 'extracteur-releve' : 'e
     <template v-else>
       <p class="discret">Pas d'extracteur : ses factures se saisissent à la main.</p>
       <div class="actions-page">
-        <button type="button" @click="ecrireExtracteur('facture')">Écrire un extracteur de factures</button>
-        <button type="button" @click="ecrireExtracteur('releve')">Écrire un extracteur de relevés (banque)</button>
+        <button type="button" @click="ecrireExtracteur('invoice')">Écrire un extracteur de factures</button>
+        <button type="button" @click="ecrireExtracteur('bank_statement')">Écrire un extracteur de relevés (banque)</button>
       </div>
     </template>
   </template>
-  <p v-else-if="message" class="message" :class="message.type">{{ message.texte }}</p>
+  <p v-else-if="message" class="message" :class="message.type">{{ message.text }}</p>
 </template>
 
 <style scoped>

@@ -8,47 +8,47 @@ import { useImmeuble } from '../immeuble'
 
 // Provisions paid, per stay and calendar year (SPEC R9): one amount per stay present during the year.
 
-type Saisie = { sejour: Sejour, provision: Provision | null, montant: string, note: string }
+type Saisie = { tenancy: Sejour, charge_advance: Provision | null, amount: string, note: string }
 
 const { immeubleId, pret } = useImmeuble()
-const sejours = ref<Sejour[]>([])
-const provisions = ref<Provision[]>([])
-const annee = ref(new Date().getFullYear() - 1)
+const tenancies = ref<Sejour[]>([])
+const advances = ref<Provision[]>([])
+const year = ref(new Date().getFullYear() - 1)
 const saisies = ref<Saisie[]>([])
-const message = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
+const message = ref<{ text: string, type: 'info' | 'erreur' } | null>(null)
 
 async function charger() {
   if (immeubleId.value === null) {
     return
   }
-  ;[sejours.value, provisions.value] = await Promise.all([api.sejours(immeubleId.value), api.provisions(immeubleId.value)])
+  ;[tenancies.value, advances.value] = await Promise.all([api.tenancies(immeubleId.value), api.advances(immeubleId.value)])
   preparer()
 }
 
-const presentPendant = (s: Sejour, a: number) => s.entree <= `${a}-12-31` && (s.sortie === null || s.sortie >= `${a}-01-01`)
+const presentPendant = (s: Sejour, a: number) => s.move_in <= `${a}-12-31` && (s.move_out === null || s.move_out >= `${a}-01-01`)
 
 function preparer() {
-  saisies.value = sejours.value
-    .filter((s) => presentPendant(s, annee.value))
-    .map((sejour) => {
-      const provision = provisions.value.find((p) => p.sejour_id === sejour.id && p.annee === annee.value) ?? null
-      return { sejour, provision, montant: nombreFr(provision?.montant ?? null), note: provision?.note ?? '' }
+  saisies.value = tenancies.value
+    .filter((s) => presentPendant(s, year.value))
+    .map((tenancy) => {
+      const charge_advance = advances.value.find((p) => p.tenancy_id === tenancy.id && p.year === year.value) ?? null
+      return { tenancy, charge_advance, amount: nombreFr(charge_advance?.amount ?? null), note: charge_advance?.note ?? '' }
     })
 }
 
 onMounted(async () => {
   await pret
-  await charger().catch((e) => { message.value = { texte: e.message, type: 'erreur' } })
+  await charger().catch((e) => { message.value = { text: e.message, type: 'erreur' } })
 })
 watch(immeubleId, charger)
-watch(annee, preparer)
+watch(year, preparer)
 
 // Every year from the first stay of the building to the current one (plus any year that already has a provision)
 const annees = computed(() => {
-  const courante = new Date().getFullYear()
-  const premiere = Math.min(courante, ...sejours.value.map((s) => Number(s.entree.slice(0, 4))))
-  const toutes = new Set(provisions.value.map((p) => p.annee))
-  for (let a = premiere; a <= courante; a++) {
+  const current = new Date().getFullYear()
+  const premiere = Math.min(current, ...tenancies.value.map((s) => Number(s.move_in.slice(0, 4))))
+  const toutes = new Set(advances.value.map((p) => p.year))
+  for (let a = premiere; a <= current; a++) {
     toutes.add(a)
   }
   return [...toutes].sort((a, b) => b - a)
@@ -56,28 +56,28 @@ const annees = computed(() => {
 
 // Sum of the stored amounts (decimal, not float)
 const total = computed(() =>
-  saisies.value.reduce((sum, s) => (s.provision ? sum.plus(s.provision.montant) : sum), new Big(0)).toString())
+  saisies.value.reduce((sum, s) => (s.charge_advance ? sum.plus(s.charge_advance.amount) : sum), new Big(0)).toString())
 
-const presence = (s: Sejour) => {
-  const debut = s.entree > `${annee.value}-01-01` ? s.entree : `${annee.value}-01-01`
-  const fin = s.sortie !== null && s.sortie < `${annee.value}-12-31` ? s.sortie : `${annee.value}-12-31`
-  return `${dateFr(debut)} → ${dateFr(fin)}`
+const attendance = (s: Sejour) => {
+  const start = s.move_in > `${year.value}-01-01` ? s.move_in : `${year.value}-01-01`
+  const end = s.move_out !== null && s.move_out < `${year.value}-12-31` ? s.move_out : `${year.value}-12-31`
+  return `${dateFr(start)} → ${dateFr(end)}`
 }
 
 async function enregistrer(saisie: Saisie) {
   try {
-    const montant = nombreApi(saisie.montant)
-    if (montant === null) {
-      if (saisie.provision?.id && confirm('Montant vide : supprimer la provision de cette année ?')) {
-        await api.supprimerProvision(saisie.provision.id)
+    const amount = nombreApi(saisie.amount)
+    if (amount === null) {
+      if (saisie.charge_advance?.id && confirm('Montant vide : supprimer la provision de cette année ?')) {
+        await api.supprimerProvision(saisie.charge_advance.id)
       }
     } else {
-      await api.enregistrerProvision({ sejour_id: saisie.sejour.id, annee: annee.value, montant, note: saisie.note || null })
+      await api.enregistrerProvision({ tenancy_id: saisie.tenancy.id, year: year.value, amount, note: saisie.note || null })
     }
-    message.value = { texte: `Provision ${annee.value} de ${saisie.sejour.locataire} enregistrée`, type: 'info' }
+    message.value = { text: `Provision ${year.value} de ${saisie.tenancy.tenant} enregistrée`, type: 'info' }
     await charger()
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 </script>
@@ -86,7 +86,7 @@ async function enregistrer(saisie: Saisie) {
   <section class="entete-page">
     <h1>Provisions</h1>
     <label>Année
-      <select v-model="annee">
+      <select v-model="year">
         <option v-for="a in annees" :key="a" :value="a">{{ a }}</option>
       </select>
     </label>
@@ -96,25 +96,25 @@ async function enregistrer(saisie: Saisie) {
     (écran Paiements), ses provisions en sont la somme ; sinon, on saisit ici le total de l'année (historique). Un
     exercice sur plusieurs années additionne les années concernées (R9).
   </p>
-  <p v-if="message" class="message" :class="message.type">{{ message.texte }}</p>
+  <p v-if="message" class="message" :class="message.type">{{ message.text }}</p>
 
   <table class="liste">
     <thead>
-      <tr><th>Lot</th><th>Locataire</th><th>Présence en {{ annee }}</th><th class="nombre">Provisions {{ annee }}</th><th>Note</th><th /></tr>
+      <tr><th>Lot</th><th>Locataire</th><th>Présence en {{ year }}</th><th class="nombre">Provisions {{ year }}</th><th>Note</th><th /></tr>
     </thead>
     <tbody>
-      <tr v-for="s in saisies" :key="s.sejour.id" class="sans-clic">
-        <td>{{ s.sejour.lot }}</td>
-        <td>{{ s.sejour.locataire }}</td>
-        <td>{{ presence(s.sejour) }}</td>
-        <template v-if="s.provision?.source === 'paiements'">
-          <td class="nombre">{{ euros(s.provision.montant) }}</td>
+      <tr v-for="s in saisies" :key="s.tenancy.id" class="sans-clic">
+        <td>{{ s.tenancy.unit }}</td>
+        <td>{{ s.tenancy.tenant }}</td>
+        <td>{{ attendance(s.tenancy) }}</td>
+        <template v-if="s.charge_advance?.source === 'payments'">
+          <td class="nombre">{{ euros(s.charge_advance.amount) }}</td>
           <td colspan="2" class="discret">
-            Somme des provisions des <RouterLink to="/paiements">paiements mensuels</RouterLink> de {{ annee }}
+            Somme des provisions des <RouterLink to="/paiements">paiements mensuels</RouterLink> de {{ year }}
           </td>
         </template>
         <template v-else>
-          <td class="nombre"><input v-model="s.montant" class="nombre" size="10" :placeholder="s.provision ? '' : 'non saisi'"></td>
+          <td class="nombre"><input v-model="s.amount" class="nombre" size="10" :placeholder="s.charge_advance ? '' : 'non saisi'"></td>
           <td><input v-model="s.note" size="28" placeholder="ex. 7 × 130 + 5 × 170"></td>
           <td><button type="button" @click="enregistrer(s)">Enregistrer</button></td>
         </template>

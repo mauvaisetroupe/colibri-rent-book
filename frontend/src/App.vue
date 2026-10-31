@@ -8,7 +8,7 @@ import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { api } from './api'
 import { useImmeuble } from './immeuble'
 
-const { immeubles, immeubleId } = useImmeuble()
+const { buildings, immeubleId } = useImmeuble()
 const route = useRoute()
 
 // The menu follows the cycle of an exercise (OpenVue Menubar): one group per step, its screens in a sub-menu; the
@@ -53,10 +53,10 @@ const REGLAGES: Entree[] = [
 // The current screen: the most precise route of the menu the path starts with (/banque/releves is not /banque)
 const routes = (entrees: Entree[]): string[] => entrees.flatMap((e) => [...(e.route ? [e.route] : []), ...routes(e.items ?? [])])
 const TOUTES = ['/', ...routes(GROUPES.flatMap((g) => g.items)), '/immeuble', '/societe', '/fournisseurs']
-const courante = computed(() => TOUTES
+const current = computed(() => TOUTES
   .filter((r) => (r === '/' ? route.path === '/' : route.path === r || route.path.startsWith(`${r}/`)))
   .sort((a, b) => b.length - a.length)[0] ?? null)
-const actif = (r: string) => courante.value === r
+const actif = (r: string) => current.value === r
 const contientActif = (e: Entree): boolean => (e.route ? actif(e.route) : false) || (e.items ?? []).some(contientActif)
 
 // The current screen and the groups that hold it are shown as active
@@ -85,7 +85,7 @@ onMounted(async () => {
   version.value = (await api.sante().catch(() => null))?.version ?? null
 })
 
-const reglages = ref<InstanceType<typeof Menu> | null>(null)
+const settings = ref<InstanceType<typeof Menu> | null>(null)
 const menuReglages = computed<MenuItem[]>(() => [
   ...REGLAGES.map((r) => ({ ...r, class: { actif: actif(r.route!) } })),
   { separator: true },
@@ -128,12 +128,12 @@ const reglageActif = computed(() => REGLAGES.some((r) => actif(r.route!)))
 
       <template #end>
         <div class="droite">
-          <select v-if="immeubles.length > 1" v-model="immeubleId" class="choix-immeuble" aria-label="Immeuble">
-            <option v-for="i in immeubles" :key="i.id" :value="i.id">{{ i.nom }}</option>
+          <select v-if="buildings.length > 1" v-model="immeubleId" class="choix-immeuble" aria-label="Immeuble">
+            <option v-for="i in buildings" :key="i.id" :value="i.id">{{ i.name }}</option>
           </select>
           <button
             type="button" class="reglages-bouton" :class="{ actif: reglageActif }" aria-haspopup="true"
-            @click="reglages?.toggle($event)"
+            @click="settings?.toggle($event)"
           ><span class="oi oi-cog" /><span class="reglages-texte"> Réglages</span> <span class="oi oi-angle-down" /></button>
           <Menu ref="reglages" :model="menuReglages" :popup="true">
             <template #item="{ item, props }">

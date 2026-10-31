@@ -8,28 +8,28 @@ import pdfmake from './pdfmake.js'
 // agenda, resolutions with the outcome of the vote, room for the signatures. A draft prints as a project.
 
 const GRIS = '#57606a'
-const TYPES = { ordinaire: 'ordinaire', extraordinaire: 'extraordinaire' }
-const PRESENCES = { present: 'présent', represente: 'représenté', absent: 'absent' }
+const TYPES = { ordinary: 'ordinaire', extraordinary: 'extraordinaire' }
+const PRESENCES = { present: 'présent', represented: 'représenté', absent: 'absent' }
 
-const pourcent = (parts: number, total: number) => (total ? `${Math.round((parts / total) * 10000) / 100} %` : '')
+const pourcent = (shares: number, total: number) => (total ? `${Math.round((shares / total) * 10000) / 100} %` : '')
 
 function vote(r: Assemblee['resolutions'][number], presentes: number): string {
   if (r.unanimite) {
     return 'Cette résolution est adoptée à l\'unanimité des associés présents ou représentés.'
   }
-  const detail = `pour : ${r.pour} parts, contre : ${r.contre}, abstention : ${r.abstention}, sur ${presentes} parts présentes ou représentées`
+  const detail = `pour : ${r.votes_for} parts, contre : ${r.votes_against}, abstention : ${r.abstentions}, sur ${presentes} parts présentes ou représentées`
   return r.adoptee ? `Cette résolution est adoptée (${detail}).` : `Cette résolution est rejetée (${detail}).`
 }
 
-function definition(a: Assemblee, societe: Societe | null): TDocumentDefinitions {
-  const titre = `Procès-verbal de l'assemblée générale ${TYPES[a.type]} du ${frenchDate(a.date)}`
-  const presents = a.presences.filter((p) => p.presence !== 'absent')
-  const entete: Content[] = societe
+function definition(a: Assemblee, company: Societe | null): TDocumentDefinitions {
+  const title = `Procès-verbal de l'assemblée générale ${TYPES[a.type]} du ${frenchDate(a.date)}`
+  const presents = a.attendances.filter((p) => p.status !== 'absent')
+  const entete: Content[] = company
     ? [
-        { text: `${societe.denomination}`, style: 'societe' },
-        { text: [societe.forme, societe.capital ? `au capital de ${euros(societe.capital)}` : null].filter(Boolean).join(' ') },
-        ...(societe.siege ? [{ text: `Siège social : ${societe.siege}` }] : []),
-        ...(societe.rcs ? [{ text: societe.rcs }] : []),
+        { text: `${company.name}`, style: 'company' },
+        { text: [company.legal_form, company.capital ? `au capital de ${euros(company.capital)}` : null].filter(Boolean).join(' ') },
+        ...(company.registered_office ? [{ text: `Siège social : ${company.registered_office}` }] : []),
+        ...(company.rcs ? [{ text: company.rcs }] : []),
       ]
     : [{ text: 'Société (fiche à compléter)', color: GRIS }]
 
@@ -38,28 +38,28 @@ function definition(a: Assemblee, societe: Societe | null): TDocumentDefinitions
     pageMargins: [50, 50, 50, 50],
     defaultStyle: { font: 'Roboto', fontSize: 10, color: '#1f2328', lineHeight: 1.2 },
     styles: {
-      societe: { fontSize: 13, bold: true },
-      titre: { fontSize: 14, bold: true, alignment: 'center', margin: [0, 18, 0, 4] },
+      company: { fontSize: 13, bold: true },
+      title: { fontSize: 14, bold: true, alignment: 'center', margin: [0, 18, 0, 4] },
       h2: { fontSize: 11, bold: true, margin: [0, 14, 0, 4] },
       petit: { fontSize: 8, color: GRIS },
     },
-    info: { title: titre },
+    info: { title: title },
     footer: (page: number, pages: number) => ({
-      text: `${a.numero ? `Registre n° ${a.numero} – ` : ''}${page} / ${pages}`, alignment: 'right', style: 'petit', margin: [0, 15, 50, 0],
+      text: `${a.number ? `Registre n° ${a.number} – ` : ''}${page} / ${pages}`, alignment: 'right', style: 'petit', margin: [0, 15, 50, 0],
     }),
-    ...(a.statut === 'brouillon'
+    ...(a.status === 'draft'
       ? { watermark: { text: 'PROJET', color: '#cf222e', opacity: 0.12, bold: true } }
       : {}),
     content: [
       ...entete,
-      { text: titre, style: 'titre' },
-      ...(a.statut === 'brouillon'
+      { text: title, style: 'title' },
+      ...(a.status === 'draft'
         ? [{ text: 'Projet – assemblée non close', alignment: 'center' as const, color: '#cf222e', bold: true }]
-        : [{ text: `Registre des décisions, procès-verbal n° ${a.numero}`, alignment: 'center' as const, color: GRIS }]),
+        : [{ text: `Registre des décisions, procès-verbal n° ${a.number}`, alignment: 'center' as const, color: GRIS }]),
       {
-        text: `Le ${frenchDate(a.date)}${a.heure ? ` à ${a.heure}` : ''}${a.lieu ? `, ${a.lieu}` : ''}, les associés de la société se `
+        text: `Le ${frenchDate(a.date)}${a.time ? ` à ${a.time}` : ''}${a.place ? `, ${a.place}` : ''}, les associés de la société se `
           + `sont réunis en assemblée générale ${TYPES[a.type]}.`
-          + (a.president ? ` L'assemblée est présidée par ${a.president}.` : ''),
+          + (a.chair ? ` L'assemblée est présidée par ${a.chair}.` : ''),
         margin: [0, 14, 0, 0],
       },
 
@@ -69,30 +69,30 @@ function definition(a: Assemblee, societe: Societe | null): TDocumentDefinitions
           widths: ['*', 60, 60, 150],
           body: [
             ['Associé', 'Parts', 'Part du capital', 'Présence'].map((t) => ({ text: t, bold: true })),
-            ...a.presences.map((p) => [
-              `${p.nom}${p.gerant ? ' (gérant)' : ''}`, String(p.parts), pourcent(p.parts, a.parts_total),
-              `${PRESENCES[p.presence]}${p.presence === 'represente' && p.represente_par ? ` par ${p.represente_par}` : ''}`,
+            ...a.attendances.map((p) => [
+              `${p.name}${p.manager ? ' (gérant)' : ''}`, String(p.shares), pourcent(p.shares, a.total_shares),
+              `${PRESENCES[p.status]}${p.status === 'represented' && p.represented_by ? ` par ${p.represented_by}` : ''}`,
             ]),
           ],
         },
         layout: 'lightHorizontalLines',
       },
       {
-        text: `Associés présents ou représentés : ${presents.length} sur ${a.presences.length}, détenant ${a.parts_presentes} parts sur `
-          + `${a.parts_total} (${pourcent(a.parts_presentes, a.parts_total)}). L'assemblée peut valablement délibérer.`,
+        text: `Associés présents ou représentés : ${presents.length} sur ${a.attendances.length}, détenant ${a.shares_present} parts sur `
+          + `${a.total_shares} (${pourcent(a.shares_present, a.total_shares)}). L'assemblée peut valablement délibérer.`,
         margin: [0, 6, 0, 0],
       },
 
       { text: 'Ordre du jour', style: 'h2' },
-      { text: a.ordre_du_jour || '—' },
+      { text: a.agenda || '—' },
 
       { text: 'Résolutions', style: 'h2' },
       ...a.resolutions.flatMap((r): Content[] => [
-        { text: `Résolution n° ${r.ordre} : ${r.titre}`, bold: true, margin: [0, 8, 0, 2] },
-        { text: r.texte },
-        { text: vote(r, a.parts_presentes), italics: true, margin: [0, 2, 0, 0] },
+        { text: `Résolution n° ${r.position} : ${r.title}`, bold: true, margin: [0, 8, 0, 2] },
+        { text: r.text },
+        { text: vote(r, a.shares_present), italics: true, margin: [0, 2, 0, 0] },
       ]),
-      ...(a.observations ? [{ text: 'Observations', style: 'h2' }, { text: a.observations }] : []),
+      ...(a.remarks ? [{ text: 'Observations', style: 'h2' }, { text: a.remarks }] : []),
 
       // The closing words and the signatures on the same page
       {
@@ -106,8 +106,8 @@ function definition(a: Assemblee, societe: Societe | null): TDocumentDefinitions
           {
             margin: [0, 24, 0, 40],
             columns: [
-              { stack: [{ text: 'Le président de séance', bold: true }, a.president ?? ''], width: '*' },
-              { stack: [{ text: 'Les associés', bold: true }, ...presents.map((p) => p.nom)], width: '*' },
+              { stack: [{ text: 'Le président de séance', bold: true }, a.chair ?? ''], width: '*' },
+              { stack: [{ text: 'Les associés', bold: true }, ...presents.map((p) => p.name)], width: '*' },
             ],
           },
         ],
@@ -116,5 +116,5 @@ function definition(a: Assemblee, societe: Societe | null): TDocumentDefinitions
   }
 }
 
-export const pvPdf = async (a: Assemblee, societe: Societe | null) =>
-  Buffer.from(await pdfmake.createPdf(definition(a, societe)).getBuffer())
+export const pvPdf = async (a: Assemblee, company: Societe | null) =>
+  Buffer.from(await pdfmake.createPdf(definition(a, company)).getBuffer())

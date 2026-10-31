@@ -19,7 +19,7 @@ import { comparer, decomptesDesPeriodes, SEUIL_RECTIFICATION } from '../rectific
 
 const router = useRouter()
 const { immeubleId: building, pret: ready } = useImmeuble()
-const regularisations = ref<Regularisation[]>([])
+const charge_adjustments = ref<Regularisation[]>([])
 const error = ref<string | null>(null)
 const statements = ref(new Map<string, Decompte>())
 
@@ -28,7 +28,7 @@ async function load() {
     return
   }
   try {
-    regularisations.value = await api.regularisations(building.value)
+    charge_adjustments.value = await api.charge_adjustments(building.value)
     error.value = null
     statements.value = await decomptesDesPeriodes(building.value, current.value)
   } catch (e) {
@@ -43,33 +43,33 @@ onMounted(async () => {
 watch(building, load)
 
 // Not replaced by a corrective one
-const current = computed(() => regularisations.value.filter((r) => !r.remplacee_par))
+const current = computed(() => charge_adjustments.value.filter((r) => !r.replaced_by))
 const comparisons = computed(() => new Map(current.value.map((r) => [r.id, comparer(r, statements.value)])))
 
 // Fields computed here, shown and filtered under their column: what is left to pay, the state shown, the gap with
 // the statement recomputed today
 const GAPS = { juste: '✓ juste', arrondi: 'écart faible', a_rectifier: 'à rectifier', a_recreer: 'à recréer' }
 type Gap = keyof typeof GAPS
-const remaining = (r: Regularisation) => new Big(r.solde).minus(r.montant_recu).toFixed(2)
+const remaining = (r: Regularisation) => new Big(r.balance).minus(r.amount_received).toFixed(2)
 
 // Latest first
 const rows = computed(() => [...current.value]
-  .sort((a, b) => b.fin.localeCompare(a.fin) || b.debut.localeCompare(a.debut) || a.lot.localeCompare(b.lot))
+  .sort((a, b) => b.end.localeCompare(a.end) || b.start.localeCompare(a.start) || a.unit.localeCompare(b.unit))
   .map((r) => ({
-    ...r, remaining: r.etat === 'brouillon' ? null : remaining(r), state: libelleRegularisation(r),
-    gap: comparisons.value.get(r.id)?.etat ?? null,
+    ...r, remaining: r.state === 'draft' ? null : remaining(r), state: libelleRegularisation(r),
+    gap: comparisons.value.get(r.id)?.state ?? null,
   })))
 type Row = (typeof rows.value)[number]
 
 const defaultFilters = (): Filters => ({
-  debut: contains(), fin: contains(), lot: equals(), locataire: equals(), solde: contains(), montant_recu: contains(),
+  start: contains(), end: contains(), unit: equals(), tenant: equals(), balance: contains(), amount_received: contains(),
   remaining: contains(), state: equals(), gap: equals(),
 })
 const filters = ref<Filters>(defaultFilters())
 const table = ref<FilteredTable<Row>>(null)
 const shown = computed(() => table.value?.processedData ?? [])
 
-const badge = (r: Regularisation) => (r.etat === 'brouillon' ? 'a_verifier' : r.decision ? 'decision' : r.etat)
+const badge = (r: Regularisation) => (r.state === 'draft' ? 'draft' : r.decision ? 'decision' : r.state)
 </script>
 
 <template>
@@ -92,48 +92,48 @@ const badge = (r: Regularisation) => (r.etat === 'brouillon' ? 'a_verifier' : r.
   <!-- Short columns at a fixed width; the tenant and the state take the rest -->
   <DataTable
     ref="table" v-model:filters="filters" :value="rows" data-key="id" filter-display="row" size="small"
-    state-storage="session" :state-key="stateKey('regularisations')" class="clickable"
-    @row-click="router.push({ name: 'regularisation', params: { id: $event.data.id } })"
+    state-storage="session" :state-key="stateKey('charge_adjustments')" class="clickable"
+    @row-click="router.push({ name: 'charge_adjustment', params: { id: $event.data.id } })"
     @state-restore="filters = withDefaults(defaultFilters(), $event.filters)"
   >
     <template #empty>Aucune régularisation.</template>
     <!-- The period regularised: its first day and its last one -->
-    <Column field="debut" header="Début" sortable :show-filter-menu="false" style="width: 7.5rem">
+    <Column field="start" header="Début" sortable :show-filter-menu="false" style="width: 7.5rem">
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
-    <Column field="fin" header="Fin" sortable :show-filter-menu="false" style="width: 7.5rem">
+    <Column field="end" header="Fin" sortable :show-filter-menu="false" style="width: 7.5rem">
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
-    <Column field="lot" header="Lot" sortable :show-filter-menu="false" style="width: 7rem">
+    <Column field="unit" header="Lot" sortable :show-filter-menu="false" style="width: 7rem">
       <template #filter="{ filterModel, filterCallback }">
-        <ColumnFilter :model="filterModel" :apply="filterCallback" :options="distinctOptions(rows.map((r) => r.lot))" />
+        <ColumnFilter :model="filterModel" :apply="filterCallback" :options="distinctOptions(rows.map((r) => r.unit))" />
       </template>
     </Column>
-    <Column field="locataire" header="Locataire" sortable :show-filter-menu="false">
+    <Column field="tenant" header="Locataire" sortable :show-filter-menu="false">
       <template #body="{ data }">
-        {{ data.locataire }}
-        <span v-if="data.remplace_id" class="discret"> · rectificatif</span>
+        {{ data.tenant }}
+        <span v-if="data.replaces_id" class="discret"> · rectificatif</span>
       </template>
       <template #filter="{ filterModel, filterCallback }">
-        <ColumnFilter :model="filterModel" :apply="filterCallback" :options="distinctOptions(rows.map((r) => r.locataire))" />
+        <ColumnFilter :model="filterModel" :apply="filterCallback" :options="distinctOptions(rows.map((r) => r.tenant))" />
       </template>
     </Column>
-    <Column field="solde" header="Solde" body-class="nombre" header-class="nombre" :show-filter-menu="false" style="width: 7.5rem">
-      <template #body="{ data }"><strong>{{ data.solde }}</strong></template>
+    <Column field="balance" header="Solde" body-class="nombre" header-class="nombre" :show-filter-menu="false" style="width: 7.5rem">
+      <template #body="{ data }"><strong>{{ data.balance }}</strong></template>
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
-    <Column field="montant_recu" header="Reçu" body-class="nombre" header-class="nombre" :show-filter-menu="false" style="width: 7.5rem">
-      <template #body="{ data }">{{ data.etat === 'brouillon' ? '' : data.montant_recu }}</template>
+    <Column field="amount_received" header="Reçu" body-class="nombre" header-class="nombre" :show-filter-menu="false" style="width: 7.5rem">
+      <template #body="{ data }">{{ data.state === 'draft' ? '' : data.amount_received }}</template>
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
     <Column field="remaining" header="Reste" body-class="nombre" header-class="nombre" :show-filter-menu="false" style="width: 7.5rem">
-      <template #body="{ data }"><strong :class="{ ok: data.etat === 'soldee' }">{{ data.remaining }}</strong></template>
+      <template #body="{ data }"><strong :class="{ ok: data.state === 'settled' }">{{ data.remaining }}</strong></template>
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
     <Column field="state" header="Statut" :show-filter-menu="false">
       <template #body="{ data }">
         <span class="pastille" :class="badge(data)">{{ data.state }}</span>
-        <span v-if="data.date_envoi" class="discret"> envoyée le {{ data.date_envoi }}</span>
+        <span v-if="data.sent_on" class="discret"> envoyée le {{ data.sent_on }}</span>
       </template>
       <template #filter="{ filterModel, filterCallback }">
         <ColumnFilter :model="filterModel" :apply="filterCallback" :options="distinctOptions(rows.map((r) => r.state))" />
@@ -146,7 +146,7 @@ const badge = (r: Regularisation) => (r.etat === 'brouillon' ? 'a_verifier' : r.
           <span v-else-if="data.gap === 'arrondi'" class="discret" title="Écart faible, sans rectificatif">
             {{ comparisons.get(data.id)!.ecart }}
           </span>
-          <span v-else class="a-rectifier" :title="`Décompte actuel : ${comparisons.get(data.id)!.actuel.solde}`">
+          <span v-else class="a-rectifier" :title="`Décompte actuel : ${comparisons.get(data.id)!.actuel.balance}`">
             {{ GAPS[data.gap as Gap] }} {{ comparisons.get(data.id)!.ecart }}
           </span>
         </template>

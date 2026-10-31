@@ -4,10 +4,10 @@ import { test } from 'node:test'
 import type { Regularisation } from './api'
 import { regularisationCourante } from './rectification'
 
-const regularisation = (id: number, remplacee_par: number | null) => ({ id, remplacee_par }) as Regularisation
+const charge_adjustment = (id: number, replaced_by: number | null) => ({ id, replaced_by }) as Regularisation
 
 test('a payment toward a corrected regularisation goes to its last corrective one', () => {
-  const regs = [regularisation(7, 19), regularisation(19, 25), regularisation(25, null), regularisation(8, null)]
+  const regs = [charge_adjustment(7, 19), charge_adjustment(19, 25), charge_adjustment(25, null), charge_adjustment(8, null)]
   assert.equal(regularisationCourante(7, regs), 25)
   assert.equal(regularisationCourante(19, regs), 25)
   assert.equal(regularisationCourante(8, regs), 8)

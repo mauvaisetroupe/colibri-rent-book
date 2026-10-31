@@ -8,215 +8,215 @@ import type { Affectation, Categorie, Energie, Reglages } from './extraction/con
 
 export type { Affectation, Categorie, Energie }
 // remplacee: a validated invoice replaced by another one, or corrected (ADR 0017); out of the statements
-export type Statut = 'a_verifier' | 'validee' | 'remplacee'
-export const STATUTS: Record<Statut, string> = { a_verifier: 'Brouillon', validee: 'Validée', remplacee: 'Remplacée' }
+export type Statut = 'draft' | 'validated' | 'replaced'
+export const STATUTS: Record<Statut, string> = { draft: 'Brouillon', validated: 'Validée', replaced: 'Remplacée' }
 
-export const CATEGORIES: Categorie[] = ['consommation', 'abonnement', 'taxe', 'prestation', 'penalite', 'autre']
+export const CATEGORIES: Categorie[] = ['consumption', 'subscription', 'tax', 'service', 'penalty', 'other']
 // ADR 0013: recoverable (allocated), borne by the owner (tax summary), about another property (left out)
 export const AFFECTATIONS: Record<Affectation, string> = {
-  recuperable: 'récupérable',
-  proprietaire: 'propriétaire',
-  hors_immeuble: 'hors immeuble',
+  recoverable: 'récupérable',
+  owner: 'propriétaire',
+  outside_building: 'hors immeuble',
 }
 export const ENERGIES: Record<Energie, string> = {
-  gaz: 'Gaz',
-  electricite: 'Électricité',
-  eau: 'Eau',
-  ordures_menageres: 'Ordures ménagères',
-  autre: 'Autre',
+  gas: 'Gaz',
+  electricity: 'Électricité',
+  water: 'Eau',
+  household_waste: 'Ordures ménagères',
+  other: 'Autre',
 }
 
 export type Immeuble = {
   id: number
   code: string
-  nom: string
-  adresse: string | null
+  name: string
+  address: string | null
   // ADR 0023: start of the management in the application (before: an agency, or nothing)
-  debut_gestion: string | null
-  nb_lots: number
-  total_tantiemes: number
+  managed_from: string | null
+  unit_count: number
+  total_charge_shares: number
 }
 
 export type Lot = {
   id: number
-  immeuble_id: number
+  building_id: number
   code: string
-  designation: string | null
-  surface_m2: string | null
-  tantiemes: number
+  label: string | null
+  area_m2: string | null
+  charge_shares: number
 }
 
-export type ImmeubleDetail = Omit<Immeuble, 'nb_lots'> & { lots: Lot[] }
+export type ImmeubleDetail = Omit<Immeuble, 'unit_count'> & { units: Lot[] }
 
 export type Locataire = {
   id: number
-  nom: string
+  name: string
   email: string | null
-  telephone: string | null
+  phone: string | null
   note: string | null
-  nb_sejours: number
+  tenancy_count: number
 }
 
 export type Sejour = {
   id: number
-  lot_id: number
-  lot: string
-  locataire_id: number
-  locataire: string
-  entree: string
+  unit_id: number
+  unit: string
+  tenant_id: number
+  tenant: string
+  move_in: string
   // null while the stay goes on
-  sortie: string | null
+  move_out: string | null
   note: string | null
   // Deposit of the lease
-  depot_garantie: string | null
+  security_deposit: string | null
   // Kept (ADR 0021): the retention, toward unpaid months or regularisations; null without any
-  depot_retenu: string | null
+  deposit_retained: string | null
   // Held (ADR 0019, 0021): paid minus refunded minus kept; null without any deposit or retention recorded
-  depot_detenu: string | null
+  deposit_held: string | null
 }
 
 // A deposit paid by a tenant (positive) or refunded to them (negative), seen on a bank statement when linked (ADR 0019)
 export type VersementDepot = {
   id: number
-  sejour_id: number
-  locataire: string
-  lot: string
-  date_versement: string
-  montant: string
-  mouvement_id: number | null
+  tenancy_id: number
+  tenant: string
+  unit: string
+  payment_date: string
+  amount: string
+  bank_transaction_id: number | null
   note: string | null
 }
 // A line of the retention on the deposit: an unpaid month, or a regularisation still open
-export type LigneRetenue = { mois: string, loyer: string, provision: string } | { regularisation_id: number, regularisation: string }
+export type LigneRetenue = { month: string, rent: string, charge_advance: string } | { charge_adjustment_id: number, charge_adjustment: string }
 
-export type VersementDepotSaisi = Omit<VersementDepot, 'id' | 'locataire' | 'lot' | 'mouvement_id'> & { mouvement_id?: number | null }
+export type VersementDepotSaisi = Omit<VersementDepot, 'id' | 'tenant' | 'unit' | 'bank_transaction_id'> & { bank_transaction_id?: number | null }
 
 export type Provision = {
   // id of the yearly total entered by hand (null when the amount comes from the monthly payments)
   id: number | null
-  sejour_id: number
-  annee: number
-  montant: string
-  source: 'paiements' | 'saisie'
+  tenancy_id: number
+  year: number
+  amount: string
+  source: 'payments' | 'entered'
   note: string | null
-  locataire: string
-  lot: string
+  tenant: string
+  unit: string
 }
 
-export type Exercice = { immeuble: number, debut: string, fin: string }
+export type Exercice = { building: number, start: string, end: string }
 
 export const COLONNES_DECOMPTE = {
-  gaz_consommation: 'Gaz conso',
-  gaz_autres: 'Gaz autres',
-  electricite_consommation: 'Élec. conso',
-  electricite_autres: 'Élec. autres',
-  eau: 'Eau',
-  ordures_menageres: 'Ordures ménagères',
+  gas_consumption: 'Gaz conso',
+  gas_other: 'Gaz autres',
+  electricity_consumption: 'Élec. conso',
+  electricity_other: 'Élec. autres',
+  water: 'Eau',
+  household_waste: 'Ordures ménagères',
 } as const
 
 export type ColonneDecompte = keyof typeof COLONNES_DECOMPTE
 
 export type LigneDecompte = {
-  sejour_id: number
-  locataire: string
-  lot: string
-  tantiemes: number
-  present_du: string | null
-  present_au: string | null
-  jours: number
+  tenancy_id: number
+  tenant: string
+  unit: string
+  charge_shares: number
+  present_from: string | null
+  present_to: string | null
+  days: number
   total: string
-  provisions: string
-  solde: string
+  advances: string
+  balance: string
 } & Record<ColonneDecompte, string>
 
 export type Decompte = Exercice & {
-  sejours: LigneDecompte[]
-  synthese: { energie: Energie, factures: string, locataires: string, proprietaire: string }[]
+  tenancies: LigneDecompte[]
+  summary: { energy: Energie, invoices: string, tenants: string, owner: string }[]
   avertissements: string[]
 }
 
 export type LigneDetail = {
-  ligne_id: number
-  facture_id: number
-  fournisseur: string
-  numero: string
-  date_facture: string
-  energie: Energie
-  categorie: Categorie
-  libelle: string
-  debut: string
-  fin: string
-  jours_ligne: number
-  montant_ligne: string
-  sejour_id: number | null
-  locataire: string | null
-  lot: string | null
-  jours: number
-  montant: string
+  invoice_line_id: number
+  invoice_id: number
+  supplier: string
+  number: string
+  invoice_date: string
+  energy: Energie
+  category: Categorie
+  label: string
+  start: string
+  end: string
+  line_days: number
+  line_amount: string
+  tenancy_id: number | null
+  tenant: string | null
+  unit: string | null
+  days: number
+  amount: string
 }
 
-export type Plage = { debut: string, fin: string }
+export type Plage = { start: string, end: string }
 
-type LigneCouvrante = { facture_id: number, fournisseur: string, numero: string, libelle: string } & Plage
+type LigneCouvrante = { invoice_id: number, supplier: string, number: string, label: string } & Plage
 
 export type Couverture = Exercice & {
-  energies: { energie: Energie, couvert: Plage[], trous: Plage[] }[]
-  chevauchements: (Plage & { energie: Energie, ligne_a: LigneCouvrante, ligne_b: LigneCouvrante })[]
-  brouillons: { id: number, fournisseur: string, numero: string, energie: Energie, date_facture: string }[]
+  energies: { energy: Energie, covered: Plage[], trous: Plage[] }[]
+  chevauchements: (Plage & { energy: Energie, line_a: LigneCouvrante, line_b: LigneCouvrante })[]
+  brouillons: { id: number, supplier: string, number: string, energy: Energie, invoice_date: string }[]
 }
 
 export type Regularisation = {
   id: number
-  sejour_id: number
-  locataire: string
+  tenancy_id: number
+  tenant: string
   email: string | null
-  lot: string
-  immeuble_id: number
-  debut: string
-  fin: string
-  montant_du: string
-  provisions: string
-  solde: string
+  unit: string
+  building_id: number
+  start: string
+  end: string
+  amount_due: string
+  advances: string
+  balance: string
   // Computed (ADR 0010): brouillon (not sent), en_attente (sent, still to be paid), soldee (paid within 1 euro)
-  etat: 'brouillon' | 'en_attente' | 'soldee'
+  state: 'draft' | 'pending' | 'settled'
   // The only thing chosen by the owner: what remains is given up, or unrecoverable
-  decision: 'abandonnee' | 'irrecouvrable' | null
-  date_envoi: string | null
+  decision: 'written_off' | 'unrecoverable' | null
+  sent_on: string | null
   // Payments received, previous regularisations of a corrective chain included
-  montant_recu: string
-  date_solde: string | null
-  remplace_id: number | null
-  remplacee_par: number | null
+  amount_received: string
+  settled_on: string | null
+  replaces_id: number | null
+  replaced_by: number | null
   // false: entered by hand (sent outside the application), no supporting document
-  justificatif: boolean
+  supporting_statement: boolean
   note: string | null
 }
 
-export const ETATS_REGULARISATION: Record<Regularisation['etat'], string> = {
-  brouillon: 'Brouillon', en_attente: 'En attente', soldee: 'Soldée',
+export const ETATS_REGULARISATION: Record<Regularisation['state'], string> = {
+  draft: 'Brouillon', pending: 'En attente', settled: 'Soldée',
 }
 
 export const DECISIONS_REGULARISATION: Record<NonNullable<Regularisation['decision']>, string> = {
-  abandonnee: 'Abandonnée', irrecouvrable: 'Irrécouvrable',
+  written_off: 'Abandonnée', unrecoverable: 'Irrécouvrable',
 }
 
 /** What to show of a regularisation: the decision when there is one, else its state. */
 export const libelleRegularisation = (r: Regularisation) =>
-  (r.decision ? DECISIONS_REGULARISATION[r.decision] : ETATS_REGULARISATION[r.etat])
+  (r.decision ? DECISIONS_REGULARISATION[r.decision] : ETATS_REGULARISATION[r.state])
 
 /** Still waiting for a payment or a refund: sent, not settled, no decision. */
-export const aEncaisser = (r: Regularisation) => r.etat === 'en_attente' && r.decision === null && !r.remplacee_par
+export const aEncaisser = (r: Regularisation) => r.state === 'pending' && r.decision === null && !r.replaced_by
 
 export type RegularisationDetail = Regularisation & {
-  suggestion: { provision_mensuelle: string | null, provision_a_partir_du: string }
+  suggestion: { monthly_charge_advance: string | null, charge_advance_from: string }
   // What becomes of each invoice in the annexes now (ADR 0024)
-  annexes: { facture_id: number, fournisseur: string, numero: string, etat: EtatAnnexe }[]
+  tenant_copies: { invoice_id: number, supplier: string, number: string, state: EtatAnnexe }[]
 }
 
 export type OptionsMail = {
   etalement: number
-  provision_mensuelle: string | null
-  provision_a_partir_du: string | null
+  monthly_charge_advance: string | null
+  charge_advance_from: string | null
   signature: string
 }
 
@@ -224,334 +224,334 @@ export type Mail = { destinataire: string | null, objet: string, corps: string }
 
 // The modes a payment is typed with; « depot », a retention on the deposit, is made from the stay only (ADR 0021)
 export const MODES_PAIEMENT = {
-  virement: 'Virement', prelevement: 'Prélèvement', cheque: 'Chèque', especes: 'Espèces', autre: 'Autre',
+  transfer: 'Virement', direct_debit: 'Prélèvement', cheque: 'Chèque', cash: 'Espèces', other: 'Autre',
 } as const
-export const NOMS_MODES = { ...MODES_PAIEMENT, depot: 'Retenue sur dépôt' } as const
+export const NOMS_MODES = { ...MODES_PAIEMENT, deposit: 'Retenue sur dépôt' } as const
 
 export type ModePaiement = keyof typeof NOMS_MODES
 
 /** A retention on the deposit (ADR 0021): changed from the stay only, never seen at the bank. */
-export const estRetenue = (p: { mode: ModePaiement | null }) => p.mode === 'depot'
+export const estRetenue = (p: { method: ModePaiement | null }) => p.method === 'deposit'
 
 export type Paiement = {
   id: number
-  sejour_id: number
-  locataire: string
-  lot: string
-  date_paiement: string
+  tenancy_id: number
+  tenant: string
+  unit: string
+  payment_date: string
   // Month of rent covered (1st day), null for a regularisation payment alone
-  mois: string | null
-  loyer: string
-  provision: string
-  regularisation_id: number | null
+  month: string | null
+  rent: string
+  charge_advance: string
+  charge_adjustment_id: number | null
   // Toward a regularisation; negative: refund paid by the owner
-  regularisation: string
-  mode: ModePaiement | null
+  charge_adjustment: string
+  method: ModePaiement | null
   note: string | null
   // Movement of the bank statement it was seen on (ADR 0018)
-  mouvement_id?: number | null
+  bank_transaction_id?: number | null
 }
 
-export type PaiementSaisi = Omit<Paiement, 'id' | 'locataire' | 'lot'> & {
+export type PaiementSaisi = Omit<Paiement, 'id' | 'tenant' | 'unit'> & {
   // Amount received (bank statement): the API checks that rent + provision + regularisation add up to it
-  montant?: string | null
+  amount?: string | null
 }
 
 // Rent and provision called each month from a_partir_du (1st of the month) until the next row of the stay (ADR 0009)
 export type Echeance = {
   id: number
-  sejour_id: number
-  a_partir_du: string
-  loyer: string
-  provision: string
+  tenancy_id: number
+  from_month: string
+  rent: string
+  charge_advance: string
   note: string | null
 }
 
 export type EcheanceSaisie = Omit<Echeance, 'id'>
 
 export type MoisSejour = {
-  sejour_id: number
-  locataire: string
-  lot: string
-  paiements: { id: number, loyer: string, provision: string, date_paiement: string, mode: ModePaiement | null }[] | null
-  precedent: { loyer: string, provision: string, mode: ModePaiement | null } | null
+  tenancy_id: number
+  tenant: string
+  unit: string
+  payments: { id: number, rent: string, charge_advance: string, payment_date: string, method: ModePaiement | null }[] | null
+  previous: { rent: string, charge_advance: string, method: ModePaiement | null } | null
 }
 
 export type SyntheseFiscale = {
-  immeuble: number
-  annee: number
-  vacance: { energie: Energie, montant: string }[]
-  total_vacance: string
+  building: number
+  year: number
+  vacance: { energy: Energie, amount: string }[]
+  total_vacancy: string
   departs: {
-    sejour_id: number
-    locataire: string
-    lot: string
-    entree: string
-    sortie: string
+    tenancy_id: number
+    tenant: string
+    unit: string
+    move_in: string
+    move_out: string
     // The entry, or the start of the management when later (ADR 0023)
-    debut_calcul: string
+    calculation_start: string
     charges: string
-    provisions: string
+    advances: string
     versements: string
-    non_rembourse: string
+    not_refunded: string
     deductible: string
-    depot_retenu: string
+    deposit_retained: string
     incomplet: string[]
   }[]
-  total_non_rembourse: string
-  total_depots_retenus: string
+  total_not_refunded: string
+  total_deposits_retained: string
   total_deductible: string
-  non_recuperables: { facture_id: number, fournisseur: string, numero: string, date_facture: string, libelle: string, montant: string }[]
-  abandons_en_cours: { regularisation_id: number, locataire: string, lot: string, debut: string, fin: string, reste: string }[]
-  travaux: TravauxFiscal[]
-  total_travaux_deductibles: string
-  travaux_non_payes: TravauxFiscal[]
+  non_recoverable: { invoice_id: number, supplier: string, number: string, invoice_date: string, label: string, amount: string }[]
+  pending_write_offs: { charge_adjustment_id: number, tenant: string, unit: string, start: string, end: string, remaining: string }[]
+  works_invoice: TravauxFiscal[]
+  total_deductible_works: string
+  unpaid_works: TravauxFiscal[]
 }
 
 // Works paid by the owner (ADR 0015): deductible according to their nature; paid by bank movements only (ADR 0019),
 // one or several, each in the tax year of its movement
-export type NatureTravaux = 'entretien' | 'amelioration' | 'construction'
+export type NatureTravaux = 'maintenance' | 'improvement' | 'construction'
 export const NATURES_TRAVAUX: Record<NatureTravaux, string> = {
-  entretien: 'Entretien, réparation',
-  amelioration: 'Amélioration',
+  maintenance: 'Entretien, réparation',
+  improvement: 'Amélioration',
   construction: 'Construction, agrandissement',
 }
 
 export type Travaux = {
   id: number
-  immeuble_id: number
-  lot_id: number | null
-  lot: string | null
-  fournisseur: string
+  building_id: number
+  unit_id: number | null
+  unit: string | null
+  supplier: string
   description: string
   nature: NatureTravaux
-  date_facture: string
-  montant_ttc: string
+  invoice_date: string
+  total_incl_tax: string
   pdf: boolean
   note: string | null
   deductible: boolean
-  reglements: ReglementTravaux[]
-  paye: string
-  reste: string
+  payments: ReglementTravaux[]
+  paid: string
+  remaining: string
   // Date of the last payment, null when nothing is paid
-  date_paiement: string | null
+  payment_date: string | null
 }
 
 // One payment of a works invoice: the bank movement that paid it (its date: the tax year), for an amount
-export type ReglementTravaux = { id: number, mouvement_id: number, date_paiement: string, libelle: string, montant: string }
+export type ReglementTravaux = { id: number, bank_transaction_id: number, payment_date: string, label: string, amount: string }
 
 // In the tax summary: one payment of the year (date_paiement, montant), or what remains unpaid (date_paiement null)
-export type TravauxFiscal = Pick<Travaux, 'id' | 'fournisseur' | 'description' | 'nature' | 'lot' | 'date_facture' | 'montant_ttc'
-  | 'deductible'> & { date_paiement: string | null, montant: string }
+export type TravauxFiscal = Pick<Travaux, 'id' | 'supplier' | 'description' | 'nature' | 'unit' | 'invoice_date' | 'total_incl_tax'
+  | 'deductible'> & { payment_date: string | null, amount: string }
 
 // The company, its partners, its general meetings (ADR 0016)
-export type Societe = { denomination: string, forme: string, capital: string | null, siege: string | null, rcs: string | null }
-export type Associe = { id: number, nom: string, parts: number, gerant: boolean, adresse: string | null, note: string | null }
-export type TypeAssemblee = 'ordinaire' | 'extraordinaire'
-export type PresenceAssocie = 'present' | 'represente' | 'absent'
-export const PRESENCES: Record<PresenceAssocie, string> = { present: 'Présent', represente: 'Représenté', absent: 'Absent' }
+export type Societe = { name: string, legal_form: string, capital: string | null, registered_office: string | null, rcs: string | null }
+export type Associe = { id: number, name: string, shares: number, manager: boolean, address: string | null, note: string | null }
+export type TypeAssemblee = 'ordinary' | 'extraordinary'
+export type PresenceAssocie = 'present' | 'represented' | 'absent'
+export const PRESENCES: Record<PresenceAssocie, string> = { present: 'Présent', represented: 'Représenté', absent: 'Absent' }
 
 export type Resolution = {
-  ordre: number
-  titre: string
-  texte: string
-  pour: number
-  contre: number
-  abstention: number
+  position: number
+  title: string
+  text: string
+  votes_for: number
+  votes_against: number
+  abstentions: number
   adoptee: boolean
   unanimite: boolean
 }
 
 export type Assemblee = {
   id: number
-  numero: number | null
+  number: number | null
   type: TypeAssemblee
   date: string
-  heure: string | null
-  lieu: string | null
-  ordre_du_jour: string
-  president: string | null
-  observations: string | null
-  statut: 'brouillon' | 'close'
-  close_le: string | null
-  pv_signe: boolean
-  parts_total: number
-  parts_presentes: number
-  presences: { associe_id: number, nom: string, parts: number, gerant: boolean, presence: PresenceAssocie, represente_par: string | null }[]
+  time: string | null
+  place: string | null
+  agenda: string
+  chair: string | null
+  remarks: string | null
+  status: 'draft' | 'closed'
+  closed_at: string | null
+  signed_minutes: boolean
+  total_shares: number
+  shares_present: number
+  attendances: { partner_id: number, name: string, shares: number, manager: boolean, attendance: PresenceAssocie, represented_by: string | null }[]
   resolutions: Resolution[]
 }
 
-export type AssembleeResumee = Pick<Assemblee, 'id' | 'numero' | 'type' | 'date' | 'statut' | 'pv_signe'> & { nb_resolutions: number }
+export type AssembleeResumee = Pick<Assemblee, 'id' | 'number' | 'type' | 'date' | 'status' | 'signed_minutes'> & { resolution_count: number }
 
 // The invoice only: its payments are bank movements linked to it (« Catégorisation », or the invoice)
-export type TravauxSaisie = Pick<Travaux, 'immeuble_id' | 'lot_id' | 'fournisseur' | 'description' | 'nature'
-  | 'date_facture' | 'montant_ttc' | 'note'>
+export type TravauxSaisie = Pick<Travaux, 'building_id' | 'unit_id' | 'supplier' | 'description' | 'nature'
+  | 'invoice_date' | 'total_incl_tax' | 'note'>
 
 // ---------------------------------------------------------------- bank statements (ADR 0018)
 
 export type Releve = {
   id: number
-  banque: string
-  compte: string
-  date_releve: string
-  solde_precedent: string
-  nouveau_solde: string
+  bank: string
+  account: string
+  statement_date: string
+  previous_balance: string
+  new_balance: string
   pdf: boolean
-  extracteur_id: number | null
-  importe_le: string
+  extractor_id: number | null
+  imported_at: string
 }
 
 // suite: the opening balance is the closing balance of the previous statement of the account (null: the first one)
-export type ReleveResume = Releve & { nb_mouvements: number, suite: boolean | null }
+export type ReleveResume = Releve & { transaction_count: number, suite: boolean | null }
 
 // What a bank movement is (ADR 0018, 0019, 0022), fixed in the code: « locataire », « travaux », « depot_garantie »,
 // « energie », « eau » and « impots » have a detail (the payments of a tenant, the payments of works invoices, the
 // deposits paid or refunded, the invoices of charges paid, linked to it); the others only a note, required for
 // « autre ». sens: the movements it applies to.
-export type CategorieMouvement = 'locataire' | 'travaux' | 'depot_garantie' | 'agence' | 'emprunt' | 'assurance' | 'energie' | 'eau'
-  | 'impots' | 'frais_bancaires' | 'copropriete' | 'honoraires' | 'associes' | 'virement_interne' | 'autre'
-export const CATEGORIES_MOUVEMENT: Record<CategorieMouvement, { nom: string, sens: 'credit' | 'debit' | 'tous', icone: string }> = {
-  locataire: { nom: 'Paiement de locataire', sens: 'tous', icone: 'oi oi-users' },
-  travaux: { nom: 'Travaux', sens: 'debit', icone: 'oi oi-hammer' },
-  depot_garantie: { nom: 'Dépôt de garantie', sens: 'tous', icone: 'oi oi-key' },
-  agence: { nom: 'Versement d\'une agence (gérance)', sens: 'tous', icone: 'oi oi-shop' },
-  emprunt: { nom: 'Emprunt', sens: 'tous', icone: 'oi oi-building-columns' },
-  assurance: { nom: 'Assurance', sens: 'tous', icone: 'oi oi-shield' },
+export type CategorieMouvement = 'tenant' | 'works' | 'security_deposit' | 'agency' | 'loan' | 'insurance' | 'energy' | 'water'
+  | 'taxes' | 'bank_fees' | 'co_ownership' | 'fees' | 'partners' | 'internal_transfer' | 'other'
+export const CATEGORIES_MOUVEMENT: Record<CategorieMouvement, { name: string, sens: 'credit' | 'debit' | 'tous', icone: string }> = {
+  tenant: { name: 'Paiement de locataire', sens: 'tous', icone: 'oi oi-users' },
+  works: { name: 'Travaux', sens: 'debit', icone: 'oi oi-hammer' },
+  security_deposit: { name: 'Dépôt de garantie', sens: 'tous', icone: 'oi oi-key' },
+  agency: { name: 'Versement d\'une agence (gérance)', sens: 'tous', icone: 'oi oi-shop' },
+  loan: { name: 'Emprunt', sens: 'tous', icone: 'oi oi-building-columns' },
+  insurance: { name: 'Assurance', sens: 'tous', icone: 'oi oi-shield' },
   // « tous »: a credit may refund an invoice (ADR 0022)
-  energie: { nom: 'Énergie (gaz, électricité)', sens: 'tous', icone: 'oi oi-bolt' },
-  eau: { nom: 'Eau', sens: 'tous', icone: 'oi oi-filter' },
-  impots: { nom: 'Impôts et taxes', sens: 'tous', icone: 'oi oi-percentage' },
-  frais_bancaires: { nom: 'Frais bancaires', sens: 'tous', icone: 'oi oi-credit-card' },
-  copropriete: { nom: 'Copropriété', sens: 'tous', icone: 'oi oi-building' },
-  honoraires: { nom: 'Honoraires (comptable, agence)', sens: 'tous', icone: 'oi oi-briefcase' },
-  associes: { nom: 'Associés (apports, versements)', sens: 'tous', icone: 'oi oi-user' },
-  virement_interne: { nom: 'Virement entre comptes de la société', sens: 'tous', icone: 'oi oi-arrow-right-arrow-left' },
-  autre: { nom: 'Autre', sens: 'tous', icone: 'oi oi-tag' },
+  energy: { name: 'Énergie (gaz, électricité)', sens: 'tous', icone: 'oi oi-bolt' },
+  water: { name: 'Eau', sens: 'tous', icone: 'oi oi-filter' },
+  taxes: { name: 'Impôts et taxes', sens: 'tous', icone: 'oi oi-percentage' },
+  bank_fees: { name: 'Frais bancaires', sens: 'tous', icone: 'oi oi-credit-card' },
+  co_ownership: { name: 'Copropriété', sens: 'tous', icone: 'oi oi-building' },
+  fees: { name: 'Honoraires (comptable, agence)', sens: 'tous', icone: 'oi oi-briefcase' },
+  partners: { name: 'Associés (apports, versements)', sens: 'tous', icone: 'oi oi-user' },
+  internal_transfer: { name: 'Virement entre comptes de la société', sens: 'tous', icone: 'oi oi-arrow-right-arrow-left' },
+  other: { name: 'Autre', sens: 'tous', icone: 'oi oi-tag' },
 }
 // Debits that pay invoices of charges (ADR 0022): their detail is the invoices paid
-export const AVEC_FACTURE: CategorieMouvement[] = ['energie', 'eau', 'impots']
-export const AVEC_DETAIL: CategorieMouvement[] = ['locataire', 'travaux', 'depot_garantie', ...AVEC_FACTURE]
+export const AVEC_FACTURE: CategorieMouvement[] = ['energy', 'water', 'taxes']
+export const AVEC_DETAIL: CategorieMouvement[] = ['tenant', 'works', 'security_deposit', ...AVEC_FACTURE]
 
 // a_categoriser: no category yet; incomplet: a category with a detail that does not cover the amount (a note does
 // not make up for it); categorise
-export type StatutMouvement = 'a_categoriser' | 'incomplet' | 'categorise'
+export type StatutMouvement = 'to_categorise' | 'incomplet' | 'categorise'
 
 export type Mouvement = {
   id: number
-  releve_id: number
-  ordre: number
-  date_operation: string
-  date_valeur: string | null
-  libelle: string
+  bank_statement_id: number
+  position: number
+  transaction_date: string
+  value_date: string | null
+  label: string
   detail: string | null
   // Credit positive, debit negative
-  montant: string
-  categorie: CategorieMouvement | null
+  amount: string
+  category: CategorieMouvement | null
   // Required for « autre »; otherwise a comment (it never completes a detail)
   note: string | null
-  compte: string
-  date_releve: string
-  paiements: { id: number, locataire: string, lot: string, mois: string | null, total: string }[]
+  account: string
+  statement_date: string
+  payments: { id: number, tenant: string, unit: string, month: string | null, total: string }[]
   // Payments of works invoices: total is this payment; montant_ttc and reste, those of the invoice
-  travaux: { id: number, reglement_id: number, description: string, fournisseur: string, total: string, montant_ttc: string, reste: string }[]
+  works_invoices: { id: number, works_invoice_payment_id: number, description: string, supplier: string, total: string, total_incl_tax: string, remaining: string }[]
   // Payments of invoices of charges (ADR 0022), the same way
-  factures: { id: number, reglement_id: number, fournisseur: string, numero: string, energie: Energie, date_facture: string,
-    total: string, montant_ttc: string, reste: string }[]
-  depots: { id: number, sejour_id: number, locataire: string, lot: string, date: string, montant: string }[]
-  couvert: string
-  statut: StatutMouvement
+  invoices: { id: number, invoice_payment_id: number, supplier: string, number: string, energy: Energie, invoice_date: string,
+    total: string, total_incl_tax: string, remaining: string }[]
+  deposits: { id: number, tenancy_id: number, tenant: string, unit: string, date: string, amount: string }[]
+  covered: string
+  status: StatutMouvement
   // Recorded by hand, of the same amount and within ten days: to link
-  possibles: ({ type: 'paiement', id: number, locataire: string, lot: string, mois: string | null, date: string }
+  candidates: ({ type: 'payment', id: number, tenant: string, unit: string, month: string | null, date: string }
     // An invoice whose unpaid rest is the amount; date: that of the invoice
-    | { type: 'travaux', id: number, description: string, fournisseur: string, date: string | null }
+    | { type: 'works', id: number, description: string, supplier: string, date: string | null }
     // An invoice of charges whose rest is the amount, or whose number is in the label (ADR 0022)
-    | { type: 'facture', id: number, fournisseur: string, numero: string, energie: Energie, date: string | null, statut?: Statut }
+    | { type: 'invoice', id: number, supplier: string, number: string, energy: Energie, date: string | null, status?: Statut }
     // Several payments of one tenant whose sum is the amount (a transfer of several months); mois: « 10/2025, 11/2025 »
-    | { type: 'groupe', ids: number[], locataire: string, lot: string, mois: string })[]
+    | { type: 'group', ids: number[], tenant: string, unit: string, month: string })[]
 }
 
-export type ReleveDetail = Releve & { mouvements: Mouvement[] }
+export type ReleveDetail = Releve & { transactions: Mouvement[] }
 
 // A statement read in the browser, as sent on import
 export type ReleveLu = {
-  extracteur_id: number
-  compte: string
-  date_releve: string
-  solde_precedent: string
-  nouveau_solde: string
+  extractor_id: number
+  account: string
+  statement_date: string
+  previous_balance: string
+  new_balance: string
   totaux: { debit: string | null, credit: string | null } | null
-  mouvements: { date_operation: string, date_valeur: string | null, libelle: string, detail: string | null, montant: string }[]
+  transactions: { transaction_date: string, value_date: string | null, label: string, detail: string | null, amount: string }[]
 }
 
-export type ReleveAvecPdf = { id: number, compte: string, date_releve: string, solde_precedent: string, nouveau_solde: string, extracteur_id: number | null }
+export type ReleveAvecPdf = { id: number, account: string, statement_date: string, previous_balance: string, new_balance: string, extractor_id: number | null }
 
-export type DetailFiltre = { sejour?: number | 'proprietaire', energie?: Energie, groupe?: 'consommation' | 'autres' }
+export type DetailFiltre = { tenancy?: number | 'owner', energy?: Energie, group?: 'consumption' | 'other' }
 
-const exerciceQuery = ({ immeuble, debut, fin }: Exercice) => `immeuble=${immeuble}&debut=${debut}&fin=${fin}`
+const exerciceQuery = ({ building, start, end }: Exercice) => `building=${building}&start=${start}&end=${end}`
 
 export type Ligne = {
-  categorie: Categorie
-  libelle: string
-  debut: string
-  fin: string
+  category: Categorie
+  label: string
+  start: string
+  end: string
   kwh: string | null
-  montant_ht: string | null
-  taux_tva: string | null
-  montant_ttc: string
-  affectation: Affectation
+  amount_excl_tax: string | null
+  vat_rate: string | null
+  amount_incl_tax: string
+  allocation: Affectation
   note: string | null
 }
 
 // An invoice extractor as stored (ADR 0013): never changed, a correction is the next version of its supplier
 export type ExtracteurEnregistre = {
   id: number
-  fournisseur: string
+  supplier: string
   version: number
   // ADR 0018: an extractor reads invoices or bank statements (no energy then)
-  type: 'facture' | 'releve'
-  energie: Energie | null
-  reglages: Reglages
+  type: 'invoice' | 'bank_statement'
+  energy: Energie | null
+  settings: Reglages
   source: string
   code: string
-  moteur: number
+  engine: number
   note: string | null
-  cree_le: string
-  derniere: boolean
-  nb_factures: number
-  nb_releves: number
+  created_at: string
+  latest: boolean
+  invoice_count: number
+  statement_count: number
 }
 
-export type NouvelleVersion = Pick<ExtracteurEnregistre, 'fournisseur' | 'energie' | 'reglages' | 'source' | 'code' | 'moteur' | 'note'>
-  & { type?: 'facture' | 'releve' }
+export type NouvelleVersion = Pick<ExtracteurEnregistre, 'supplier' | 'energy' | 'settings' | 'source' | 'code' | 'engine' | 'note'>
+  & { type?: 'invoice' | 'bank_statement' }
 
 // An invoice of a supplier with its PDF, every building: read again by a new version (non-regression)
 export type FactureAvecPdf = {
   id: number
-  numero: string
-  date_facture: string
-  montant_ttc: string | null
-  statut: Statut
-  extracteur_id: number | null
-  immeuble: string
-  annexe: EtatAnnexe
-  fournisseur_id: number
+  number: string
+  invoice_date: string
+  total_incl_tax: string | null
+  status: Statut
+  extractor_id: number | null
+  building: string
+  tenant_copy: EtatAnnexe
+  supplier_id: number
   // ADR 0025: the zones of its scans adjusted by hand; null, those of its supplier
-  zones_masquees: ZoneSaisie[] | null
+  masked_zones: ZoneSaisie[] | null
 }
 
 // A supplier (ADR 0014): its invoices, the last version of its extractor; « confidentiel »: never joined in annex
 export type Fournisseur = {
   id: number
-  nom: string
-  confidentiel: boolean
+  name: string
+  confidential: boolean
   energies: Energie[] | null
-  nb_factures: number
-  nb_pdf: number
+  invoice_count: number
+  pdf_count: number
   // A bank (ADR 0018): its statements
-  nb_releves: number
-  extracteur: { id: number, version: number, type: 'facture' | 'releve' } | null
+  statement_count: number
+  extractor: { id: number, version: number, type: 'invoice' | 'bank_statement' } | null
   // ADR 0025: the zones masked on the scans of its invoices, drawn by hand
-  zones_masquees: ZoneSaisie[]
+  masked_zones: ZoneSaisie[]
 }
 
 /** A zone drawn by hand on a scanned page (ADR 0025): page from 1, bounds in fractions of the page from its top-left. */
@@ -559,79 +559,79 @@ export type ZoneSaisie = { page: number, x0: number, y0: number, x1: number, y1:
 
 // What the browser read from a PDF, sent with it on import
 export type Brouillon = {
-  extracteur_id: number
-  numero: string
-  date_facture: string
-  montant_ttc: string | null
-  lignes: Ligne[]
+  extractor_id: number
+  number: string
+  invoice_date: string
+  total_incl_tax: string | null
+  lines: Ligne[]
 }
 
 export type Facture = {
   id: number
-  immeuble_id: number
-  fournisseur: string
-  energie: Energie
-  numero: string
-  date_facture: string
+  building_id: number
+  supplier: string
+  energy: Energie
+  number: string
+  invoice_date: string
   // Empty on a draft whose total is not on the PDF (ADR 0013)
-  montant_ttc: string | null
-  statut: Statut
+  total_incl_tax: string | null
+  status: Statut
   note: string | null
   pdf: boolean
   // ADR 0017: replaced by which invoice, when, why; on the draft of a correction, the invoice it will replace
-  remplacee_par: number | null
-  remplacee_le: string | null
-  motif_remplacement: string | null
-  remplace_id: number | null
+  replaced_by: number | null
+  replaced_at: string | null
+  replacement_reason: string | null
+  replaces_id: number | null
   // ADR 0022: paid by bank movements, what remains, the date of the last payment
-  paye: string
-  reste: string
-  date_paiement: string | null
-  fournisseur_id: number
+  paid: string
+  remaining: string
+  payment_date: string | null
+  supplier_id: number
   // Version of the extractor that read it (null: typed by hand)
-  extracteur_id: number | null
+  extractor_id: number | null
   // ADR 0024: what becomes of it in the annexes of a supporting document
-  annexe: EtatAnnexe
+  tenant_copy: EtatAnnexe
   // ADR 0025: the zones of its scans adjusted by hand; null, those of its supplier
-  zones_masquees: ZoneSaisie[] | null
+  masked_zones: ZoneSaisie[] | null
 }
 
 /**
  * The invoice in the annexes (ADR 0024): never joined (confidential supplier), no PDF, its version in images to make
  * (none, or made from another PDF), to verify by eye, or verified.
  */
-export type EtatAnnexe = 'confidentiel' | 'sans_pdf' | 'a_faire' | 'a_verifier' | 'verifiee'
+export type EtatAnnexe = 'confidential' | 'no_pdf' | 'to_make' | 'to_check' | 'checked'
 
 /** The current version in images of an invoice. */
 export type AnnexeFacture = {
   id: number
-  extracteur_id: number | null
-  termes: string[]
-  reglages: { dpi: number, seuil: number }
+  extractor_id: number | null
+  terms: string[]
+  settings: { dpi: number, threshold: number }
   // Number of zones painted
   zones: number
-  cree_le: string
-  verifiee_le: string | null
+  created_at: string
+  checked_at: string | null
   // ADR 0025: its pages that were scans, masked by zones drawn by hand
-  pages_scannees: number[]
+  scanned_pages: number[]
 }
 
 /** A version in images made in the browser, sent with its PDF. */
 export type AnnexeEnvoyee = {
-  zones: { page: number, x0: number, y0: number, x1: number, y1: number, origine: string }[]
-  extracteur_id: number | null
-  termes: string[]
-  reglages: { dpi: number, seuil: number }
-  pages_scannees: number[]
+  zones: { page: number, x0: number, y0: number, x1: number, y1: number, origin: string }[]
+  extractor_id: number | null
+  terms: string[]
+  settings: { dpi: number, threshold: number }
+  scanned_pages: number[]
 }
 
-export type ReglementFacture = { id: number, mouvement_id: number, date_paiement: string, libelle: string, montant: string }
+export type ReglementFacture = { id: number, bank_transaction_id: number, payment_date: string, label: string, amount: string }
 // A debit that may pay an invoice: what remains of it; correspond, the rest of the invoice
 export type MouvementPourFacture = {
-  id: number, date_operation: string, libelle: string, montant: string, categorie: CategorieMouvement | null, reste: string, correspond: boolean
+  id: number, transaction_date: string, label: string, amount: string, category: CategorieMouvement | null, remaining: string, correspond: boolean
 }
 
-export type ReferenceFacture = { id: number, fournisseur: string, numero: string, statut: Statut }
+export type ReferenceFacture = { id: number, supplier: string, number: string, status: Statut }
 export type LiensFacture = {
   remplacante: ReferenceFacture | null
   remplacees: ReferenceFacture[]
@@ -639,50 +639,50 @@ export type LiensFacture = {
   correction: ReferenceFacture | null
 }
 // Sent regularisations whose period touches a replaced invoice: to check (« à rectifier »)
-export type RegularisationTouchee = { id: number, locataire: string, lot: string, debut: string, fin: string, solde: string }
+export type RegularisationTouchee = { id: number, tenant: string, unit: string, start: string, end: string, balance: string }
 
 export type FactureResumee = Facture & {
   total_ok: boolean | null
-  debut: string | null
-  fin: string | null
-  nb_lignes: number
+  start: string | null
+  end: string | null
+  line_count: number
 }
 
-export type Constat = {
-  severite: 'erreur' | 'avertissement'
+export type Finding = {
+  severity: 'error' | 'warning'
   code: string
   message: string
-  ligne: number | null
-  saisie: boolean
+  line: number | null
+  input_error: boolean
 }
 
-export type Controle = {
-  total_lignes: string
-  ecart: string
+export type Checks = {
+  lines_total: string
+  gap: string
   ok: boolean
-  constats: Constat[]
-  enregistrable: boolean
-  validable: boolean
+  findings: Finding[]
+  can_save: boolean
+  can_validate: boolean
 }
 
 export type FactureDetail = {
-  facture: Facture, lignes: Ligne[], liens: LiensFacture, reglements: ReglementFacture[], controle: Controle,
-  annexe: AnnexeFacture | null
+  invoice: Facture, lines: Ligne[], liens: LiensFacture, payments: ReglementFacture[], checks: Checks,
+  tenant_copy: AnnexeFacture | null
 }
-export type FactureRemplacee = FactureDetail & { regularisations: RegularisationTouchee[] }
+export type FactureRemplacee = FactureDetail & { charge_adjustments: RegularisationTouchee[] }
 
-export type FactureEnTete = Pick<Facture, 'numero' | 'date_facture' | 'montant_ttc' | 'energie' | 'note'>
+export type FactureEnTete = Pick<Facture, 'number' | 'invoice_date' | 'total_incl_tax' | 'energy' | 'note'>
 
 export type FactureSaisie = FactureEnTete & {
   // Lines as typed in the grid: the server reports what cannot be stored
-  lignes: Ligne[]
+  lines: Ligne[]
 }
 
 // ---------------------------------------------------------------- authentication (ADR 0020)
 
-export type Utilisateur = { id: number, email: string, nom: string }
-export type Passkey = { id: string, appareil: string, cree_le: string, utilisee_le: string | null }
-export type JetonApi = { id: number, nom: string, cree_le: string, utilise_le: string | null, revoque_le: string | null }
+export type Utilisateur = { id: number, email: string, name: string }
+export type Passkey = { id: string, device: string, created_at: string, used_at: string | null }
+export type JetonApi = { id: number, name: string, created_at: string, used_at: string | null, revoked_at: string | null }
 
 export class ApiError extends Error {
   readonly status: number
@@ -726,52 +726,52 @@ async function answer<T>(response: Response): Promise<T> {
 
 export const api = {
   // ---------------------------------------------------------------- authentication (ADR 0020)
-  session: () => request<{ utilisateur: Utilisateur }>('GET', '/auth/session'),
+  session: () => request<{ app_user: Utilisateur }>('GET', '/auth/session'),
   connexionOptions: () => request<{ id: string, options: PublicKeyCredentialRequestOptionsJSON }>('POST', '/auth/connexion/options'),
   connexion: (id: string, reponse: unknown) => request<{ ok: true }>('POST', '/auth/connexion', { id, reponse }),
   deconnexion: () => request<void>('POST', '/auth/deconnexion'),
   // From a link (jeton), or for the account connected (this device)
-  enregistrementOptions: (jeton: string | null) => request<{ id: string, options: PublicKeyCredentialCreationOptionsJSON, utilisateur: Utilisateur }>(
+  enregistrementOptions: (jeton: string | null) => request<{ id: string, options: PublicKeyCredentialCreationOptionsJSON, app_user: Utilisateur }>(
     'POST', '/auth/enregistrement/options', { jeton }),
-  enregistrement: (id: string, reponse: unknown, appareil: string) => request<{ ok: true }>('POST', '/auth/enregistrement', { id, reponse, appareil }),
+  enregistrement: (id: string, reponse: unknown, device: string) => request<{ ok: true }>('POST', '/auth/enregistrement', { id, reponse, device }),
   passkeys: () => request<Passkey[]>('GET', '/auth/passkeys'),
   supprimerPasskey: (id: string) => request<void>('DELETE', `/auth/passkeys/${encodeURIComponent(id)}`),
-  lienAppareil: () => request<{ url: string, expire_le: string }>('POST', '/auth/liens'),
+  lienAppareil: () => request<{ url: string, expires_at: string }>('POST', '/auth/liens'),
   jetons: () => request<JetonApi[]>('GET', '/auth/jetons'),
-  creerJeton: (nom: string) => request<{ id: number, jeton: string }>('POST', '/auth/jetons', { nom }),
+  creerJeton: (name: string) => request<{ id: number, jeton: string }>('POST', '/auth/jetons', { name }),
   revoquerJeton: (id: number) => request<void>('DELETE', `/auth/jetons/${id}`),
 
-  immeubles: () => request<Immeuble[]>('GET', '/immeubles'),
-  immeuble: (id: number) => request<ImmeubleDetail>('GET', `/immeubles/${id}`),
-  creerImmeuble: (data: Pick<Immeuble, 'code' | 'nom' | 'adresse'>) => request<Immeuble>('POST', '/immeubles', data),
-  modifierImmeuble: (id: number, data: Pick<Immeuble, 'nom' | 'adresse' | 'debut_gestion'>) =>
+  buildings: () => request<Immeuble[]>('GET', '/immeubles'),
+  building: (id: number) => request<ImmeubleDetail>('GET', `/immeubles/${id}`),
+  creerImmeuble: (data: Pick<Immeuble, 'code' | 'name' | 'address'>) => request<Immeuble>('POST', '/immeubles', data),
+  modifierImmeuble: (id: number, data: Pick<Immeuble, 'name' | 'address' | 'managed_from'>) =>
     request<Immeuble>('PUT', `/immeubles/${id}`, data),
-  creerLot: (immeuble: number, lot: Omit<Lot, 'id' | 'immeuble_id'>) =>
-    request<Lot>('POST', `/immeubles/${immeuble}/lots`, lot),
-  modifierLot: (lot: Lot) => request<Lot>('PUT', `/lots/${lot.id}`, lot),
+  creerLot: (building: number, unit: Omit<Lot, 'id' | 'building_id'>) =>
+    request<Lot>('POST', `/immeubles/${building}/lots`, unit),
+  modifierLot: (unit: Lot) => request<Lot>('PUT', `/lots/${unit.id}`, unit),
   supprimerLot: (id: number) => request<void>('DELETE', `/lots/${id}`),
 
-  locataires: () => request<Locataire[]>('GET', '/locataires'),
-  creerLocataire: (l: Omit<Locataire, 'id' | 'nb_sejours'>) => request<Locataire>('POST', '/locataires', l),
-  modifierLocataire: (l: Omit<Locataire, 'nb_sejours'>) => request<Locataire>('PUT', `/locataires/${l.id}`, l),
+  tenants: () => request<Locataire[]>('GET', '/locataires'),
+  creerLocataire: (l: Omit<Locataire, 'id' | 'tenancy_count'>) => request<Locataire>('POST', '/locataires', l),
+  modifierLocataire: (l: Omit<Locataire, 'tenancy_count'>) => request<Locataire>('PUT', `/locataires/${l.id}`, l),
   supprimerLocataire: (id: number) => request<void>('DELETE', `/locataires/${id}`),
 
-  sejours: (immeuble: number) => request<Sejour[]>('GET', `/sejours?immeuble=${immeuble}`),
-  creerSejour: (s: Omit<Sejour, 'id' | 'lot' | 'locataire' | 'depot_detenu' | 'depot_retenu'>) => request<Sejour>('POST', '/sejours', s),
-  modifierSejour: (s: Omit<Sejour, 'lot' | 'locataire' | 'depot_detenu' | 'depot_retenu'>) => request<Sejour>('PUT', `/sejours/${s.id}`, s),
+  tenancies: (building: number) => request<Sejour[]>('GET', `/sejours?building=${building}`),
+  creerSejour: (s: Omit<Sejour, 'id' | 'unit' | 'tenant' | 'deposit_held' | 'deposit_retained'>) => request<Sejour>('POST', '/sejours', s),
+  modifierSejour: (s: Omit<Sejour, 'unit' | 'tenant' | 'deposit_held' | 'deposit_retained'>) => request<Sejour>('PUT', `/sejours/${s.id}`, s),
   supprimerSejour: (id: number) => request<void>('DELETE', `/sejours/${id}`),
 
-  echeances: (immeuble: number) => request<Echeance[]>('GET', `/echeances?immeuble=${immeuble}`),
+  rent_schedules: (building: number) => request<Echeance[]>('GET', `/echeances?building=${building}`),
   creerEcheance: (e: EcheanceSaisie) => request<Echeance>('POST', '/echeances', e),
   modifierEcheance: (id: number, e: EcheanceSaisie) => request<Echeance>('PUT', `/echeances/${id}`, e),
   supprimerEcheance: (id: number) => request<void>('DELETE', `/echeances/${id}`),
 
-  provisions: (immeuble: number) => request<Provision[]>('GET', `/provisions?immeuble=${immeuble}`),
-  enregistrerProvision: (p: Pick<Provision, 'sejour_id' | 'annee' | 'montant' | 'note'>) =>
+  advances: (building: number) => request<Provision[]>('GET', `/provisions?building=${building}`),
+  enregistrerProvision: (p: Pick<Provision, 'tenancy_id' | 'year' | 'amount' | 'note'>) =>
     request<Provision>('PUT', '/provisions', p),
   supprimerProvision: (id: number) => request<void>('DELETE', `/provisions/${id}`),
 
-  decompte: (e: Exercice) => request<Decompte>('GET', `/decompte?${exerciceQuery(e)}`),
+  charge_statement: (e: Exercice) => request<Decompte>('GET', `/decompte?${exerciceQuery(e)}`),
   detail: (e: Exercice, f: DetailFiltre) => {
     const filtres = Object.entries(f).filter(([, v]) => v !== undefined).map(([k, v]) => `&${k}=${v}`).join('')
     return request<LigneDetail[]>('GET', `/decompte/detail?${exerciceQuery(e)}${filtres}`)
@@ -779,16 +779,16 @@ export const api = {
   couverture: (e: Exercice) => request<Couverture>('GET', `/couverture?${exerciceQuery(e)}`),
   exportUrl: (e: Exercice) => `/api/decompte/export?${exerciceQuery(e)}`,
 
-  regularisations: (immeuble: number) => request<Regularisation[]>('GET', `/regularisations?immeuble=${immeuble}`),
-  regularisation: (id: number) => request<RegularisationDetail>('GET', `/regularisations/${id}`),
-  creerRegularisation: (sejour_id: number, debut: string, fin: string) =>
-    request<Regularisation>('POST', '/regularisations', { sejour_id, debut, fin }),
-  saisirRegularisation: (r: { sejour_id: number, debut: string, fin: string, solde: string, provisions: string | null,
-    date_envoi: string, montant_recu: string | null, note: string | null }) =>
+  charge_adjustments: (building: number) => request<Regularisation[]>('GET', `/regularisations?building=${building}`),
+  charge_adjustment: (id: number) => request<RegularisationDetail>('GET', `/regularisations/${id}`),
+  creerRegularisation: (tenancy_id: number, start: string, end: string) =>
+    request<Regularisation>('POST', '/regularisations', { tenancy_id, start, end }),
+  saisirRegularisation: (r: { tenancy_id: number, start: string, end: string, balance: string, advances: string | null,
+    sent_on: string, amount_received: string | null, note: string | null }) =>
     request<Regularisation>('POST', '/regularisations/manuelle', r),
   rectificatif: (id: number) => request<Regularisation>('POST', `/regularisations/${id}/rectificatif`),
-  marquerEnvoyee: (id: number, date_envoi: string) =>
-    request<Regularisation>('POST', `/regularisations/${id}/envoi`, { date_envoi }),
+  marquerEnvoyee: (id: number, sent_on: string) =>
+    request<Regularisation>('POST', `/regularisations/${id}/envoi`, { sent_on }),
   // « Marquer envoyée » done by mistake: back to a draft (refused once a payment, a decision or a corrective depends on it)
   annulerEnvoi: (id: number) => request<Regularisation>('DELETE', `/regularisations/${id}/envoi`),
   supprimerRegularisation: (id: number) => request<void>('DELETE', `/regularisations/${id}`),
@@ -797,18 +797,18 @@ export const api = {
     request<Regularisation>('POST', `/regularisations/${id}/decision`, { decision }),
 
   // annee null: every year
-  paiements: (immeuble: number, annee: number | null) =>
-    request<Paiement[]>('GET', `/paiements?immeuble=${immeuble}${annee === null ? '' : `&annee=${annee}`}`),
+  payments: (building: number, year: number | null) =>
+    request<Paiement[]>('GET', `/paiements?building=${building}${year === null ? '' : `&year=${year}`}`),
   // Payments toward a regularisation, any year, previous regularisations of its corrective chain included
-  paiementsRegularisation: (immeuble: number, regularisation: number) =>
-    request<Paiement[]>('GET', `/paiements?immeuble=${immeuble}&regularisation=${regularisation}`),
-  paiementsDuMois: (immeuble: number, mois: string) =>
-    request<MoisSejour[]>('GET', `/paiements/mois?immeuble=${immeuble}&mois=${mois}`),
+  paiementsRegularisation: (building: number, charge_adjustment: number) =>
+    request<Paiement[]>('GET', `/paiements?building=${building}&charge_adjustment=${charge_adjustment}`),
+  paiementsDuMois: (building: number, month: string) =>
+    request<MoisSejour[]>('GET', `/paiements/mois?building=${building}&month=${month}`),
   creerPaiement: (p: PaiementSaisi) => request<Paiement>('POST', '/paiements', p),
   modifierPaiement: (id: number, p: PaiementSaisi) => request<Paiement>('PUT', `/paiements/${id}`, p),
   supprimerPaiement: (id: number) => request<void>('DELETE', `/paiements/${id}`),
 
-  travaux: (immeuble: number) => request<Travaux[]>('GET', `/travaux?immeuble=${immeuble}`),
+  works_invoice: (building: number) => request<Travaux[]>('GET', `/travaux?building=${building}`),
   creerTravaux: (t: TravauxSaisie) => request<Travaux>('POST', '/travaux', t),
   modifierTravaux: (id: number, t: TravauxSaisie) => request<Travaux>('PUT', `/travaux/${id}`, t),
   supprimerTravaux: (id: number) => request<void>('DELETE', `/travaux/${id}`),
@@ -819,14 +819,14 @@ export const api = {
     return answer<Travaux>(await fetch(`/api/travaux/${id}/pdf`, { method: 'POST', body: form }))
   },
 
-  societe: () => request<{ societe: Societe | null, associes: Associe[] }>('GET', '/societe'),
-  modifierSociete: (s: Societe) => request<{ societe: Societe | null, associes: Associe[] }>('PUT', '/societe', s),
+  company: () => request<{ company: Societe | null, partners: Associe[] }>('GET', '/societe'),
+  modifierSociete: (s: Societe) => request<{ company: Societe | null, partners: Associe[] }>('PUT', '/societe', s),
   creerAssocie: (a: Omit<Associe, 'id'>) => request<Associe>('POST', '/associes', a),
   modifierAssocie: (a: Associe) => request<Associe>('PUT', `/associes/${a.id}`, a),
   supprimerAssocie: (id: number) => request<void>('DELETE', `/associes/${id}`),
   assemblees: () => request<AssembleeResumee[]>('GET', '/assemblees'),
-  assemblee: (id: number) => request<Assemblee>('GET', `/assemblees/${id}`),
-  creerAssemblee: (a: { type: TypeAssemblee, date: string, lieu: string | null, modele: 'annuelle' | 'vide' }) =>
+  general_meeting: (id: number) => request<Assemblee>('GET', `/assemblees/${id}`),
+  creerAssemblee: (a: { type: TypeAssemblee, date: string, place: string | null, modele: 'annuelle' | 'vide' }) =>
     request<Assemblee>('POST', '/assemblees', a),
   modifierAssemblee: (a: Assemblee) => request<Assemblee>('PUT', `/assemblees/${a.id}`, a),
   supprimerAssemblee: (id: number) => request<void>('DELETE', `/assemblees/${id}`),
@@ -839,43 +839,43 @@ export const api = {
     return answer<Assemblee>(await fetch(`/api/assemblees/${id}/pv-signe`, { method: 'POST', body: form }))
   },
 
-  releves: () => request<ReleveResume[]>('GET', '/releves'),
+  statements: () => request<ReleveResume[]>('GET', '/releves'),
   releve: (id: number) => request<ReleveDetail>('GET', `/releves/${id}`),
   supprimerReleve: (id: number) => request<void>('DELETE', `/releves/${id}`),
   relevePdfUrl: (id: number) => `/api/releves/${id}/pdf`,
   async importerReleve(fichier: File, releve: ReleveLu) {
     const form = new FormData()
-    form.append('releve', JSON.stringify(releve))
+    form.append('bank_statement', JSON.stringify(releve))
     form.append('file', fichier)
     return answer<ReleveDetail>(await fetch('/api/releves/import', { method: 'POST', body: form }))
   },
-  relevesDeLaBanque: (fournisseur: string) =>
-    request<ReleveAvecPdf[]>('GET', `/extracteurs/releves?fournisseur=${encodeURIComponent(fournisseur)}`),
-  mouvements: (statut: 'tous' | StatutMouvement, du?: string, au?: string) =>
-    request<Mouvement[]>('GET', `/mouvements?statut=${statut}${du ? `&du=${du}` : ''}${au ? `&au=${au}` : ''}`),
-  categoriserMouvement: (id: number, categorie: CategorieMouvement, note: string | null = null) =>
-    request<Mouvement>('PUT', `/mouvements/${id}/categorie`, { categorie, note }),
+  relevesDeLaBanque: (supplier: string) =>
+    request<ReleveAvecPdf[]>('GET', `/extracteurs/releves?supplier=${encodeURIComponent(supplier)}`),
+  transactions: (status: 'tous' | StatutMouvement, du?: string, au?: string) =>
+    request<Mouvement[]>('GET', `/mouvements?status=${status}${du ? `&from=${du}` : ''}${au ? `&to=${au}` : ''}`),
+  categoriserMouvement: (id: number, category: CategorieMouvement, note: string | null = null) =>
+    request<Mouvement>('PUT', `/mouvements/${id}/categorie`, { category, note }),
   retirerCategorie: (id: number) => request<Mouvement>('DELETE', `/mouvements/${id}/categorie`),
-  lierMouvement: (id: number, lien: { paiement_id: number } | { travaux_id: number } | { facture_id: number } | { paiement_ids: number[] }
-    | { depot_id: number }) => request<Mouvement>('POST', `/mouvements/${id}/lier`, lien),
-  delierMouvement: (id: number, lien: { paiement_id: number } | { reglement_id: number } | { reglement_facture_id: number } | { depot_id: number }) =>
+  lierMouvement: (id: number, lien: { payment_id: number } | { works_invoice_id: number } | { invoice_id: number } | { payment_ids: number[] }
+    | { deposit_payment_id: number }) => request<Mouvement>('POST', `/mouvements/${id}/lier`, lien),
+  delierMouvement: (id: number, lien: { payment_id: number } | { works_invoice_payment_id: number } | { invoice_payment_id: number } | { deposit_payment_id: number }) =>
     request<Mouvement>('POST', `/mouvements/${id}/delier`, lien),
 
-  depots: (immeuble: number) => request<VersementDepot[]>('GET', `/depots?immeuble=${immeuble}`),
+  deposits: (building: number) => request<VersementDepot[]>('GET', `/depots?building=${building}`),
   creerDepot: (d: VersementDepotSaisi) => request<VersementDepot>('POST', '/depots', d),
   modifierDepot: (id: number, d: VersementDepotSaisi) => request<VersementDepot>('PUT', `/depots/${id}`, d),
   supprimerDepot: (id: number) => request<void>('DELETE', `/depots/${id}`),
   // The retention of a stay, replaced as a whole (no line: removed)
-  retenue: (sejour: number, r: { date: string, lignes: LigneRetenue[] }) =>
-    request<unknown[]>('PUT', `/sejours/${sejour}/retenue`, r),
+  retenue: (tenancy: number, r: { date: string, lines: LigneRetenue[] }) =>
+    request<unknown[]>('PUT', `/sejours/${tenancy}/retenue`, r),
 
-  fiscal: (immeuble: number, annee: number) => request<SyntheseFiscale>('GET', `/fiscal?immeuble=${immeuble}&annee=${annee}`),
+  fiscal: (building: number, year: number) => request<SyntheseFiscale>('GET', `/fiscal?building=${building}&year=${year}`),
 
   justificatifUrl: (id: number) => `/api/regularisations/${id}/justificatif`,
-  apercuUrl: (e: Exercice, sejour: number) => `/api/justificatif?${exerciceQuery(e)}&sejour=${sejour}`,
+  apercuUrl: (e: Exercice, tenancy: number) => `/api/justificatif?${exerciceQuery(e)}&tenancy=${tenancy}`,
 
-  factures: (immeuble: number) => request<FactureResumee[]>('GET', `/factures?immeuble=${immeuble}`),
-  facture: (id: number) => request<FactureDetail>('GET', `/factures/${id}`),
+  invoices: (building: number) => request<FactureResumee[]>('GET', `/factures?building=${building}`),
+  invoice: (id: number) => request<FactureDetail>('GET', `/factures/${id}`),
   enregistrer: (id: number, saisie: FactureSaisie) => request<FactureDetail>('PUT', `/factures/${id}`, saisie),
   valider: (id: number) => request<FactureRemplacee>('POST', `/factures/${id}/valider`),
   remplacer: (id: number, par: number, motif: string) =>
@@ -883,26 +883,26 @@ export const api = {
   corriger: (id: number) => request<FactureDetail>('POST', `/factures/${id}/corriger`),
   // Payments by bank movements (ADR 0022)
   mouvementsPourFacture: (id: number) => request<MouvementPourFacture[]>('GET', `/factures/${id}/mouvements`),
-  reglerFacture: (id: number, mouvement: number) => request<FactureDetail>('POST', `/factures/${id}/reglements`, { mouvement_id: mouvement }),
+  reglerFacture: (id: number, bank_transaction: number) => request<FactureDetail>('POST', `/factures/${id}/reglements`, { bank_transaction_id: bank_transaction }),
   supprimerReglementFacture: (id: number, reglement: number) => request<FactureDetail>('DELETE', `/factures/${id}/reglements/${reglement}`),
   supprimer: (id: number) => request<void>('DELETE', `/factures/${id}`),
-  controler: (saisie: Pick<FactureSaisie, 'montant_ttc' | 'lignes'>) => request<Controle>('POST', '/controle', saisie),
+  controler: (saisie: Pick<FactureSaisie, 'total_incl_tax' | 'lines'>) => request<Checks>('POST', '/controle', saisie),
   pdfUrl: (id: number) => `/api/factures/${id}/pdf`,
 
   // Version in images joined to the supporting documents (ADR 0024)
   annexePdfUrl: (id: number, version: number) => `/api/factures/${id}/annexe/pdf?v=${version}`,
-  async envoyerAnnexe(id: number, pdf: Uint8Array, annexe: AnnexeEnvoyee) {
+  async envoyerAnnexe(id: number, pdf: Uint8Array, tenant_copy: AnnexeEnvoyee) {
     const form = new FormData()
-    form.append('annexe', JSON.stringify(annexe))
+    form.append('tenant_copy', JSON.stringify(tenant_copy))
     form.append('file', new Blob([pdf as Uint8Array<ArrayBuffer>], { type: 'application/pdf' }), 'annexe.pdf')
     return answer<FactureDetail>(await fetch(`/api/factures/${id}/annexe`, { method: 'POST', body: form }))
   },
-  verifierAnnexe: (id: number, annexe: number) =>
-    request<FactureDetail>('POST', `/factures/${id}/annexe/verifiee`, { annexe_id: annexe }),
+  verifierAnnexe: (id: number, tenant_copy: number) =>
+    request<FactureDetail>('POST', `/factures/${id}/annexe/verifiee`, { tenant_copy_id: tenant_copy }),
   // ADR 0025: the zones of its scans adjusted by hand (null: those of its supplier)
   modifierZonesFacture: (id: number, zones: ZoneSaisie[] | null) => request<FactureDetail>('PUT', `/factures/${id}/zones`, { zones }),
   termesMasques: () => request<string[]>('GET', '/termes-masques'),
-  modifierTermesMasques: (termes: string[]) => request<string[]>('PUT', '/termes-masques', { termes }),
+  modifierTermesMasques: (terms: string[]) => request<string[]>('PUT', '/termes-masques', { terms }),
 
   async joindrePdf(id: number, file: File) {
     const form = new FormData()
@@ -911,7 +911,7 @@ export const api = {
   },
 
   // Invoice typed by hand, with the PDF when there is one (not read by the parsers): draft without lines
-  async creerFacture(immeuble: number, entete: FactureEnTete & { fournisseur: string }, file: File | null) {
+  async creerFacture(building: number, entete: FactureEnTete & { supplier: string }, file: File | null) {
     const form = new FormData()
     for (const [name, value] of Object.entries(entete)) {
       form.append(name, value ?? '')
@@ -919,26 +919,26 @@ export const api = {
     if (file) {
       form.append('file', file)
     }
-    return answer<FactureDetail>(await fetch(`/api/factures?immeuble=${immeuble}`, { method: 'POST', body: form }))
+    return answer<FactureDetail>(await fetch(`/api/factures?building=${building}`, { method: 'POST', body: form }))
   },
 
   // The PDF and the draft read from it in the browser (ADR 0013)
-  async importer(immeuble: number, file: File, brouillon: Brouillon) {
+  async importer(building: number, file: File, brouillon: Brouillon) {
     const form = new FormData()
-    form.append('brouillon', JSON.stringify(brouillon))
+    form.append('draft', JSON.stringify(brouillon))
     form.append('file', file)
-    const response = await fetch(`/api/factures/import?immeuble=${immeuble}`, { method: 'POST', body: form })
+    const response = await fetch(`/api/factures/import?building=${building}`, { method: 'POST', body: form })
     return answer<FactureDetail>(response)
   },
 
   sante: () => request<{ status: string, version: string }>('GET', '/health'),
-  fournisseurs: () => request<Fournisseur[]>('GET', '/fournisseurs'),
-  fournisseur: (id: number) => request<Fournisseur>('GET', `/fournisseurs/${id}`),
-  modifierFournisseur: (id: number, modif: { confidentiel: boolean }) => request<Fournisseur>('PATCH', `/fournisseurs/${id}`, modif),
+  suppliers: () => request<Fournisseur[]>('GET', '/fournisseurs'),
+  supplier: (id: number) => request<Fournisseur>('GET', `/fournisseurs/${id}`),
+  modifierFournisseur: (id: number, modif: { confidential: boolean }) => request<Fournisseur>('PATCH', `/fournisseurs/${id}`, modif),
   modifierZonesFournisseur: (id: number, zones: ZoneSaisie[]) => request<Fournisseur>('PUT', `/fournisseurs/${id}/zones`, { zones }),
-  extracteurs: () => request<ExtracteurEnregistre[]>('GET', '/extracteurs'),
-  extracteur: (id: number) => request<ExtracteurEnregistre>('GET', `/extracteurs/${id}`),
+  extractors: () => request<ExtracteurEnregistre[]>('GET', '/extracteurs'),
+  extractor: (id: number) => request<ExtracteurEnregistre>('GET', `/extracteurs/${id}`),
   nouvelleVersion: (version: NouvelleVersion) => request<ExtracteurEnregistre>('POST', '/extracteurs', version),
-  facturesDuFournisseur: (fournisseur: string) =>
-    request<FactureAvecPdf[]>('GET', `/extracteurs/factures?fournisseur=${encodeURIComponent(fournisseur)}`),
+  facturesDuFournisseur: (supplier: string) =>
+    request<FactureAvecPdf[]>('GET', `/extracteurs/factures?supplier=${encodeURIComponent(supplier)}`),
 }

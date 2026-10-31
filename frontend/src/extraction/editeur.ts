@@ -31,7 +31,7 @@ ts.typescriptDefaults.setExtraLibs([
   { content: 'declare module \'big.js\' { const Big: any; export default Big }', filePath: 'file:///node_modules/big.js/index.d.ts' },
 ])
 
-let compteur = 0
+let sign_count = 0
 
 // Each method of the extractor gets, in the gutter, the colour of what it highlights in the text of the PDF
 const METHODES: Record<string, string> = {
@@ -58,16 +58,16 @@ const METHODES: Record<string, string> = {
 
 /** Lines of each method: from its declaration to the closing brace at its indentation. */
 function blocsDesMethodes(model: monaco.editor.ITextModel) {
-  const lignes = model.getLinesContent()
-  const blocs: { debut: number, fin: number, classe: string }[] = []
-  lignes.forEach((ligne, i) => {
+  const lines = model.getLinesContent()
+  const blocs: { start: number, end: number, classe: string }[] = []
+  lines.forEach((ligne, i) => {
     const m = ligne.match(/^(\s*)(?:(?:public|protected|private|override)\s+)*(\w+)\s*\(/)
     const classe = m && METHODES[m[2]!]
     if (!m || !classe) {
       return
     }
-    const fermeture = lignes.findIndex((l, k) => k > i && l === `${m[1]}}`)
-    blocs.push({ debut: i + 1, fin: (fermeture < 0 ? i : fermeture) + 1, classe })
+    const fermeture = lines.findIndex((l, k) => k > i && l === `${m[1]}}`)
+    blocs.push({ start: i + 1, end: (fermeture < 0 ? i : fermeture) + 1, classe })
   })
   return blocs
 }
@@ -83,15 +83,15 @@ export type Editeur = {
 }
 
 export function creerEditeur(element: HTMLElement, source: string): Editeur {
-  const uri = monaco.Uri.parse(`file:///extracteur-${++compteur}.ts`)
+  const uri = monaco.Uri.parse(`file:///extracteur-${++sign_count}.ts`)
   const model = monaco.editor.createModel(source, 'typescript', uri)
   const editor = monaco.editor.create(element, {
     model, theme: 'vs', automaticLayout: true, minimap: { enabled: false }, fontSize: 13, tabSize: 2, scrollBeyondLastLine: false,
   })
 
   const decorations = editor.createDecorationsCollection()
-  const colorer = () => decorations.set(blocsDesMethodes(model).map(({ debut, fin, classe }) => ({
-    range: new monaco.Range(debut, 1, fin, 1),
+  const colorer = () => decorations.set(blocsDesMethodes(model).map(({ start, end, classe }) => ({
+    range: new monaco.Range(start, 1, end, 1),
     options: { isWholeLine: true, linesDecorationsClassName: classe },
   })))
   colorer()
@@ -99,20 +99,20 @@ export function creerEditeur(element: HTMLElement, source: string): Editeur {
 
   return {
     source: () => model.getValue(),
-    remplacer: (texte) => model.setValue(texte),
+    remplacer: (text) => model.setValue(text),
     async compiler() {
       const worker = await (await ts.getTypeScriptWorker())(uri)
-      const [syntaxe, semantique, sortie] = await Promise.all([
+      const [syntaxe, semantique, move_out] = await Promise.all([
         worker.getSyntacticDiagnostics(uri.toString()),
         worker.getSemanticDiagnostics(uri.toString()),
         worker.getEmitOutput(uri.toString()),
       ])
       const erreurs = [...syntaxe, ...semantique].map((d) => {
-        const texte = typeof d.messageText === 'string' ? d.messageText : d.messageText.messageText
+        const text = typeof d.messageText === 'string' ? d.messageText : d.messageText.messageText
         const ligne = d.start === undefined ? null : model.getPositionAt(d.start).lineNumber
-        return ligne ? `ligne ${ligne} : ${texte}` : texte
+        return ligne ? `ligne ${ligne} : ${text}` : text
       })
-      const js = sortie.outputFiles.find((f) => f.name.endsWith('.js'))
+      const js = move_out.outputFiles.find((f) => f.name.endsWith('.js'))
       return { code: js?.text ?? '', erreurs }
     },
     surChangement: (rappel) => { model.onDidChangeContent(rappel) },

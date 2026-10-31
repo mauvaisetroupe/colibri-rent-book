@@ -31,7 +31,7 @@ describe('general meetings', { skip: skipWithoutDatabase }, () => {
   let pool: pg.Pool
   let app: Awaited<ReturnType<typeof buildApp>>
   let storageDir: string
-  let associes: { id: number, nom: string }[]
+  let partners: { id: number, name: string }[]
 
   before(async () => {
     pool = createTestPool()
@@ -40,12 +40,12 @@ describe('general meetings', { skip: skipWithoutDatabase }, () => {
     app = await buildApp({ db: pool, storageDir })
     await app.inject({
       method: 'PUT', url: '/api/societe',
-      payload: { denomination: 'SCI Exemple', forme: 'SCI', capital: '1000', siege: '1 rue de l\'Exemple, 75000 Paris', rcs: 'RCS Paris 000 000 000' },
+      payload: { name: 'SCI Exemple', legal_form: 'SCI', capital: '1000', registered_office: '1 rue de l\'Exemple, 75000 Paris', rcs: 'RCS Paris 000 000 000' },
     })
-    for (const a of [{ nom: 'Alice Martin', parts: 50, gerant: true }, { nom: 'Bruno Martin', parts: 50, gerant: false }]) {
+    for (const a of [{ name: 'Alice Martin', shares: 50, manager: true }, { name: 'Bruno Martin', shares: 50, manager: false }]) {
       assert.equal((await app.inject({ method: 'POST', url: '/api/associes', payload: a })).statusCode, 201)
     }
-    associes = (await app.inject('/api/societe')).json().associes
+    partners = (await app.inject('/api/societe')).json().partners
   })
 
   after(async () => {
@@ -55,17 +55,17 @@ describe('general meetings', { skip: skipWithoutDatabase }, () => {
   })
 
   const nouvelle = async (date: string) =>
-    (await app.inject({ method: 'POST', url: '/api/assemblees', payload: { type: 'ordinaire', date, modele: 'annuelle', lieu: 'au siège' } })).json()
+    (await app.inject({ method: 'POST', url: '/api/assemblees', payload: { type: 'ordinary', date, modele: 'annuelle', place: 'au siège' } })).json()
 
   test('the annual meeting is proposed: agenda, four resolutions, all partners present and in favour', async () => {
     const a = await nouvelle('2026-06-15')
-    assert.equal(a.statut, 'brouillon')
-    assert.equal(a.president, 'Alice Martin')
-    assert.deepEqual([a.parts_total, a.parts_presentes], [100, 100])
-    assert.match(a.ordre_du_jour, /1\. Approbation des comptes de l'exercice 2025/)
+    assert.equal(a.status, 'draft')
+    assert.equal(a.chair, 'Alice Martin')
+    assert.deepEqual([a.total_shares, a.shares_present], [100, 100])
+    assert.match(a.agenda, /1\. Approbation des comptes de l'exercice 2025/)
     assert.equal(a.resolutions.length, 4)
     assert.ok(a.resolutions.every((r: { unanimite: boolean }) => r.unanimite))
-    assert.match(a.resolutions[1].texte, /Alice Martin : 50 parts sur 100 \(50 %\)/)
+    assert.match(a.resolutions[1].text, /Alice Martin : 50 parts sur 100 \(50 %\)/)
   })
 
   test('a draft is changed: an absent partner, a rejected resolution', async () => {
@@ -75,37 +75,37 @@ describe('general meetings', { skip: skipWithoutDatabase }, () => {
       method: 'PUT', url: `/api/assemblees/${id}`,
       payload: {
         ...a,
-        presences: a.presences.map((p: { associe_id: number }) => ({
-          ...p, presence: p.associe_id === associes[1]!.id ? 'represente' : 'present', represente_par: 'Alice Martin',
+        attendances: a.attendances.map((p: { partner_id: number }) => ({
+          ...p, status: p.partner_id === partners[1]!.id ? 'represented' : 'present', represented_by: 'Alice Martin',
         })),
         resolutions: [
           a.resolutions[0],
-          { ...a.resolutions[1], texte: a.resolutions[1].texte.replace('[montant]', '12 345,67') },
+          { ...a.resolutions[1], text: a.resolutions[1].text.replace('[montant]', '12 345,67') },
           a.resolutions[2],
-          { titre: 'Résolution soumise au vote', texte: 'Texte.', pour: 50, contre: 50, abstention: 0 },
+          { title: 'Résolution soumise au vote', text: 'Texte.', votes_for: 50, votes_against: 50, abstentions: 0 },
         ],
       },
     })
     assert.equal(changed.statusCode, 200, changed.body)
     const r = changed.json().resolutions
     assert.deepEqual(r.map((x: { adoptee: boolean }) => x.adoptee), [true, true, true, false])
-    assert.equal(changed.json().presences.find((p: { associe_id: number }) => p.associe_id === associes[1]!.id).represente_par, 'Alice Martin')
+    assert.equal(changed.json().attendances.find((p: { partner_id: number }) => p.partner_id === partners[1]!.id).represented_by, 'Alice Martin')
   })
 
   test('closing numbers the register and freezes the meeting', async () => {
     const [{ id }] = (await app.inject('/api/assemblees')).json()
     const close = await app.inject({ method: 'POST', url: `/api/assemblees/${id}/cloture` })
     assert.equal(close.statusCode, 200, close.body)
-    assert.deepEqual([close.json().numero, close.json().statut], [1, 'close'])
+    assert.deepEqual([close.json().number, close.json().status], [1, 'closed'])
 
     assert.equal((await app.inject({ method: 'PUT', url: `/api/assemblees/${id}`, payload: close.json() })).statusCode, 409)
     assert.equal((await app.inject({ method: 'DELETE', url: `/api/assemblees/${id}` })).statusCode, 409)
-    await assert.rejects(pool.query('UPDATE assemblee SET lieu = \'ailleurs\' WHERE id = $1', [id]), /n'est plus modifiée/)
-    await assert.rejects(pool.query('DELETE FROM resolution WHERE assemblee_id = $1', [id]), /ne changent plus/)
+    await assert.rejects(pool.query('UPDATE general_meeting SET place = \'ailleurs\' WHERE id = $1', [id]), /n'est plus modifiée/)
+    await assert.rejects(pool.query('DELETE FROM resolution WHERE general_meeting_id = $1', [id]), /ne changent plus/)
     // A partner of the register is kept
-    assert.equal((await app.inject({ method: 'DELETE', url: `/api/associes/${associes[1]!.id}` })).statusCode, 409)
+    assert.equal((await app.inject({ method: 'DELETE', url: `/api/associes/${partners[1]!.id}` })).statusCode, 409)
     // Renaming the company afterwards does not change the minutes frozen
-    await app.inject({ method: 'PUT', url: '/api/societe', payload: { denomination: 'SCI Renommée' } })
+    await app.inject({ method: 'PUT', url: '/api/societe', payload: { name: 'SCI Renommée' } })
 
     // The model leaves the result to complete: closing is refused until it is
     const second = await nouvelle('2027-06-15')
@@ -114,23 +114,23 @@ describe('general meetings', { skip: skipWithoutDatabase }, () => {
     assert.match(refus.json().message, /Résolution n° 2 : texte à compléter \(\[montant\]\)/)
     await app.inject({
       method: 'PUT', url: `/api/assemblees/${second.id}`,
-      payload: { ...second, resolutions: second.resolutions.map((r: { texte: string }) => ({ ...r, texte: r.texte.replace('[montant]', '0') })) },
+      payload: { ...second, resolutions: second.resolutions.map((r: { text: string }) => ({ ...r, text: r.text.replace('[montant]', '0') })) },
     })
-    assert.equal((await app.inject({ method: 'POST', url: `/api/assemblees/${second.id}/cloture` })).json().numero, 2)
+    assert.equal((await app.inject({ method: 'POST', url: `/api/assemblees/${second.id}/cloture` })).json().number, 2)
   })
 
   test('the minutes in PDF: frozen once closed, a project for a draft', { skip: !hasPdftotext && 'pdftotext missing' }, async () => {
     const liste = (await app.inject('/api/assemblees')).json()
-    const close = liste.find((a: { numero: number }) => a.numero === 1)
+    const close = liste.find((a: { number: number }) => a.number === 1)
     const pv = await app.inject(`/api/assemblees/${close.id}/pv`)
     assert.equal(pv.headers['content-type'], 'application/pdf')
-    const texte = await pdftotext(pv.rawPayload)
-    assert.match(texte, /SCI Exemple/)
-    assert.match(texte, /procès-verbal n° 1/)
-    assert.match(texte, /Bruno Martin 50 50 % représenté par Alice Martin/)
-    assert.match(texte, /adoptée à l'unanimité/)
-    assert.match(texte, /s'élève à 12 345,67 €/)
-    assert.match(texte, /Cette résolution est rejetée \(pour : 50 parts, contre : 50/)
+    const text = await pdftotext(pv.rawPayload)
+    assert.match(text, /SCI Exemple/)
+    assert.match(text, /procès-verbal n° 1/)
+    assert.match(text, /Bruno Martin 50 50 % représenté par Alice Martin/)
+    assert.match(text, /adoptée à l'unanimité/)
+    assert.match(text, /s'élève à 12 345,67 €/)
+    assert.match(text, /Cette résolution est rejetée \(pour : 50 parts, contre : 50/)
 
     const brouillon = await nouvelle('2028-06-15')
     assert.match(await pdftotext((await app.inject(`/api/assemblees/${brouillon.id}/pv`)).rawPayload), /Projet – assemblée non close/)
@@ -138,8 +138,8 @@ describe('general meetings', { skip: skipWithoutDatabase }, () => {
 
   test('the signed minutes are attached to a closed meeting only', async () => {
     const liste = (await app.inject('/api/assemblees')).json()
-    const close = liste.find((a: { numero: number }) => a.numero === 1)
-    const brouillon = liste.find((a: { statut: string }) => a.statut === 'brouillon')
+    const close = liste.find((a: { number: number }) => a.number === 1)
+    const brouillon = liste.find((a: { status: string }) => a.status === 'draft')
     const pdf = await PDFDocument.create()
     pdf.addPage()
     const content = Buffer.from(await pdf.save())
@@ -152,7 +152,7 @@ describe('general meetings', { skip: skipWithoutDatabase }, () => {
       headers: { 'content-type': 'multipart/form-data; boundary=b' },
     })
     assert.equal((await envoyer(brouillon.id)).statusCode, 409)
-    assert.equal((await envoyer(close.id)).json().pv_signe, true)
+    assert.equal((await envoyer(close.id)).json().signed_minutes, true)
     assert.deepEqual((await app.inject(`/api/assemblees/${close.id}/pv-signe`)).rawPayload, content)
   })
 })

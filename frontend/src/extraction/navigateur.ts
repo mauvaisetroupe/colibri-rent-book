@@ -27,26 +27,26 @@ export async function morceauxDuPdf(fichier: Blob): Promise<Morceau[][]> {
   }
 }
 
-export type Candidat = { enregistre: ExtracteurEnregistre, extracteur: ClasseExtracteur }
+export type Candidat = { enregistre: ExtracteurEnregistre, extractor: ClasseExtracteur }
 
 const charges = new Map<number, ClasseExtracteur>()
 
 /** The class of the extractor of a stored version (its JavaScript, loaded once). */
 export function extracteurDe(enregistre: ExtracteurEnregistre): ClasseExtracteur {
-  let extracteur = charges.get(enregistre.id)
-  if (!extracteur) {
-    extracteur = charger(enregistre.code)
-    charges.set(enregistre.id, extracteur)
+  let extractor = charges.get(enregistre.id)
+  if (!extractor) {
+    extractor = charger(enregistre.code)
+    charges.set(enregistre.id, extractor)
   }
-  return extracteur
+  return extractor
 }
 
 /** The last versions that recognise the PDF; each one reads it with its own grouping settings. */
 export function candidats(pages: Morceau[][], enregistres: ExtracteurEnregistre[]): Candidat[] {
-  return enregistres.filter((e) => e.derniere && (e.type ?? 'facture') === 'facture').flatMap((enregistre) => {
+  return enregistres.filter((e) => e.latest && (e.type ?? 'invoice') === 'invoice').flatMap((enregistre) => {
     try {
-      const extracteur = extracteurDe(enregistre)
-      return reconnait(extracteur, documentDe(pages, enregistre.reglages)) ? [{ enregistre, extracteur }] : []
+      const extractor = extracteurDe(enregistre)
+      return reconnait(extractor, documentDe(pages, enregistre.settings)) ? [{ enregistre, extractor }] : []
     } catch {
       // An extractor whose code does not load recognises nothing
       return []
@@ -54,24 +54,24 @@ export function candidats(pages: Morceau[][], enregistres: ExtracteurEnregistre[
   })
 }
 
-export const lire = (pages: Morceau[][], { enregistre, extracteur }: Candidat): Extraction =>
-  extraire(extracteur, documentDe(pages, enregistre.reglages))
+export const lire = (pages: Morceau[][], { enregistre, extractor }: Candidat): Extraction =>
+  extraire(extractor, documentDe(pages, enregistre.settings))
 
 /** The draft sent on import; null with the reason when the number or the date was not read. */
 export function brouillonDe(extraction: Extraction, extracteurId: number): { brouillon: Brouillon | null, probleme: string | null } {
-  const erreurs = (['numero', 'date', 'total', 'lignes'] as const)
+  const erreurs = (['number', 'date', 'total', 'lines'] as const)
     .filter((c) => extraction[c].erreur)
     .map((c) => `${c} : ${extraction[c].erreur}`)
-  if (!extraction.numero.valeur || !extraction.date.valeur || extraction.lignes.erreur) {
+  if (!extraction.number.valeur || !extraction.date.valeur || extraction.lines.erreur) {
     return { brouillon: null, probleme: erreurs.join(' ; ') || 'numéro ou date introuvable' }
   }
   return {
     brouillon: {
-      extracteur_id: extracteurId,
-      numero: extraction.numero.valeur,
-      date_facture: extraction.date.valeur,
-      montant_ttc: extraction.total.valeur,
-      lignes: extraction.lignes.valeur ?? [],
+      extractor_id: extracteurId,
+      number: extraction.number.valeur,
+      invoice_date: extraction.date.valeur,
+      total_incl_tax: extraction.total.valeur,
+      lines: extraction.lines.valeur ?? [],
     },
     probleme: null,
   }
@@ -79,43 +79,43 @@ export function brouillonDe(extraction: Extraction, extracteurId: number): { bro
 
 // ---------------------------------------------------------------- bank statements (ADR 0018)
 
-export type CandidatReleve = { enregistre: ExtracteurEnregistre, extracteur: ClasseExtracteurReleve }
+export type CandidatReleve = { enregistre: ExtracteurEnregistre, extractor: ClasseExtracteurReleve }
 
 const chargesReleve = new Map<number, ClasseExtracteurReleve>()
 
 export function extracteurReleveDe(enregistre: ExtracteurEnregistre): ClasseExtracteurReleve {
-  let extracteur = chargesReleve.get(enregistre.id)
-  if (!extracteur) {
-    extracteur = chargerReleve(enregistre.code)
-    chargesReleve.set(enregistre.id, extracteur)
+  let extractor = chargesReleve.get(enregistre.id)
+  if (!extractor) {
+    extractor = chargerReleve(enregistre.code)
+    chargesReleve.set(enregistre.id, extractor)
   }
-  return extracteur
+  return extractor
 }
 
 /** The last versions of the statement extractors that recognise the PDF. */
 export function candidatsReleve(pages: Morceau[][], enregistres: ExtracteurEnregistre[]): CandidatReleve[] {
-  return enregistres.filter((e) => e.derniere && e.type === 'releve').flatMap((enregistre) => {
+  return enregistres.filter((e) => e.latest && e.type === 'bank_statement').flatMap((enregistre) => {
     try {
-      const extracteur = extracteurReleveDe(enregistre)
-      return reconnaitReleve(extracteur, documentReleve(pages, enregistre.reglages)) ? [{ enregistre, extracteur }] : []
+      const extractor = extracteurReleveDe(enregistre)
+      return reconnaitReleve(extractor, documentReleve(pages, enregistre.settings)) ? [{ enregistre, extractor }] : []
     } catch {
       return []
     }
   })
 }
 
-export const lireReleve = (pages: Morceau[][], { enregistre, extracteur }: CandidatReleve): ExtractionReleve =>
-  extraireReleve(extracteur, documentReleve(pages, enregistre.reglages))
+export const lireReleve = (pages: Morceau[][], { enregistre, extractor }: CandidatReleve): ExtractionReleve =>
+  extraireReleve(extractor, documentReleve(pages, enregistre.settings))
 
 // ---------------------------------------------------------------- copy joined to a supporting document (ADR 0024)
 
 /** The last version of the invoice extractor of a supplier, if it has one. */
-const extracteurDuFournisseur = (fournisseur: string, enregistres: ExtracteurEnregistre[]) =>
-  enregistres.find((e) => e.derniere && (e.type ?? 'facture') === 'facture' && e.fournisseur === fournisseur) ?? null
+const extracteurDuFournisseur = (supplier: string, enregistres: ExtracteurEnregistre[]) =>
+  enregistres.find((e) => e.latest && (e.type ?? 'invoice') === 'invoice' && e.supplier === supplier) ?? null
 
 /** Each page drawn by pdf.js, its zones painted black, in black and white. */
 async function pagesEnImages(pdf: pdfjs.PDFDocumentProxy, zones: Zone[]): Promise<PageImage[]> {
-  const { dpi, seuil } = REGLAGES_ANNEXE
+  const { dpi, threshold } = REGLAGES_ANNEXE
   const images: PageImage[] = []
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n)
@@ -135,7 +135,7 @@ async function pagesEnImages(pdf: pdfjs.PDFDocumentProxy, zones: Zone[]): Promis
     const { data } = contexte.getImageData(0, 0, canvas.width, canvas.height)
     images.push({
       largeur: taille.width, hauteur: taille.height, largeurPx: canvas.width, hauteurPx: canvas.height,
-      bits: binariser(data, canvas.width, canvas.height, seuil),
+      bits: binariser(data, canvas.width, canvas.height, threshold),
     })
     canvas.width = canvas.height = 0
     page.cleanup()
@@ -155,12 +155,12 @@ async function scanneesDe(pdf: pdfjs.PDFDocumentProxy): Promise<number[]> {
 }
 
 /** Zones drawn by hand for the scans of an invoice: its own (`main`), or else those of its supplier (`modele`). */
-export type ZonesDesScans = { zones: ZoneSaisie[], origine: 'modele' | 'main' }
+export type ZonesDesScans = { zones: ZoneSaisie[], origin: 'template' | 'manual' }
 
-type ExtracteurLu = { classe: ClasseExtracteur, reglages: Reglages }
+type ExtracteurLu = { classe: ClasseExtracteur, settings: Reglages }
 
 /** The zones of an open PDF (see `masquage`), and its scanned pages. */
-async function zonesDu(pdf: pdfjs.PDFDocumentProxy, termes: string[], extracteur: ExtracteurLu | null, scans: ZonesDesScans) {
+async function zonesDu(pdf: pdfjs.PDFDocumentProxy, terms: string[], extractor: ExtracteurLu | null, scans: ZonesDesScans) {
   const pieces = await morceaux(pdf)
   const pages: PageLue[] = []
   for (let n = 1; n <= pdf.numPages; n++) {
@@ -168,7 +168,7 @@ async function zonesDu(pdf: pdfjs.PDFDocumentProxy, termes: string[], extracteur
     pages.push({ largeur: width, hauteur: height, morceaux: pieces[n - 1] ?? [] })
   }
   const scannees = await scanneesDe(pdf)
-  const zones = masquage(pages, extracteur?.reglages ?? REGLAGES_PAR_DEFAUT, termes, extracteur?.classe ?? null,
+  const zones = masquage(pages, extractor?.settings ?? REGLAGES_PAR_DEFAUT, terms, extractor?.classe ?? null,
     { pages: scannees, ...scans })
   return { zones, scannees }
 }
@@ -179,13 +179,13 @@ async function zonesDu(pdf: pdfjs.PDFDocumentProxy, termes: string[], extracteur
  * drawn by hand. Every page in images, the zones painted black.
  */
 export async function copieEnImages(
-  contenu: Uint8Array, termes: string[], extracteur: ExtracteurLu | null,
-  scans: ZonesDesScans = { zones: [], origine: 'modele' },
+  contenu: Uint8Array, terms: string[], extractor: ExtracteurLu | null,
+  scans: ZonesDesScans = { zones: [], origin: 'template' },
 ): Promise<{ pdf: Uint8Array, zones: Zone[], scannees: number[] }> {
   const chargement = ouvrir(contenu)
   try {
     const pdf = await chargement.promise
-    const { zones, scannees } = await zonesDu(pdf, termes, extracteur, scans)
+    const { zones, scannees } = await zonesDu(pdf, terms, extractor, scans)
     return { pdf: await pdfEnImages(await pagesEnImages(pdf, zones)), zones, scannees }
   } finally {
     await chargement.destroy()
@@ -198,20 +198,20 @@ export async function copieEnImages(
  * `donnees`: the terms, the extractors and the zones of the supplier, when several invoices are made at once.
  */
 export async function preparerAnnexe(
-  facture: Pick<Facture, 'id' | 'fournisseur' | 'fournisseur_id' | 'zones_masquees'>,
-  donnees?: { termes: string[], extracteurs: ExtracteurEnregistre[], modele: ZoneSaisie[] },
+  invoice: Pick<Facture, 'id' | 'supplier' | 'supplier_id' | 'masked_zones'>,
+  donnees?: { terms: string[], extractors: ExtracteurEnregistre[], modele: ZoneSaisie[] },
 ): Promise<FactureDetail> {
-  const [termes, extracteurs, modele] = donnees
-    ? [donnees.termes, donnees.extracteurs, donnees.modele]
-    : await Promise.all([api.termesMasques(), api.extracteurs(),
-      api.fournisseur(facture.fournisseur_id).then((f) => f.zones_masquees)])
-  const enregistre = extracteurDuFournisseur(facture.fournisseur, extracteurs)
-  const contenu = new Uint8Array(await (await (await fetch(api.pdfUrl(facture.id))).blob()).arrayBuffer())
-  const { pdf, zones, scannees } = await copieEnImages(contenu, termes,
-    enregistre ? { classe: extracteurDe(enregistre), reglages: enregistre.reglages } : null,
-    facture.zones_masquees ? { zones: facture.zones_masquees, origine: 'main' } : { zones: modele, origine: 'modele' })
-  return api.envoyerAnnexe(facture.id, pdf, {
-    zones, extracteur_id: enregistre?.id ?? null, termes, reglages: REGLAGES_ANNEXE, pages_scannees: scannees,
+  const [terms, extractors, modele] = donnees
+    ? [donnees.terms, donnees.extractors, donnees.modele]
+    : await Promise.all([api.termesMasques(), api.extractors(),
+      api.supplier(invoice.supplier_id).then((f) => f.masked_zones)])
+  const enregistre = extracteurDuFournisseur(invoice.supplier, extractors)
+  const contenu = new Uint8Array(await (await (await fetch(api.pdfUrl(invoice.id))).blob()).arrayBuffer())
+  const { pdf, zones, scannees } = await copieEnImages(contenu, terms,
+    enregistre ? { classe: extracteurDe(enregistre), settings: enregistre.settings } : null,
+    invoice.masked_zones ? { zones: invoice.masked_zones, origin: 'manual' } : { zones: modele, origin: 'template' })
+  return api.envoyerAnnexe(invoice.id, pdf, {
+    zones, extractor_id: enregistre?.id ?? null, terms, settings: REGLAGES_ANNEXE, scanned_pages: scannees,
   })
 }
 
@@ -219,13 +219,13 @@ export async function preparerAnnexe(
  * What the masked terms and the last extractor of a supplier mask on a PDF, without the zones drawn by hand: shown in
  * the editor of zones, where there is no need to draw them again.
  */
-export async function zonesAutomatiques(contenu: Uint8Array, fournisseur: string): Promise<Zone[]> {
-  const [termes, extracteurs] = await Promise.all([api.termesMasques(), api.extracteurs()])
-  const enregistre = extracteurDuFournisseur(fournisseur, extracteurs)
+export async function zonesAutomatiques(contenu: Uint8Array, supplier: string): Promise<Zone[]> {
+  const [terms, extractors] = await Promise.all([api.termesMasques(), api.extractors()])
+  const enregistre = extracteurDuFournisseur(supplier, extractors)
   const chargement = ouvrir(contenu)
   try {
-    return (await zonesDu(await chargement.promise, termes,
-      enregistre ? { classe: extracteurDe(enregistre), reglages: enregistre.reglages } : null, { zones: [], origine: 'modele' })).zones
+    return (await zonesDu(await chargement.promise, terms,
+      enregistre ? { classe: extracteurDe(enregistre), settings: enregistre.settings } : null, { zones: [], origin: 'template' })).zones
   } finally {
     await chargement.destroy()
   }

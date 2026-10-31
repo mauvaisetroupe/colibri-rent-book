@@ -36,17 +36,17 @@ import { categoriePropose, proposer } from '../rapprochement'
 // categories with a detail (those whose detail does not cover the amount first, « à rattacher »; a note does not
 // complete them); the other categories.
 
-type Onglet = 'a_categoriser' | 'rapprochement' | 'categorises'
+type Onglet = 'to_categorise' | 'rapprochement' | 'categorises'
 
 const route = useRoute()
 const router = useRouter()
 const confirm = useConfirm()
 const toast = useToast()
 
-const onglet = ref<Onglet>('a_categoriser')
-const mouvements = ref<Mouvement[]>([])
-const releves = ref<ReleveResume[]>([])
-const annee = ref('')
+const onglet = ref<Onglet>('to_categorise')
+const transactions = ref<Mouvement[]>([])
+const statements = ref<ReleveResume[]>([])
+const year = ref('')
 const releveId = ref<number | null>(null)
 const sens = ref<'' | 'credit' | 'debit'>('')
 const filtreCategorie = ref<CategorieMouvement | ''>('')
@@ -56,59 +56,59 @@ const recherche = ref('')
 const occupe = ref(false)
 // Rows unfolded (detail of a tenant payment or works), by movement id
 const deplies = ref<Record<number, boolean>>({})
-// Opened from a payment (?mouvement=): highlighted
+// Opened from a payment (?bank_transaction=): highlighted
 const surligne = ref<number | null>(null)
 
 // What the proposals and the forms need, every building
-const immeubles = ref<Immeuble[]>([])
-const sejours = ref<Sejour[]>([])
-const echeances = ref<Echeance[]>([])
-const regularisations = ref<Regularisation[]>([])
-const paiements = ref<Paiement[]>([])
-const travaux = ref<Travaux[]>([])
-const factures = ref<FactureResumee[]>([])
-const depots = ref<VersementDepot[]>([])
-const lots = ref<Map<number, Lot[]>>(new Map())
+const buildings = ref<Immeuble[]>([])
+const tenancies = ref<Sejour[]>([])
+const rent_schedules = ref<Echeance[]>([])
+const charge_adjustments = ref<Regularisation[]>([])
+const payments = ref<Paiement[]>([])
+const works_invoice = ref<Travaux[]>([])
+const invoices = ref<FactureResumee[]>([])
+const deposits = ref<VersementDepot[]>([])
+const units = ref<Map<number, Lot[]>>(new Map())
 
-const ok = (texte: string) => toast.add({ severity: 'success', summary: texte, life: 3000 })
+const ok = (text: string) => toast.add({ severity: 'success', summary: text, life: 3000 })
 const ko = (e: unknown) => toast.add({ severity: 'error', summary: (e as Error).message, life: 6000 })
 
 onMounted(async () => {
   try {
-    immeubles.value = await api.immeubles()
-    lots.value = new Map(await Promise.all(immeubles.value.map(async (i) => [i.id, (await api.immeuble(i.id)).lots] as const)))
+    buildings.value = await api.buildings()
+    units.value = new Map(await Promise.all(buildings.value.map(async (i) => [i.id, (await api.building(i.id)).units] as const)))
     await Promise.all([chargerReferentiel(), charger()])
   } catch (e) {
     ko(e)
   }
-  await ouvrirMouvement(Number(route.query.mouvement))
+  await ouvrirMouvement(Number(route.query.bank_transaction))
   // From the page of a statement: its movements
   const releve = Number(route.query.releve)
-  if (releves.value.some((r) => r.id === releve)) {
+  if (statements.value.some((r) => r.id === releve)) {
     releveId.value = releve
-    annee.value = ''
+    year.value = ''
   }
 })
 
 async function chargerReferentiel() {
-  const parImmeuble = await Promise.all(immeubles.value.map(async (i) => ({
-    sejours: await api.sejours(i.id), echeances: await api.echeances(i.id), regularisations: await api.regularisations(i.id),
-    paiements: await api.paiements(i.id, null), travaux: await api.travaux(i.id), depots: await api.depots(i.id),
-    factures: await api.factures(i.id),
+  const parImmeuble = await Promise.all(buildings.value.map(async (i) => ({
+    tenancies: await api.tenancies(i.id), rent_schedules: await api.rent_schedules(i.id), charge_adjustments: await api.charge_adjustments(i.id),
+    payments: await api.payments(i.id, null), works_invoice: await api.works_invoice(i.id), deposits: await api.deposits(i.id),
+    invoices: await api.invoices(i.id),
   })))
-  sejours.value = parImmeuble.flatMap((x) => x.sejours)
-  echeances.value = parImmeuble.flatMap((x) => x.echeances)
-  regularisations.value = parImmeuble.flatMap((x) => x.regularisations)
-  paiements.value = parImmeuble.flatMap((x) => x.paiements)
-  travaux.value = parImmeuble.flatMap((x) => x.travaux)
-  factures.value = parImmeuble.flatMap((x) => x.factures)
-  depots.value = parImmeuble.flatMap((x) => x.depots)
+  tenancies.value = parImmeuble.flatMap((x) => x.tenancies)
+  rent_schedules.value = parImmeuble.flatMap((x) => x.rent_schedules)
+  charge_adjustments.value = parImmeuble.flatMap((x) => x.charge_adjustments)
+  payments.value = parImmeuble.flatMap((x) => x.payments)
+  works_invoice.value = parImmeuble.flatMap((x) => x.works_invoice)
+  invoices.value = parImmeuble.flatMap((x) => x.invoices)
+  deposits.value = parImmeuble.flatMap((x) => x.deposits)
 }
 
 async function charger() {
-  ;[mouvements.value, releves.value] = await Promise.all([api.mouvements('tous'), api.releves()])
+  ;[transactions.value, statements.value] = await Promise.all([api.transactions('tous'), api.statements()])
   // The statement of the filter deleted (imported again, it has another id): every statement
-  if (releveId.value !== null && !releves.value.some((r) => r.id === releveId.value)) {
+  if (releveId.value !== null && !statements.value.some((r) => r.id === releveId.value)) {
     releveId.value = null
   }
 }
@@ -116,14 +116,14 @@ async function charger() {
 const recharger = () => Promise.all([chargerReferentiel(), charger()])
 
 async function ouvrirMouvement(id: number) {
-  const m = mouvements.value.find((x) => x.id === id)
+  const m = transactions.value.find((x) => x.id === id)
   if (!m) {
     return
   }
-  annee.value = m.date_operation.slice(0, 4)
-  releveId.value = m.releve_id
+  year.value = m.transaction_date.slice(0, 4)
+  releveId.value = m.bank_statement_id
   onglet.value = ongletDe(m)
-  seulementARattacher.value = m.statut === 'incomplet'
+  seulementARattacher.value = m.status === 'incomplet'
   surligne.value = m.id
   if (aDetail(m)) {
     deplies.value = { [m.id]: true }
@@ -134,43 +134,43 @@ async function ouvrirMouvement(id: number) {
 
 // ---------------------------------------------------------------- lists and filters
 
-const estCredit = (m: Mouvement) => new Big(m.montant).gt(0)
-const reste = (m: Mouvement) => new Big(m.montant).abs().minus(m.couvert).toString()
-const ongletDe = (m: Mouvement): Onglet => (m.statut === 'a_categoriser' ? 'a_categoriser' : aDetail(m) ? 'rapprochement' : 'categorises')
+const estCredit = (m: Mouvement) => new Big(m.amount).gt(0)
+const remaining = (m: Mouvement) => new Big(m.amount).abs().minus(m.covered).toString()
+const ongletDe = (m: Mouvement): Onglet => (m.status === 'to_categorise' ? 'to_categorise' : aDetail(m) ? 'rapprochement' : 'categorises')
 // The filters above the tabs apply to both: year, statement, sense, search
 function filtre(m: Mouvement) {
-  const texte = recherche.value.trim().toUpperCase()
-  return (releveId.value === null || m.releve_id === releveId.value)
-    && (releveId.value !== null || !annee.value || m.date_operation.startsWith(annee.value))
+  const text = recherche.value.trim().toUpperCase()
+  return (releveId.value === null || m.bank_statement_id === releveId.value)
+    && (releveId.value !== null || !year.value || m.transaction_date.startsWith(year.value))
     && (!sens.value || (sens.value === 'credit') === estCredit(m))
-    && (!texte || `${m.libelle} ${m.detail ?? ''} ${m.note ?? ''}`.toUpperCase().includes(texte))
+    && (!text || `${m.label} ${m.detail ?? ''} ${m.note ?? ''}`.toUpperCase().includes(text))
 }
-const filtres = computed(() => mouvements.value.filter(filtre))
+const filtres = computed(() => transactions.value.filter(filtre))
 const nombre = (o: Onglet) => filtres.value.filter((m) => ongletDe(m) === o).length
-const aRattacher = computed(() => filtres.value.filter((m) => m.statut === 'incomplet').length)
-const nomCategorie = (c: CategorieMouvement | null) => (c ? CATEGORIES_MOUVEMENT[c].nom : '')
+const aRattacher = computed(() => filtres.value.filter((m) => m.status === 'incomplet').length)
+const nomCategorie = (c: CategorieMouvement | null) => (c ? CATEGORIES_MOUVEMENT[c].name : '')
 const iconeCategorie = (c: CategorieMouvement | null) => (c ? CATEGORIES_MOUVEMENT[c].icone : '')
 // A detail to unfold: required (tenant, works, deposit), or the invoices of charges paid (ADR 0022)
-const aDetail = (m: Mouvement) => m.categorie !== null && (AVEC_DETAIL.includes(m.categorie) || AVEC_FACTURE.includes(m.categorie))
-const payeFactures = (m: Mouvement) => m.categorie !== null && AVEC_FACTURE.includes(m.categorie)
+const aDetail = (m: Mouvement) => m.category !== null && (AVEC_DETAIL.includes(m.category) || AVEC_FACTURE.includes(m.category))
+const payeFactures = (m: Mouvement) => m.category !== null && AVEC_FACTURE.includes(m.category)
 /** The category of a debit paying an invoice of this energy. */
-const categorieDeFacture = (e: Energie): CategorieMouvement => (e === 'eau' ? 'eau' : e === 'ordures_menageres' ? 'impots' : 'energie')
+const categorieDeFacture = (e: Energie): CategorieMouvement => (e === 'water' ? 'water' : e === 'household_waste' ? 'taxes' : 'energy')
 
-const annees = computed(() => [...new Set(mouvements.value.map((m) => m.date_operation.slice(0, 4)))].sort().reverse())
-const relevesDuFiltre = computed(() => releves.value.filter((r) => !annee.value || r.date_releve.startsWith(annee.value)))
-const plusieursComptes = computed(() => new Set(releves.value.map((r) => r.compte)).size > 1)
+const annees = computed(() => [...new Set(transactions.value.map((m) => m.transaction_date.slice(0, 4)))].sort().reverse())
+const relevesDuFiltre = computed(() => statements.value.filter((r) => !year.value || r.statement_date.startsWith(year.value)))
+const plusieursComptes = computed(() => new Set(statements.value.map((r) => r.account)).size > 1)
 
 const affiches = computed(() => filtres.value
   .filter((m) => ongletDe(m) === onglet.value
-    && (!seulementARattacher.value || onglet.value !== 'rapprochement' || m.statut === 'incomplet')
-    && (onglet.value === 'a_categoriser' || !filtreCategorie.value || m.categorie === filtreCategorie.value))
+    && (!seulementARattacher.value || onglet.value !== 'rapprochement' || m.status === 'incomplet')
+    && (onglet.value === 'to_categorise' || !filtreCategorie.value || m.category === filtreCategorie.value))
   // Those to complete first, then by date (the table keeps this order until a column is sorted)
-  .sort((a, b) => Number(b.statut === 'incomplet') - Number(a.statut === 'incomplet')
-    || a.date_operation.localeCompare(b.date_operation) || a.releve_id - b.releve_id || a.ordre - b.ordre))
+  .sort((a, b) => Number(b.status === 'incomplet') - Number(a.status === 'incomplet')
+    || a.transaction_date.localeCompare(b.transaction_date) || a.bank_statement_id - b.bank_statement_id || a.position - b.position))
 
 // ---------------------------------------------------------------- categories
 
-const proposition = (m: Mouvement) => categoriePropose(m, sejours.value)
+const proposition = (m: Mouvement) => categoriePropose(m, tenancies.value)
 
 async function agir(action: () => Promise<unknown>, succes: string) {
   occupe.value = true
@@ -186,16 +186,16 @@ async function agir(action: () => Promise<unknown>, succes: string) {
 }
 
 // A category with a note to type (« autre »), or the note of a categorised movement
-const saisieNote = ref<{ mouvement: Mouvement, categorie: CategorieMouvement, note: string, titre: string } | null>(null)
+const saisieNote = ref<{ bank_transaction: Mouvement, category: CategorieMouvement, note: string, title: string } | null>(null)
 
-function categoriser(m: Mouvement, categorie: CategorieMouvement) {
-  if (categorie === 'autre') {
-    saisieNote.value = { mouvement: m, categorie, note: '', titre: 'Autre : qu\'est-ce que ce mouvement ?' }
+function categoriser(m: Mouvement, category: CategorieMouvement) {
+  if (category === 'other') {
+    saisieNote.value = { bank_transaction: m, category, note: '', title: 'Autre : qu\'est-ce que ce mouvement ?' }
     return
   }
   // A category with a detail (tenant payment, works, invoice…): given later, in « Rapprochement » (to link)
-  return agir(() => api.categoriserMouvement(m.id, categorie),
-    AVEC_DETAIL.includes(categorie) ? `${nomCategorie(categorie)} : à rattacher dans « Rapprochement »` : nomCategorie(categorie))
+  return agir(() => api.categoriserMouvement(m.id, category),
+    AVEC_DETAIL.includes(category) ? `${nomCategorie(category)} : à rattacher dans « Rapprochement »` : nomCategorie(category))
 }
 
 function enregistrerNote() {
@@ -204,12 +204,12 @@ function enregistrerNote() {
     return
   }
   saisieNote.value = null
-  return agir(() => api.categoriserMouvement(s.mouvement.id, s.categorie, s.note.trim() || null), 'Enregistré')
+  return agir(() => api.categoriserMouvement(s.bank_transaction.id, s.category, s.note.trim() || null), 'Enregistré')
 }
 
 // The note of a categorised movement, edited at any time (empty: removed, except for « autre »)
 function editerNote(m: Mouvement) {
-  saisieNote.value = { mouvement: m, categorie: m.categorie!, note: m.note ?? '', titre: 'Note du mouvement' }
+  saisieNote.value = { bank_transaction: m, category: m.category!, note: m.note ?? '', title: 'Note du mouvement' }
 }
 
 const retirerCategorie = (m: Mouvement) => agir(() => api.retirerCategorie(m.id), 'Catégorie retirée')
@@ -234,25 +234,25 @@ function ouvrirMenu(event: Event, m: Mouvement) {
 
 // ---------------------------------------------------------------- detail: payments of a tenant, works, deposits
 
-const paiementsDe = (m: Mouvement) => paiements.value.filter((p) => p.mouvement_id === m.id)
-const totalPaiement = (p: Paiement) => new Big(p.loyer).plus(p.provision).plus(p.regularisation).toString()
-const moisFr = (mois: string | null) => (mois ? `${mois.slice(5, 7)}/${mois.slice(0, 4)}` : 'régularisation')
-const contexte = (m: Mouvement) => ({ libelle: m.libelle, date: m.date_operation, montant: m.montant, couvert: m.couvert })
+const paiementsDe = (m: Mouvement) => payments.value.filter((p) => p.bank_transaction_id === m.id)
+const totalPaiement = (p: Paiement) => new Big(p.rent).plus(p.charge_advance).plus(p.charge_adjustment).toString()
+const moisFr = (month: string | null) => (month ? `${month.slice(5, 7)}/${month.slice(0, 4)}` : 'régularisation')
+const contexte = (m: Mouvement) => ({ label: m.label, date: m.transaction_date, amount: m.amount, covered: m.covered })
 
 /**
  * Payments or works typed by hand that may be this movement: the server's « possibles » (same amount, ten days), of
  * the tenant named; and the payment of that tenant for the month of the transfer, of the same amount, typed later.
  */
-function possibles(m: Mouvement) {
-  const p = proposer(m, sejours.value, echeances.value, regularisations.value)
-  const sejour = p.sejour
-  const siens = sejour ? m.possibles.filter((x) => (x.type === 'paiement' || x.type === 'groupe') && x.locataire === sejour.locataire) : []
-  const liste: Possible[] = siens.length ? siens : [...m.possibles]
-  if (sejour && m.statut !== 'categorise') {
-    for (const x of paiements.value.filter((y) => !y.mouvement_id && y.sejour_id === sejour.id && y.mois?.slice(0, 7) === p.mois
-      && new Big(totalPaiement(y)).eq(reste(m)))) {
-      if (!liste.some((l) => l.type === 'paiement' && l.id === x.id)) {
-        liste.push({ type: 'paiement', id: x.id, locataire: x.locataire, lot: x.lot, mois: x.mois, date: x.date_paiement })
+function candidates(m: Mouvement) {
+  const p = proposer(m, tenancies.value, rent_schedules.value, charge_adjustments.value)
+  const tenancy = p.tenancy
+  const siens = tenancy ? m.candidates.filter((x) => (x.type === 'payment' || x.type === 'group') && x.tenant === tenancy.tenant) : []
+  const liste: Possible[] = siens.length ? siens : [...m.candidates]
+  if (tenancy && m.status !== 'categorise') {
+    for (const x of payments.value.filter((y) => !y.bank_transaction_id && y.tenancy_id === tenancy.id && y.month?.slice(0, 7) === p.month
+      && new Big(totalPaiement(y)).eq(remaining(m)))) {
+      if (!liste.some((l) => l.type === 'payment' && l.id === x.id)) {
+        liste.push({ type: 'payment', id: x.id, tenant: x.tenant, unit: x.unit, month: x.month, date: x.payment_date })
       }
     }
   }
@@ -260,68 +260,68 @@ function possibles(m: Mouvement) {
 }
 // What the « Rattacher » button links, and how many typed by hand match
 const NOMS_SAISIS: Record<string, string> = {
-  locataire: 'Paiement saisi', travaux: 'Facture de travaux', depot_garantie: 'Dépôt saisi', energie: 'Facture', eau: 'Facture', impots: 'Facture',
+  tenant: 'Paiement saisi', works: 'Facture de travaux', security_deposit: 'Dépôt saisi', energy: 'Facture', water: 'Facture', taxes: 'Facture',
 }
 function libelleRattacher(m: Mouvement) {
-  const nom = payeFactures(m) ? 'Rattacher à une facture…'
-    : { locataire: 'Rattacher à un paiement existant…', travaux: 'Rattacher à une facture de travaux…' }[m.categorie as string]
+  const name = payeFactures(m) ? 'Rattacher à une facture…'
+    : { tenant: 'Rattacher à un paiement existant…', works: 'Rattacher à une facture de travaux…' }[m.category as string]
       ?? 'Rattacher à un dépôt saisi…'
   const n = correspondances(m)
-  return n ? `${nom} ✓ ${n} correspond${n > 1 ? 'ent' : ''}` : nom
+  return n ? `${name} ✓ ${n} correspond${n > 1 ? 'ent' : ''}` : name
 }
 
 // A deposit typed by hand, to link (« depot_garantie »)
-type Possible = Mouvement['possibles'][number] | { type: 'depot', id: number }
+type Possible = Mouvement['candidates'][number] | { type: 'deposit', id: number }
 const lien = (p: Possible) =>
-  p.type === 'groupe' ? { paiement_ids: p.ids } : p.type === 'paiement' ? { paiement_id: p.id }
-    : p.type === 'depot' ? { depot_id: p.id } : p.type === 'facture' ? { facture_id: p.id } : { travaux_id: p.id }
-const clePossible = (p: Possible) => (p.type === 'groupe' ? `g${p.ids.join('-')}` : `${p.type}${p.id}`)
+  p.type === 'group' ? { payment_ids: p.ids } : p.type === 'payment' ? { payment_id: p.id }
+    : p.type === 'deposit' ? { deposit_payment_id: p.id } : p.type === 'invoice' ? { invoice_id: p.id } : { works_invoice_id: p.id }
+const clePossible = (p: Possible) => (p.type === 'group' ? `g${p.ids.join('-')}` : `${p.type}${p.id}`)
 function libellePossible(p: Possible) {
-  if (p.type === 'depot') {
+  if (p.type === 'deposit') {
     return 'dépôt de garantie'
   }
-  if (p.type === 'travaux') {
-    return `${p.fournisseur} : ${p.description}`
+  if (p.type === 'works') {
+    return `${p.supplier} : ${p.description}`
   }
-  if (p.type === 'facture') {
-    return `${p.fournisseur} n° ${p.numero}${p.statut === 'a_verifier' ? ' (brouillon)' : ''}`
+  if (p.type === 'invoice') {
+    return `${p.supplier} n° ${p.number}${p.status === 'draft' ? ' (brouillon)' : ''}`
   }
-  if (p.type === 'groupe') {
-    return `${p.locataire}, ${p.ids.length} paiements : ${p.mois}`
+  if (p.type === 'group') {
+    return `${p.tenant}, ${p.ids.length} paiements : ${p.month}`
   }
-  return `${p.locataire}, ${moisFr(p.mois)}`
+  return `${p.tenant}, ${moisFr(p.month)}`
 }
 
 // The category proposed for a movement to categorise: that of the payment or works typed by hand that match it (its
 // detail, linked once categorised), else the category read in its label or the tenant named in it
 function proposee(m: Mouvement): CategorieMouvement | null {
-  const candidats = possibles(m)
-  if (candidats.some((c) => c.type === 'paiement' || c.type === 'groupe')) {
-    return 'locataire'
+  const candidats = candidates(m)
+  if (candidats.some((c) => c.type === 'payment' || c.type === 'group')) {
+    return 'tenant'
   }
-  if (candidats.some((c) => c.type === 'travaux')) {
-    return 'travaux'
+  if (candidats.some((c) => c.type === 'works')) {
+    return 'works'
   }
-  const facture = candidats.find((c) => c.type === 'facture')
-  return facture?.type === 'facture' ? categorieDeFacture(facture.energie) : proposition(m)
+  const invoice = candidats.find((c) => c.type === 'invoice')
+  return invoice?.type === 'invoice' ? categorieDeFacture(invoice.energy) : proposition(m)
 }
 
 /** The one invoice of charges whose rest is the amount of the debit: accepting the proposal links it too (ADR 0022). */
 function factureProposee(m: Mouvement) {
-  const memeMontant = m.possibles.filter((c): c is Extract<typeof c, { type: 'facture' }> => c.type === 'facture'
-    && new Big(factures.value.find((f) => f.id === c.id)?.reste ?? 0).eq(new Big(m.montant).abs()))
-  return memeMontant.length === 1 && proposee(m) !== 'locataire' && proposee(m) !== 'travaux' ? memeMontant[0]!.id : null
+  const memeMontant = m.candidates.filter((c): c is Extract<typeof c, { type: 'invoice' }> => c.type === 'invoice'
+    && new Big(invoices.value.find((f) => f.id === c.id)?.remaining ?? 0).eq(new Big(m.amount).abs()))
+  return memeMontant.length === 1 && proposee(m) !== 'tenant' && proposee(m) !== 'works' ? memeMontant[0]!.id : null
 }
 
 /** The proposal of a movement to categorise: its category, and its invoice when one has its amount. */
 function accepter(m: Mouvement) {
-  const facture = factureProposee(m)
-  return facture ? agir(() => api.lierMouvement(m.id, { facture_id: facture }), 'Facture rattachée') : categoriser(m, proposee(m)!)
+  const invoice = factureProposee(m)
+  return invoice ? agir(() => api.lierMouvement(m.id, { invoice_id: invoice }), 'Facture rattachée') : categoriser(m, proposee(m)!)
 }
 const libelleProposition = (m: Mouvement) => `${nomCategorie(proposee(m))}${factureProposee(m) ? ' + facture' : ''}`
 
 // Every category proposed on the rows shown, in one go (the history): the same as clicking each button of the column
-const avecProposition = computed(() => (onglet.value === 'a_categoriser' ? affiches.value.filter((m) => proposee(m)) : []))
+const avecProposition = computed(() => (onglet.value === 'to_categorise' ? affiches.value.filter((m) => proposee(m)) : []))
 function accepterTout() {
   const liste = avecProposition.value.map((m) => ({ m, c: proposee(m)! }))
   confirm.require({
@@ -330,8 +330,8 @@ function accepterTout() {
     header: 'Accepter les propositions', acceptLabel: 'Catégoriser', rejectLabel: 'Annuler',
     accept: () => agir(async () => {
       for (const { m, c } of liste) {
-        const facture = factureProposee(m)
-        await (facture ? api.lierMouvement(m.id, { facture_id: facture }) : api.categoriserMouvement(m.id, c))
+        const invoice = factureProposee(m)
+        await (invoice ? api.lierMouvement(m.id, { invoice_id: invoice }) : api.categoriserMouvement(m.id, c))
       }
     }, `${liste.length} mouvement(s) catégorisé(s)`),
   })
@@ -357,81 +357,81 @@ const basculer = (m: Mouvement) => {
 // « Rattacher à un existant »: the payments (or works) not linked, of a smaller amount, close in time; those of the
 // tenant named first
 /** How many payments or works typed by hand match the movement (shown on the button that links them). */
-const correspondances = (m: Mouvement) => (m.categorie === 'depot_garantie'
-  ? depotsLibres(m).filter((d) => new Big(d.montant).abs().eq(reste(m))).length
-  : possibles(m).filter((p) => (payeFactures(m) ? p.type === 'facture'
-    : m.categorie === 'travaux' ? p.type === 'travaux' : p.type === 'paiement' || p.type === 'groupe')).length)
+const correspondances = (m: Mouvement) => (m.category === 'security_deposit'
+  ? depotsLibres(m).filter((d) => new Big(d.amount).abs().eq(remaining(m))).length
+  : candidates(m).filter((p) => (payeFactures(m) ? p.type === 'invoice'
+    : m.category === 'works' ? p.type === 'works' : p.type === 'payment' || p.type === 'group')).length)
 
 /** Deposits typed by hand, not linked, of the sign of the movement. */
-const depotsLibres = (m: Mouvement) => depots.value.filter((d) => !d.mouvement_id && new Big(d.montant).gt(0) === estCredit(m))
+const depotsLibres = (m: Mouvement) => deposits.value.filter((d) => !d.bank_transaction_id && new Big(d.amount).gt(0) === estCredit(m))
 
 // The list offers everything typed by hand and not linked (works; payments of the tenant named, else all): no filter
 // on amount or date (a deposit, a transfer before the invoice). What matches the movement (same amount, close date, or
 // several payments adding up to it) is marked, first, and chosen; the others by closeness of date. The choice gets
 // warnings, not a refusal: amount different from the rest, date far from the movement.
-type Choix = { cle: string, texte: string, correspond: boolean, lien: Possible, montant: string | null, date: string | null }
-const rattachement = ref<{ mouvement: Mouvement, choix: Choix[], cle: string | null } | null>(null)
+type Choix = { cle: string, text: string, correspond: boolean, lien: Possible, amount: string | null, date: string | null }
+const rattachement = ref<{ bank_transaction: Mouvement, choix: Choix[], cle: string | null } | null>(null)
 const ecartJours = (m: Mouvement, date: string | null) =>
-  (date ? Math.round(Math.abs(new Date(date).getTime() - new Date(m.date_operation).getTime()) / 864e5) : null)
+  (date ? Math.round(Math.abs(new Date(date).getTime() - new Date(m.transaction_date).getTime()) / 864e5) : null)
 function ouvrirRattachement(m: Mouvement) {
-  const correspondants = possibles(m)
+  const correspondants = candidates(m)
   const correspond = (l: Possible) => correspondants.some((c) => clePossible(c) === clePossible(l))
   let choix: Choix[]
   if (payeFactures(m)) {
     // Validated invoices of the energies of the category: a debit pays their rest, or a part of it (those not paid in
     // full); a credit refunds one (any, the latest first)
     // (a draft with a total too: an invoice still to find, typed from the transfer)
-    choix = factures.value.filter((f) => (f.statut === 'validee' || (f.statut === 'a_verifier' && f.montant_ttc !== null))
-      && (estCredit(m) || Number(f.reste) > 0) && categorieDeFacture(f.energie) === m.categorie)
+    choix = invoices.value.filter((f) => (f.status === 'validated' || (f.status === 'draft' && f.total_incl_tax !== null))
+      && (estCredit(m) || Number(f.remaining) > 0) && categorieDeFacture(f.energy) === m.category)
       .map((f) => {
-        const l: Possible = { type: 'facture', id: f.id, fournisseur: f.fournisseur, numero: f.numero, energie: f.energie, date: f.date_facture, statut: f.statut }
+        const l: Possible = { type: 'invoice', id: f.id, supplier: f.supplier, number: f.number, energy: f.energy, date: f.invoice_date, status: f.status }
         return {
           cle: clePossible(l),
-          texte: `${f.fournisseur} n° ${f.numero}${f.statut === 'a_verifier' ? ' (brouillon)' : ''} (${ENERGIES[f.energie]}), du ${dateFr(f.date_facture)} de ${euros(f.montant_ttc)}`
-            + (Number(f.paye) > 0 ? `, reste ${euros(f.reste)}` : ''),
-          correspond: correspond(l), lien: l, montant: f.reste, date: f.date_facture,
+          text: `${f.supplier} n° ${f.number}${f.status === 'draft' ? ' (brouillon)' : ''} (${ENERGIES[f.energy]}), du ${dateFr(f.invoice_date)} de ${euros(f.total_incl_tax)}`
+            + (Number(f.paid) > 0 ? `, reste ${euros(f.remaining)}` : ''),
+          correspond: correspond(l), lien: l, amount: f.remaining, date: f.invoice_date,
         }
       })
-  } else if (m.categorie === 'travaux') {
+  } else if (m.category === 'works') {
     // Invoices not paid in full: this movement pays their rest, or a part of it
-    choix = travaux.value.filter((t) => Number(t.reste) > 0).map((t) => {
-      const l: Possible = { type: 'travaux', id: t.id, description: t.description, fournisseur: t.fournisseur, date: t.date_facture }
+    choix = works_invoice.value.filter((t) => Number(t.remaining) > 0).map((t) => {
+      const l: Possible = { type: 'works', id: t.id, description: t.description, supplier: t.supplier, date: t.invoice_date }
       return {
         cle: clePossible(l),
-        texte: `${t.fournisseur} : ${t.description}, facture du ${dateFr(t.date_facture)} de ${euros(t.montant_ttc)}`
-          + (Number(t.paye) > 0 ? `, reste ${euros(t.reste)}` : ''),
-        correspond: correspond(l), lien: l, montant: t.reste, date: t.date_facture,
+        text: `${t.supplier} : ${t.description}, facture du ${dateFr(t.invoice_date)} de ${euros(t.total_incl_tax)}`
+          + (Number(t.paid) > 0 ? `, reste ${euros(t.remaining)}` : ''),
+        correspond: correspond(l), lien: l, amount: t.remaining, date: t.invoice_date,
       }
     })
-  } else if (m.categorie === 'depot_garantie') {
+  } else if (m.category === 'security_deposit') {
     choix = depotsLibres(m).map((d) => {
-      const l: Possible = { type: 'depot', id: d.id }
+      const l: Possible = { type: 'deposit', id: d.id }
       return {
-        cle: clePossible(l), texte: `${d.locataire} (${d.lot}), ${dateFr(d.date_versement)} : ${euros(d.montant)}`,
-        correspond: new Big(d.montant).abs().eq(reste(m)), lien: l, montant: new Big(d.montant).abs().toString(), date: d.date_versement,
+        cle: clePossible(l), text: `${d.tenant} (${d.unit}), ${dateFr(d.payment_date)} : ${euros(d.amount)}`,
+        correspond: new Big(d.amount).abs().eq(remaining(m)), lien: l, amount: new Big(d.amount).abs().toString(), date: d.payment_date,
       }
     })
   } else {
-    const sejour = proposer(m, sejours.value, echeances.value, regularisations.value).sejour
-    const libres = paiements.value.filter((p) => !p.mouvement_id && !estRetenue(p) && new Big(totalPaiement(p)).gt(0) === estCredit(m))
-    const siens = sejour ? libres.filter((p) => p.sejour_id === sejour.id) : []
+    const tenancy = proposer(m, tenancies.value, rent_schedules.value, charge_adjustments.value).tenancy
+    const libres = payments.value.filter((p) => !p.bank_transaction_id && !estRetenue(p) && new Big(totalPaiement(p)).gt(0) === estCredit(m))
+    const siens = tenancy ? libres.filter((p) => p.tenancy_id === tenancy.id) : []
     choix = [
       // Several payments adding up to the transfer (several months)
-      ...correspondants.filter((c) => c.type === 'groupe').map((c) => ({
-        cle: clePossible(c), texte: libellePossible(c), correspond: true, lien: c, montant: null, date: null,
+      ...correspondants.filter((c) => c.type === 'group').map((c) => ({
+        cle: clePossible(c), text: libellePossible(c), correspond: true, lien: c, amount: null, date: null,
       })),
       ...(siens.length ? siens : libres).map((p) => {
-        const l: Possible = { type: 'paiement', id: p.id, locataire: p.locataire, lot: p.lot, mois: p.mois, date: p.date_paiement }
+        const l: Possible = { type: 'payment', id: p.id, tenant: p.tenant, unit: p.unit, month: p.month, date: p.payment_date }
         return {
-          cle: clePossible(l), texte: `${p.locataire}, ${moisFr(p.mois)}, saisi le ${dateFr(p.date_paiement)} : ${euros(totalPaiement(p))}`,
-          correspond: correspond(l), lien: l, montant: new Big(totalPaiement(p)).abs().toString(), date: p.date_paiement,
+          cle: clePossible(l), text: `${p.tenant}, ${moisFr(p.month)}, saisi le ${dateFr(p.payment_date)} : ${euros(totalPaiement(p))}`,
+          correspond: correspond(l), lien: l, amount: new Big(totalPaiement(p)).abs().toString(), date: p.payment_date,
         }
       }),
     ]
   }
   choix.sort((a, b) => Number(b.correspond) - Number(a.correspond)
     || (ecartJours(m, a.date) ?? 9999) - (ecartJours(m, b.date) ?? 9999))
-  rattachement.value = { mouvement: m, choix, cle: choix[0]?.cle ?? null }
+  rattachement.value = { bank_transaction: m, choix, cle: choix[0]?.cle ?? null }
 }
 
 /** Warnings on the choice: an amount different from the rest of the movement, a date far from it. */
@@ -442,15 +442,15 @@ const alertes = computed(() => {
     return []
   }
   const liste: string[] = []
-  const resteMouvement = new Big(reste(r.mouvement))
-  if (c.montant !== null && !new Big(c.montant).eq(resteMouvement)) {
-    liste.push(new Big(c.montant).gt(resteMouvement)
-      ? `${euros(c.montant)} pour un reste de ${euros(resteMouvement.toString())} : ce virement n'en paie qu'une partie (acompte) ?`
-      : `${euros(c.montant)} sur un reste de ${euros(resteMouvement.toString())} : le reste sera à rattacher`)
+  const resteMouvement = new Big(remaining(r.bank_transaction))
+  if (c.amount !== null && !new Big(c.amount).eq(resteMouvement)) {
+    liste.push(new Big(c.amount).gt(resteMouvement)
+      ? `${euros(c.amount)} pour un reste de ${euros(resteMouvement.toString())} : ce virement n'en paie qu'une partie (acompte) ?`
+      : `${euros(c.amount)} sur un reste de ${euros(resteMouvement.toString())} : le reste sera à rattacher`)
   }
-  const jours = ecartJours(r.mouvement, c.date)
-  if (jours !== null && jours > 31) {
-    liste.push(`${jours} jours d'écart avec le mouvement : paiement en avance, ou facture reçue après ?`)
+  const days = ecartJours(r.bank_transaction, c.date)
+  if (days !== null && days > 31) {
+    liste.push(`${days} jours d'écart avec le mouvement : paiement en avance, ou facture reçue après ?`)
   }
   return liste
 })
@@ -461,43 +461,43 @@ function rattacher() {
     return
   }
   rattachement.value = null
-  return agir(() => api.lierMouvement(r.mouvement.id, lien(choisi.lien)), 'Rattaché')
+  return agir(() => api.lierMouvement(r.bank_transaction.id, lien(choisi.lien)), 'Rattaché')
 }
 
-const detacher = (m: Mouvement, l: { paiement_id: number } | { reglement_id: number } | { reglement_facture_id: number } | { depot_id: number }) =>
+const detacher = (m: Mouvement, l: { payment_id: number } | { works_invoice_payment_id: number } | { invoice_payment_id: number } | { deposit_payment_id: number }) =>
   agir(() => api.delierMouvement(m.id, l), 'Détaché (gardé dans son écran)')
 
 // ---------------------------------------------------------------- forms (the same as the Paiements and Travaux screens)
 
-const formulairePaiement = ref<{ brouillon: Brouillon, mouvement: Mouvement } | null>(null)
-const formulaireTravaux = ref<{ brouillon: BrouillonTravaux, mouvement: Mouvement } | null>(null)
+const formulairePaiement = ref<{ brouillon: Brouillon, bank_transaction: Mouvement } | null>(null)
+const formulaireTravaux = ref<{ brouillon: BrouillonTravaux, bank_transaction: Mouvement } | null>(null)
 const erreurFormulaire = ref<string | null>(null)
 
 /** The building of a stay (the forms read the amounts called of its building). */
 function immeubleDuSejour(id: number | null) {
-  const s = sejours.value.find((x) => x.id === id)
-  for (const [immeuble, l] of lots.value) {
-    if (s && l.some((x) => x.id === s.lot_id)) {
-      return immeuble
+  const s = tenancies.value.find((x) => x.id === id)
+  for (const [building, l] of units.value) {
+    if (s && l.some((x) => x.id === s.unit_id)) {
+      return building
     }
   }
-  return immeubles.value[0]?.id ?? 0
+  return buildings.value[0]?.id ?? 0
 }
 
 function nouveauPaiement(m: Mouvement) {
-  const p = proposer(m, sejours.value, echeances.value, regularisations.value, paiements.value)
+  const p = proposer(m, tenancies.value, rent_schedules.value, charge_adjustments.value, payments.value)
   const credit = estCredit(m)
   // The month is already paid: nothing proposed, and said (link the payment typed, or change the month)
   const dejaPaye = Boolean(p.ecart?.includes('déjà payé'))
   formulairePaiement.value = {
-    mouvement: m,
+    bank_transaction: m,
     brouillon: {
-      id: null, date: m.date_operation, sejour_id: p.sejour?.id ?? null, mois: p.mois,
-      montant: nombreFr(`${credit ? '' : '-'}${new Big(reste(m)).toFixed(2)}`),
-      loyer: credit && !dejaPaye ? nombreFr(new Big(p.loyer).toFixed(2)) : '',
-      provision: credit && !dejaPaye ? nombreFr(new Big(p.provision).toFixed(2)) : '',
-      versements: p.regularisation_id ? [{ regularisation_id: p.regularisation_id, montant: nombreFr(p.regularisation) }] : [],
-      mode: 'virement', note: '',
+      id: null, date: m.transaction_date, tenancy_id: p.tenancy?.id ?? null, month: p.month,
+      amount: nombreFr(`${credit ? '' : '-'}${new Big(remaining(m)).toFixed(2)}`),
+      rent: credit && !dejaPaye ? nombreFr(new Big(p.rent).toFixed(2)) : '',
+      charge_advance: credit && !dejaPaye ? nombreFr(new Big(p.charge_advance).toFixed(2)) : '',
+      versements: p.charge_adjustment_id ? [{ charge_adjustment_id: p.charge_adjustment_id, amount: nombreFr(p.charge_adjustment) }] : [],
+      method: 'transfer', note: '',
     },
   }
   erreurFormulaire.value = dejaPaye
@@ -507,12 +507,12 @@ function nouveauPaiement(m: Mouvement) {
 
 function modifierPaiement(m: Mouvement, p: Paiement) {
   formulairePaiement.value = {
-    mouvement: m,
+    bank_transaction: m,
     brouillon: {
-      id: p.id, date: p.date_paiement, sejour_id: p.sejour_id, mois: p.mois?.slice(0, 7) ?? '',
-      montant: nombreFr(new Big(totalPaiement(p)).toFixed(2)), loyer: nombreFr(p.loyer), provision: nombreFr(p.provision),
-      versements: p.regularisation_id ? [{ regularisation_id: p.regularisation_id, montant: nombreFr(p.regularisation) }] : [],
-      mode: p.mode ?? '', note: p.note ?? '',
+      id: p.id, date: p.payment_date, tenancy_id: p.tenancy_id, month: p.month?.slice(0, 7) ?? '',
+      amount: nombreFr(new Big(totalPaiement(p)).toFixed(2)), rent: nombreFr(p.rent), charge_advance: nombreFr(p.charge_advance),
+      versements: p.charge_adjustment_id ? [{ charge_adjustment_id: p.charge_adjustment_id, amount: nombreFr(p.charge_adjustment) }] : [],
+      method: p.method ?? '', note: p.note ?? '',
     },
   }
   erreurFormulaire.value = null
@@ -524,12 +524,12 @@ async function enregistrerPaiement(suivant: boolean) {
   occupe.value = true
   try {
     // A rest left (a deposit paid with the first rent…) stays to complete: « Dépôt de garantie… » then
-    await enregistrerBrouillon(b, f.mouvement.id)
+    await enregistrerBrouillon(b, f.bank_transaction.id)
     await recharger()
-    const m = mouvements.value.find((x) => x.id === f.mouvement.id)!
+    const m = transactions.value.find((x) => x.id === f.bank_transaction.id)!
     formulairePaiement.value = null
     // « Ajouter et en saisir un autre »: the next one on what remains of the transfer
-    if (suivant && new Big(reste(m)).gt(0) && m.statut === 'incomplet') {
+    if (suivant && new Big(remaining(m)).gt(0) && m.status === 'incomplet') {
       nouveauPaiement(m)
     }
     ok('Paiement enregistré')
@@ -545,7 +545,7 @@ function supprimerPaiement(p: Paiement | undefined) {
     return
   }
   confirm.require({
-    message: `Supprimer le paiement ${moisFr(p.mois)} de ${p.locataire} (${euros(totalPaiement(p))}) ?`,
+    message: `Supprimer le paiement ${moisFr(p.month)} de ${p.tenant} (${euros(totalPaiement(p))}) ?`,
     header: 'Supprimer', acceptLabel: 'Supprimer', rejectLabel: 'Annuler', acceptClass: 'p-button-danger',
     accept: () => {
       formulairePaiement.value = null
@@ -556,10 +556,10 @@ function supprimerPaiement(p: Paiement | undefined) {
 
 function modifierTravaux(m: Mouvement, t: Travaux) {
   formulaireTravaux.value = {
-    mouvement: m,
+    bank_transaction: m,
     brouillon: {
-      id: t.id, immeuble_id: t.immeuble_id, lot_id: t.lot_id, fournisseur: t.fournisseur, description: t.description,
-      nature: t.nature, date_facture: t.date_facture, montant_ttc: nombreFr(t.montant_ttc), note: t.note ?? '', pdf: null,
+      id: t.id, building_id: t.building_id, unit_id: t.unit_id, supplier: t.supplier, description: t.description,
+      nature: t.nature, invoice_date: t.invoice_date, total_incl_tax: nombreFr(t.total_incl_tax), note: t.note ?? '', pdf: null,
     },
   }
   erreurFormulaire.value = null
@@ -589,7 +589,7 @@ function supprimerTravaux(t: Travaux | undefined) {
     return
   }
   confirm.require({
-    message: `Supprimer les travaux « ${t.description} » (${euros(t.montant_ttc)}) ?`,
+    message: `Supprimer les travaux « ${t.description} » (${euros(t.total_incl_tax)}) ?`,
     header: 'Supprimer', acceptLabel: 'Supprimer', rejectLabel: 'Annuler', acceptClass: 'p-button-danger',
     accept: () => {
       formulaireTravaux.value = null
@@ -603,20 +603,20 @@ function supprimerTravaux(t: Travaux | undefined) {
 // A deposit is managed from the stay (Locataires): the transfer opens its window there, prefilled; the stay is the
 // tenant named in the label, else chosen there
 function versDepot(m: Mouvement) {
-  const sejour = proposer(m, sejours.value, echeances.value, regularisations.value).sejour
+  const tenancy = proposer(m, tenancies.value, rent_schedules.value, charge_adjustments.value).tenancy
   router.push({ path: '/sejours', query: {
-    depot: estCredit(m) ? 'recu' : 'restitution', mouvement: m.id, date: m.date_operation,
-    montant: new Big(reste(m)).toFixed(2), ...(sejour ? { sejour: sejour.id } : {}),
+    depot: estCredit(m) ? 'recu' : 'restitution', bank_transaction: m.id, date: m.transaction_date,
+    amount: new Big(remaining(m)).toFixed(2), ...(tenancy ? { tenancy: tenancy.id } : {}),
   } })
 }
 
 /** The form of the stay of a deposit linked to the movement, with its deposit. */
-const voirDepot = (sejourId: number) => router.push({ path: '/sejours', query: { depot: 'voir', sejour: sejourId } })
+const voirDepot = (sejourId: number) => router.push({ path: '/sejours', query: { depot: 'voir', tenancy: sejourId } })
 
-const ONGLETS: { code: Onglet, nom: string, titre: string }[] = [
-  { code: 'a_categoriser', nom: 'À catégoriser', titre: 'Les mouvements sans catégorie' },
-  { code: 'rapprochement', nom: 'Rapprochement', titre: 'Paiements de locataire, travaux, dépôts, factures d\'énergie, d\'eau, de taxes : rattachés à ce qu\'ils paient' },
-  { code: 'categorises', nom: 'Autres catégories', titre: 'Emprunt, assurance, frais bancaires… : une catégorie suffit' },
+const ONGLETS: { code: Onglet, name: string, title: string }[] = [
+  { code: 'to_categorise', name: 'À catégoriser', title: 'Les mouvements sans catégorie' },
+  { code: 'rapprochement', name: 'Rapprochement', title: 'Paiements de locataire, travaux, dépôts, factures d\'énergie, d\'eau, de taxes : rattachés à ce qu\'ils paient' },
+  { code: 'categorises', name: 'Autres catégories', title: 'Emprunt, assurance, frais bancaires… : une catégorie suffit' },
 ]
 // The categories of the filter: those of the tab shown
 const categoriesDuFiltre = computed(() => (Object.keys(CATEGORIES_MOUVEMENT) as CategorieMouvement[])
@@ -633,26 +633,26 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
     <h1>Catégorisation des mouvements</h1>
   </section>
   <p class="discret">
-    Les mouvements des <RouterLink :to="{ name: 'releves' }">relevés bancaires</RouterLink> : chacun reçoit une catégorie.
+    Les mouvements des <RouterLink :to="{ name: 'statements' }">relevés bancaires</RouterLink> : chacun reçoit une catégorie.
     Un paiement de locataire, des travaux, un dépôt, un prélèvement d'énergie, d'eau ou de taxe se rattachent à ce
     qu'ils paient (onglet « Rapprochement ») : dépliez la ligne pour ajouter, rattacher, modifier.
   </p>
 
 
   <!-- ---------------------------------------------------------------- movements -->
-  <template v-if="mouvements">
+  <template v-if="transactions">
     <section class="filtres">
       <IconField>
         <InputIcon class="oi oi-search" />
         <InputText v-model="recherche" placeholder="Rechercher (libellé, détail)" size="small" />
       </IconField>
-      <select v-model="annee" aria-label="Année">
+      <select v-model="year" aria-label="Année">
         <option value="">Toutes les années</option>
         <option v-for="a in annees" :key="a" :value="a">{{ a }}</option>
       </select>
       <select v-model="releveId" aria-label="Relevé">
         <option :value="null">Tous les relevés</option>
-        <option v-for="r in relevesDuFiltre" :key="r.id" :value="r.id">Relevé du {{ dateFr(r.date_releve) }}{{ plusieursComptes ? ` (${r.compte})` : '' }}</option>
+        <option v-for="r in relevesDuFiltre" :key="r.id" :value="r.id">Relevé du {{ dateFr(r.statement_date) }}{{ plusieursComptes ? ` (${r.account})` : '' }}</option>
       </select>
       <select v-model="sens" aria-label="Sens">
         <option value="">Crédits et débits</option>
@@ -662,17 +662,17 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
     </section>
 
     <nav class="onglets">
-      <button v-for="o in ONGLETS" :key="o.code" type="button" :class="{ actif: onglet === o.code }" :title="o.titre" @click="onglet = o.code; filtreCategorie = ''">
-        {{ o.nom }} ({{ nombre(o.code) }})
+      <button v-for="o in ONGLETS" :key="o.code" type="button" :class="{ actif: onglet === o.code }" :title="o.title" @click="onglet = o.code; filtreCategorie = ''">
+        {{ o.name }} ({{ nombre(o.code) }})
         <span v-if="o.code === 'rapprochement' && aRattacher" class="a-completer">{{ aRattacher }} à rattacher</span>
       </button>
     </nav>
-    <p v-if="onglet === 'a_categoriser' && aRattacher" class="message avertissement a-completer-message">
+    <p v-if="onglet === 'to_categorise' && aRattacher" class="message avertissement a-completer-message">
       Attention : {{ aRattacher }} mouvement(s) catégorisé(s) attendent d'être rattachés (paiement de locataire, facture,
       travaux, dépôt). <a href="#" @click.prevent="voirARattacher">Les rattacher</a>
     </p>
     <section class="filtres outils-onglet">
-      <select v-if="onglet !== 'a_categoriser'" v-model="filtreCategorie" aria-label="Catégorie">
+      <select v-if="onglet !== 'to_categorise'" v-model="filtreCategorie" aria-label="Catégorie">
         <option value="">Toutes les catégories</option>
         <option v-for="code in categoriesDuFiltre" :key="code" :value="code">{{ nomCategorie(code) }}</option>
       </select>
@@ -701,31 +701,31 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
           />
         </template>
       </Column>
-      <Column field="date_operation" header="Date" sortable style="width: 7rem">
-        <template #body="{ data }">{{ dateFr(data.date_operation) }}</template>
+      <Column field="transaction_date" header="Date" sortable style="width: 7rem">
+        <template #body="{ data }">{{ dateFr(data.transaction_date) }}</template>
       </Column>
       <Column header="Opération">
         <template #body="{ data }">
-          <strong>{{ data.libelle }}</strong>
+          <strong>{{ data.label }}</strong>
           <div v-if="data.detail" class="detail-mouvement" :title="data.detail">{{ data.detail.split('\n').slice(0, 3).join(' · ') }}</div>
         </template>
       </Column>
-      <Column field="montant" header="Montant" sortable body-class="nombre" header-class="nombre" style="width: 9rem">
+      <Column field="amount" header="Montant" sortable body-class="nombre" header-class="nombre" style="width: 9rem">
         <template #body="{ data }">
-          <span :class="estCredit(data) ? 'ok' : ''">{{ estCredit(data) ? '+' : '' }}{{ euros(data.montant) }}</span>
-          <div v-if="data.statut === 'incomplet'" class="discret">reste {{ euros(reste(data)) }}</div>
+          <span :class="estCredit(data) ? 'ok' : ''">{{ estCredit(data) ? '+' : '' }}{{ euros(data.amount) }}</span>
+          <div v-if="data.status === 'incomplet'" class="discret">reste {{ euros(remaining(data)) }}</div>
         </template>
       </Column>
       <Column header="Relevé" style="width: 7.5rem">
         <template #body="{ data }">
           <RouterLink
-            :to="{ name: 'releve', params: { id: data.releve_id }, query: { mouvement: data.id } }" class="lien-releve"
+            :to="{ name: 'bank_statement', params: { id: data.bank_statement_id }, query: { bank_transaction: data.id } }" class="lien-releve"
             title="Ouvrir le relevé, ce mouvement surligné" @click.stop
-          ><i class="oi oi-file-pdf" /> {{ dateFr(data.date_releve) }}</RouterLink>
+          ><i class="oi oi-file-pdf" /> {{ dateFr(data.statement_date) }}</RouterLink>
         </template>
       </Column>
       <!-- To categorise: the proposal (one button), then any other category -->
-      <Column v-if="onglet === 'a_categoriser'" header="Proposition" style="width: 22rem">
+      <Column v-if="onglet === 'to_categorise'" header="Proposition" style="width: 22rem">
         <template #body="{ data }">
           <Button
             v-if="proposee(data)" :label="libelleProposition(data)" :icon="iconeCategorie(proposee(data))" size="small"
@@ -734,7 +734,7 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
           <span v-else class="discret">—</span>
         </template>
       </Column>
-      <Column v-if="onglet === 'a_categoriser'" style="width: 11rem">
+      <Column v-if="onglet === 'to_categorise'" style="width: 11rem">
         <template #body="{ data }">
           <Button
             label="Autre catégorie" icon="oi oi-angle-down" icon-pos="right" size="small" severity="secondary" outlined
@@ -743,22 +743,22 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
         </template>
       </Column>
       <!-- Categorised: the category, ✕ to take it back; then its note, ✎ to edit it -->
-      <Column v-if="onglet !== 'a_categoriser'" header="Catégorie" style="width: 23rem">
+      <Column v-if="onglet !== 'to_categorise'" header="Catégorie" style="width: 23rem">
         <template #body="{ data }">
           <div class="categorie">
-            <Tag :value="nomCategorie(data.categorie)" :icon="iconeCategorie(data.categorie)" severity="info" />
-            <Tag v-if="data.statut === 'incomplet'" value="à rattacher" severity="warn" />
-            <Tag v-if="data.factures.length" value="facture" icon="oi oi-link" severity="success" :title="data.factures.map((f: Mouvement['factures'][number]) => `${f.fournisseur} n° ${f.numero}`).join(', ')" />
+            <Tag :value="nomCategorie(data.category)" :icon="iconeCategorie(data.category)" severity="info" />
+            <Tag v-if="data.status === 'incomplet'" value="à rattacher" severity="warn" />
+            <Tag v-if="data.invoices.length" value="facture" icon="oi oi-link" severity="success" :title="data.invoices.map((f: Mouvement['invoices'][number]) => `${f.supplier} n° ${f.number}`).join(', ')" />
             <Button
               icon="oi oi-times" size="small" text rounded severity="secondary"
-              :disabled="occupe || data.paiements.length > 0 || data.travaux.length > 0 || data.factures.length > 0"
-              :title="data.paiements.length || data.travaux.length || data.factures.length ? 'Détacher d\'abord le détail (paiements, travaux, factures)' : 'Retirer la catégorie'"
+              :disabled="occupe || data.payments.length > 0 || data.works_invoices.length > 0 || data.invoices.length > 0"
+              :title="data.payments.length || data.works_invoices.length || data.invoices.length ? 'Détacher d\'abord le détail (paiements, travaux, factures)' : 'Retirer la catégorie'"
               @click="retirerCategorie(data)"
             />
           </div>
         </template>
       </Column>
-      <Column v-if="onglet !== 'a_categoriser'" header="Note" style="width: 18rem">
+      <Column v-if="onglet !== 'to_categorise'" header="Note" style="width: 18rem">
         <template #body="{ data }">
           <div class="note-cellule">
             <span class="discret note">{{ data.note }}</span>
@@ -775,79 +775,79 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
         <div class="deplie">
           <template v-if="aDetail(data)">
             <p class="resume">
-              {{ estCredit(data) ? 'Virement reçu' : 'Débit' }} de {{ euros(data.montant) }} · rapproché {{ euros(data.couvert) }}
-              · <strong :class="Number(reste(data)) > 0 ? 'ko' : 'ok'">reste {{ euros(reste(data)) }}</strong>
+              {{ estCredit(data) ? 'Virement reçu' : 'Débit' }} de {{ euros(data.amount) }} · rapproché {{ euros(data.covered) }}
+              · <strong :class="Number(remaining(data)) > 0 ? 'ko' : 'ok'">reste {{ euros(remaining(data)) }}</strong>
             </p>
             <ul class="liens">
               <li v-for="p in paiementsDe(data)" :key="`p${p.id}`">
                 <span class="oi oi-user" />
                 <span>
-                  {{ p.locataire }}, {{ moisFr(p.mois) }} :
-                  <template v-if="p.mois">loyer {{ euros(p.loyer) }} + provision {{ euros(p.provision) }}</template>
-                  <template v-if="p.regularisation_id">{{ p.mois ? ' + ' : '' }}régularisation {{ euros(p.regularisation) }}</template>
+                  {{ p.tenant }}, {{ moisFr(p.month) }} :
+                  <template v-if="p.month">loyer {{ euros(p.rent) }} + provision {{ euros(p.charge_advance) }}</template>
+                  <template v-if="p.charge_adjustment_id">{{ p.month ? ' + ' : '' }}régularisation {{ euros(p.charge_adjustment) }}</template>
                   = <strong>{{ euros(totalPaiement(p)) }}</strong>
                 </span>
                 <Button label="Modifier" size="small" text :disabled="occupe" @click="modifierPaiement(data, p)" />
-                <Button label="Détacher" size="small" text severity="secondary" :disabled="occupe" @click="detacher(data, { paiement_id: p.id })" />
+                <Button label="Détacher" size="small" text severity="secondary" :disabled="occupe" @click="detacher(data, { payment_id: p.id })" />
                 <Button label="Supprimer" size="small" text severity="danger" :disabled="occupe" @click="supprimerPaiement(p)" />
               </li>
-              <li v-for="t in data.travaux" :key="`t${t.reglement_id}`">
+              <li v-for="t in data.works_invoices" :key="`t${t.works_invoice_payment_id}`">
                 <span class="oi oi-hammer" />
                 <span>
-                  {{ t.fournisseur }} : {{ t.description }} : règlement de <strong>{{ euros(t.total) }}</strong>
+                  {{ t.supplier }} : {{ t.description }} : règlement de <strong>{{ euros(t.total) }}</strong>
                   <span class="discret">
-                    (facture de {{ euros(t.montant_ttc) }}{{ Number(t.reste) > 0 ? `, reste ${euros(t.reste)} à payer` : ', payée en entier' }})
+                    (facture de {{ euros(t.total_incl_tax) }}{{ Number(t.remaining) > 0 ? `, reste ${euros(t.remaining)} à payer` : ', payée en entier' }})
                   </span>
                 </span>
-                <Button label="Modifier" size="small" text :disabled="occupe" @click="modifierTravaux(data, travaux.find((x) => x.id === t.id)!)" />
-                <Button label="Détacher" size="small" text severity="secondary" :disabled="occupe" @click="detacher(data, { reglement_id: t.reglement_id })" />
-                <Button label="Supprimer" size="small" text severity="danger" :disabled="occupe" @click="supprimerTravaux(travaux.find((x) => x.id === t.id))" />
+                <Button label="Modifier" size="small" text :disabled="occupe" @click="modifierTravaux(data, works_invoice.find((x) => x.id === t.id)!)" />
+                <Button label="Détacher" size="small" text severity="secondary" :disabled="occupe" @click="detacher(data, { works_invoice_payment_id: t.works_invoice_payment_id })" />
+                <Button label="Supprimer" size="small" text severity="danger" :disabled="occupe" @click="supprimerTravaux(works_invoice.find((x) => x.id === t.id))" />
               </li>
-              <li v-for="f in data.factures" :key="`f${f.reglement_id}`">
+              <li v-for="f in data.invoices" :key="`f${f.invoice_payment_id}`">
                 <span class="oi oi-file" />
                 <span>
-                  {{ f.fournisseur }} n° {{ f.numero }} ({{ ENERGIES[f.energie as Energie] }}) :
+                  {{ f.supplier }} n° {{ f.number }} ({{ ENERGIES[f.energy as Energie] }}) :
                   {{ Number(f.total) < 0 ? 'remboursement de' : 'règlement de' }} <strong>{{ euros(new Big(f.total).abs().toString()) }}</strong>
                   <span class="discret">
-                    (facture du {{ dateFr(f.date_facture) }} de {{ euros(f.montant_ttc) }}{{ Number(f.reste) > 0 ? `, reste ${euros(f.reste)} à payer` : ', payée en entier' }})
+                    (facture du {{ dateFr(f.invoice_date) }} de {{ euros(f.total_incl_tax) }}{{ Number(f.remaining) > 0 ? `, reste ${euros(f.remaining)} à payer` : ', payée en entier' }})
                   </span>
                 </span>
-                <RouterLink :to="{ name: 'facture', params: { id: f.id } }" class="petit">Voir la facture</RouterLink>
-                <Button label="Détacher" size="small" text severity="secondary" :disabled="occupe" @click="detacher(data, { reglement_facture_id: f.reglement_id })" />
+                <RouterLink :to="{ name: 'invoice', params: { id: f.id } }" class="petit">Voir la facture</RouterLink>
+                <Button label="Détacher" size="small" text severity="secondary" :disabled="occupe" @click="detacher(data, { invoice_payment_id: f.invoice_payment_id })" />
               </li>
-              <li v-for="d in data.depots" :key="`d${d.id}`">
+              <li v-for="d in data.deposits" :key="`d${d.id}`">
                 <span class="oi oi-key" />
                 <span>
-                  Dépôt de garantie de {{ d.locataire }} ({{ d.lot }}) :
-                  {{ Number(d.montant) > 0 ? 'versé' : 'remboursé' }} <strong>{{ euros(new Big(d.montant).abs().toString()) }}</strong>
+                  Dépôt de garantie de {{ d.tenant }} ({{ d.unit }}) :
+                  {{ Number(d.amount) > 0 ? 'versé' : 'remboursé' }} <strong>{{ euros(new Big(d.amount).abs().toString()) }}</strong>
                 </span>
-                <Button label="Voir le dépôt" size="small" text :disabled="occupe" @click="voirDepot(d.sejour_id)" />
-                <Button label="Détacher" size="small" text severity="secondary" :disabled="occupe" @click="detacher(data, { depot_id: d.id })" />
+                <Button label="Voir le dépôt" size="small" text :disabled="occupe" @click="voirDepot(d.tenancy_id)" />
+                <Button label="Détacher" size="small" text severity="secondary" :disabled="occupe" @click="detacher(data, { deposit_payment_id: d.id })" />
               </li>
-              <li v-if="!data.paiements.length && !data.travaux.length && !data.factures.length && !data.depots.length" class="discret">Rien de rattaché pour l'instant.</li>
+              <li v-if="!data.payments.length && !data.works_invoices.length && !data.invoices.length && !data.deposits.length" class="discret">Rien de rattaché pour l'instant.</li>
             </ul>
             <div class="actions-detail">
               <Button
-                v-if="data.categorie === 'locataire'" label="Ajouter un paiement du locataire…" icon="oi oi-plus" size="small"
-                :disabled="occupe || Number(reste(data)) <= 0" @click="nouveauPaiement(data)"
+                v-if="data.category === 'tenant'" label="Ajouter un paiement du locataire…" icon="oi oi-plus" size="small"
+                :disabled="occupe || Number(remaining(data)) <= 0" @click="nouveauPaiement(data)"
               />
               <Button
-                v-if="data.categorie === 'locataire' || data.categorie === 'depot_garantie'" label="Dépôt de garantie…"
+                v-if="data.category === 'tenant' || data.category === 'security_deposit'" label="Dépôt de garantie…"
                 title="Le dépôt se saisit dans l'écran Locataires : ouvert sur le séjour, ce virement prérempli"
-                icon="oi oi-key" size="small" :outlined="data.categorie === 'locataire'"
-                :disabled="occupe || Number(reste(data)) <= 0" @click="versDepot(data)"
+                icon="oi oi-key" size="small" :outlined="data.category === 'tenant'"
+                :disabled="occupe || Number(remaining(data)) <= 0" @click="versDepot(data)"
               />
               <Button
                 :label="libelleRattacher(data)"
                 :icon="correspondances(data) ? 'oi oi-link' : 'oi oi-search'" size="small" outlined
-                :severity="correspondances(data) ? 'success' : undefined" :disabled="occupe || Number(reste(data)) <= 0"
+                :severity="correspondances(data) ? 'success' : undefined" :disabled="occupe || Number(remaining(data)) <= 0"
                 @click="ouvrirRattachement(data)"
               />
             </div>
-            <form v-if="rattachement && rattachement.mouvement.id === data.id" class="formulaire" @submit.prevent="rattacher">
-              <label v-if="rattachement.choix.length">{{ NOMS_SAISIS[data.categorie] }}
+            <form v-if="rattachement && rattachement.bank_transaction.id === data.id" class="formulaire" @submit.prevent="rattacher">
+              <label v-if="rattachement.choix.length">{{ NOMS_SAISIS[data.category] }}
                 <select v-model="rattachement.cle" required>
-                  <option v-for="c in rattachement.choix" :key="c.cle" :value="c.cle">{{ c.correspond ? '✓ correspond · ' : '' }}{{ c.texte }}</option>
+                  <option v-for="c in rattachement.choix" :key="c.cle" :value="c.cle">{{ c.correspond ? '✓ correspond · ' : '' }}{{ c.text }}</option>
                 </select>
               </label>
               <span v-else class="discret">Rien de saisi qui ne soit déjà rattaché.</span>
@@ -858,7 +858,7 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
             </form>
           </template>
           <p v-else class="discret">
-            {{ data.categorie ? `${nomCategorie(data.categorie)} : pas de détail à saisir.` : 'Pas encore de catégorie.' }}
+            {{ data.category ? `${nomCategorie(data.category)} : pas de détail à saisir.` : 'Pas encore de catégorie.' }}
             <span v-if="data.detail" class="pre">{{ data.detail }}</span>
           </p>
         </div>
@@ -868,49 +868,49 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
 
   <!-- A note: « autre », or the note of a movement (modal, in the middle of the screen) -->
   <Dialog
-    :visible="saisieNote !== null" modal :header="saisieNote?.titre" :style="{ width: '34rem' }"
+    :visible="saisieNote !== null" modal :header="saisieNote?.title" :style="{ width: '34rem' }"
     @update:visible="(v: boolean) => { if (!v) saisieNote = null }"
   >
     <form v-if="saisieNote" class="note-form" @submit.prevent="enregistrerNote">
-      <p class="discret">{{ saisieNote.mouvement.libelle }} du {{ dateFr(saisieNote.mouvement.date_operation) }} : {{ euros(saisieNote.mouvement.montant) }}</p>
-      <InputText v-model="saisieNote.note" :required="saisieNote.categorie === 'autre'" autofocus placeholder="dépôt de garantie, apport des associés…" fluid />
-      <p v-if="saisieNote.categorie !== 'autre'" class="discret">Vide : la note est retirée.</p>
+      <p class="discret">{{ saisieNote.bank_transaction.label }} du {{ dateFr(saisieNote.bank_transaction.transaction_date) }} : {{ euros(saisieNote.bank_transaction.amount) }}</p>
+      <InputText v-model="saisieNote.note" :required="saisieNote.category === 'other'" autofocus placeholder="dépôt de garantie, apport des associés…" fluid />
+      <p v-if="saisieNote.category !== 'other'" class="discret">Vide : la note est retirée.</p>
       <div class="actions-detail fin">
         <Button label="Annuler" text @click="saisieNote = null" />
-        <Button type="submit" label="Enregistrer" :disabled="occupe || (saisieNote.categorie === 'autre' && !saisieNote.note.trim())" />
+        <Button type="submit" label="Enregistrer" :disabled="occupe || (saisieNote.category === 'other' && !saisieNote.note.trim())" />
       </div>
     </form>
   </Dialog>
 
   <FormulairePaiement
     v-if="formulairePaiement"
-    :key="formulairePaiement.brouillon.id ?? `nouveau-${formulairePaiement.mouvement.id}-${formulairePaiement.mouvement.couvert}`"
+    :key="formulairePaiement.brouillon.id ?? `nouveau-${formulairePaiement.bank_transaction.id}-${formulairePaiement.bank_transaction.covered}`"
     v-model="formulairePaiement.brouillon"
-    :immeuble="immeubleDuSejour(formulairePaiement.brouillon.sejour_id)"
-    :sejours="sejours"
-    :regularisations="regularisations"
-    :echeances="echeances"
-    :paiements="paiements"
+    :building="immeubleDuSejour(formulairePaiement.brouillon.tenancy_id)"
+    :tenancies="tenancies"
+    :charge_adjustments="charge_adjustments"
+    :rent_schedules="rent_schedules"
+    :payments="payments"
     :occupe="occupe"
     :erreur="erreurFormulaire"
-    :mouvement="contexte(formulairePaiement.mouvement)"
+    :bank_transaction="contexte(formulairePaiement.bank_transaction)"
     @enregistrer="enregistrerPaiement"
     @fermer="formulairePaiement = null"
-    @supprimer="supprimerPaiement(paiements.find((p) => p.id === formulairePaiement?.brouillon.id))"
+    @supprimer="supprimerPaiement(payments.find((p) => p.id === formulairePaiement?.brouillon.id))"
   />
   <FormulaireTravaux
     v-if="formulaireTravaux"
     :key="formulaireTravaux.brouillon.id ?? 0"
     v-model="formulaireTravaux.brouillon"
-    :immeubles="immeubles"
-    :lots="lots"
+    :buildings="buildings"
+    :units="units"
     :occupe="occupe"
     :erreur="erreurFormulaire"
-    :travaux="travaux.find((t) => t.id === formulaireTravaux?.brouillon.id) ?? null"
+    :works_invoice="works_invoice.find((t) => t.id === formulaireTravaux?.brouillon.id) ?? null"
     @change="recharger"
     @enregistrer="enregistrerTravaux"
     @fermer="formulaireTravaux = null"
-    @supprimer="supprimerTravaux(travaux.find((t) => t.id === formulaireTravaux?.brouillon.id))"
+    @supprimer="supprimerTravaux(works_invoice.find((t) => t.id === formulaireTravaux?.brouillon.id))"
   />
 </template>
 

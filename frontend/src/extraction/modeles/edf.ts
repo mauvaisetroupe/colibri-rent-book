@@ -9,7 +9,7 @@ import { AMOUNT, DATE, InvoiceExtractor, rx, type Category, type Redaction } fro
 const LINE = rx`^(.+?)\s+du (${DATE}) au (${DATE})\s.*?(${AMOUNT}) €\s+(${AMOUNT}) %$`
 
 export default class EdfExtractor extends InvoiceExtractor {
-  readonly energy = 'electricite'
+  readonly energy = 'electricity'
 
   recognizes() {
     return this.doc.text.includes('EDF') && this.doc.text.includes('Détail de votre facture')
@@ -57,14 +57,14 @@ export default class EdfExtractor extends InvoiceExtractor {
 
   /** Category and normalised label, from the start of the printed label. */
   private categorize(label: string): { category: Category, label: string } {
-    if (label.startsWith('Electricit')) return { category: 'consommation', label: 'Consommation électricité' }
-    if (label.startsWith('Abonnement')) return { category: 'abonnement', label: 'Abonnement électricité' }
+    if (label.startsWith('Electricit')) return { category: 'consumption', label: 'Consommation électricité' }
+    if (label.startsWith('Abonnement')) return { category: 'subscription', label: 'Abonnement électricité' }
     if (label.startsWith('Contribution au Service') || label.startsWith('Accise')) {
-      return { category: 'taxe', label: 'Accise sur l\'électricité (ex-CSPE)' }
+      return { category: 'tax', label: 'Accise sur l\'électricité (ex-CSPE)' }
     }
     if (label.startsWith('Contribution Tarifaire')) {
-      return { category: 'taxe', label: 'CTA (Contribution Tarifaire d\'Acheminement)' }
+      return { category: 'tax', label: 'CTA (Contribution Tarifaire d\'Acheminement)' }
     }
-    return { category: 'autre', label }
+    return { category: 'other', label }
   }
 }

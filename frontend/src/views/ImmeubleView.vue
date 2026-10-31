@@ -7,117 +7,117 @@ import { rechargerImmeubles, useImmeuble } from '../immeuble'
 
 // Building and lots with their tantièmes (SPEC § 7). Changing tantièmes changes every statement, past ones included.
 
-type LotSaisi = { id: number | null, code: string, designation: string, surface_m2: string, tantiemes: string }
+type LotSaisi = { id: number | null, code: string, label: string, area_m2: string, charge_shares: string }
 
 const { immeubleId, pret } = useImmeuble()
-const nouveau = ref<null | { code: string, nom: string, adresse: string }>(null)
-const immeuble = ref<ImmeubleDetail | null>(null)
-const identite = reactive({ nom: '', adresse: '', debut_gestion: '' })
-const lots = ref<LotSaisi[]>([])
-const message = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
+const nouveau = ref<null | { code: string, name: string, address: string }>(null)
+const building = ref<ImmeubleDetail | null>(null)
+const identite = reactive({ name: '', address: '', managed_from: '' })
+const units = ref<LotSaisi[]>([])
+const message = ref<{ text: string, type: 'info' | 'erreur' } | null>(null)
 
 const vers = (l: Lot): LotSaisi => ({
   id: l.id,
   code: l.code,
-  designation: l.designation ?? '',
-  surface_m2: nombreFr(l.surface_m2),
-  tantiemes: String(l.tantiemes),
+  label: l.label ?? '',
+  area_m2: nombreFr(l.area_m2),
+  charge_shares: String(l.charge_shares),
 })
 
 async function charger() {
   if (immeubleId.value === null) {
     return
   }
-  immeuble.value = await api.immeuble(immeubleId.value)
-  identite.nom = immeuble.value.nom
-  identite.adresse = immeuble.value.adresse ?? ''
-  identite.debut_gestion = immeuble.value.debut_gestion ?? ''
-  lots.value = immeuble.value.lots.map(vers)
+  building.value = await api.building(immeubleId.value)
+  identite.name = building.value.name
+  identite.address = building.value.address ?? ''
+  identite.managed_from = building.value.managed_from ?? ''
+  units.value = building.value.units.map(vers)
 }
 
 onMounted(async () => {
   await pret
-  await charger().catch((e) => { message.value = { texte: e.message, type: 'erreur' } })
+  await charger().catch((e) => { message.value = { text: e.message, type: 'erreur' } })
 })
 watch(immeubleId, charger)
 
-const total = computed(() => lots.value.reduce((sum, l) => sum + (Number.parseInt(l.tantiemes, 10) || 0), 0))
+const total = computed(() => units.value.reduce((sum, l) => sum + (Number.parseInt(l.charge_shares, 10) || 0), 0))
 
 async function action(f: () => Promise<unknown>, succes: string) {
   try {
     await f()
-    message.value = { texte: succes, type: 'info' }
+    message.value = { text: succes, type: 'info' }
     await charger()
     await rechargerImmeubles()
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 
 const enregistrerIdentite = () => action(
   () => api.modifierImmeuble(immeubleId.value!, {
-    nom: identite.nom, adresse: identite.adresse || null, debut_gestion: identite.debut_gestion || null,
+    name: identite.name, address: identite.address || null, managed_from: identite.managed_from || null,
   }),
   'Immeuble enregistré',
 )
 
-function enregistrerLot(lot: LotSaisi) {
-  const avant = immeuble.value?.lots.find((l) => l.id === lot.id)
-  if (avant && String(avant.tantiemes) !== lot.tantiemes.trim()
+function enregistrerLot(unit: LotSaisi) {
+  const avant = building.value?.units.find((l) => l.id === unit.id)
+  if (avant && String(avant.charge_shares) !== unit.charge_shares.trim()
     && !confirm('Changer les tantièmes modifie tous les décomptes, y compris ceux des exercices passés. Continuer ?')) {
     return
   }
   const donnees = {
-    code: lot.code,
-    designation: lot.designation || null,
-    surface_m2: nombreApi(lot.surface_m2),
-    tantiemes: Number(lot.tantiemes),
+    code: unit.code,
+    label: unit.label || null,
+    area_m2: nombreApi(unit.area_m2),
+    charge_shares: Number(unit.charge_shares),
   }
   return action(
-    () => (lot.id === null
+    () => (unit.id === null
       ? api.creerLot(immeubleId.value!, donnees)
-      : api.modifierLot({ ...donnees, id: lot.id, immeuble_id: immeubleId.value! })),
-    `${lot.code} enregistré`,
+      : api.modifierLot({ ...donnees, id: unit.id, building_id: immeubleId.value! })),
+    `${unit.code} enregistré`,
   )
 }
 
-function supprimerLot(lot: LotSaisi) {
-  if (lot.id === null) {
-    lots.value = lots.value.filter((l) => l !== lot)
+function supprimerLot(unit: LotSaisi) {
+  if (unit.id === null) {
+    units.value = units.value.filter((l) => l !== unit)
     return
   }
-  if (confirm(`Supprimer ${lot.code} ?`)) {
-    return action(() => api.supprimerLot(lot.id!), `${lot.code} supprimé`)
+  if (confirm(`Supprimer ${unit.code} ?`)) {
+    return action(() => api.supprimerLot(unit.id!), `${unit.code} supprimé`)
   }
 }
 
 async function creerImmeuble() {
   const n = nouveau.value!
   try {
-    const cree = await api.creerImmeuble({ code: n.code, nom: n.nom, adresse: n.adresse || null })
+    const created = await api.creerImmeuble({ code: n.code, name: n.name, address: n.address || null })
     await rechargerImmeubles()
-    immeubleId.value = cree.id
+    immeubleId.value = created.id
     nouveau.value = null
-    message.value = { texte: `Immeuble ${cree.nom} créé : ajouter ses lots, puis ses locataires et séjours`, type: 'info' }
+    message.value = { text: `Immeuble ${created.name} créé : ajouter ses lots, puis ses locataires et séjours`, type: 'info' }
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 
-const ajouterLot = () => lots.value.push({ id: null, code: '', designation: '', surface_m2: '', tantiemes: '' })
+const ajouterLot = () => units.value.push({ id: null, code: '', label: '', area_m2: '', charge_shares: '' })
 </script>
 
 <template>
   <h1>Immeuble</h1>
-  <p v-if="message" class="message" :class="message.type">{{ message.texte }}</p>
+  <p v-if="message" class="message" :class="message.type">{{ message.text }}</p>
 
-  <template v-if="immeuble">
+  <template v-if="building">
     <section class="champs">
-      <label>Code <input :value="immeuble.code" disabled></label>
-      <label>Nom <input v-model="identite.nom" size="34"></label>
-      <label>Adresse <input v-model="identite.adresse" size="40"></label>
+      <label>Code <input :value="building.code" disabled></label>
+      <label>Nom <input v-model="identite.name" size="34"></label>
+      <label>Adresse <input v-model="identite.address" size="40"></label>
       <label title="Avant cette date, les comptes n'étaient pas tenus ici (une agence de gestion, par exemple) : pas de factures manquantes, de régularisations manquantes ni de charges comptées au départ d'un locataire">
-        Début de la gestion dans Colibri <input v-model="identite.debut_gestion" type="date">
+        Début de la gestion dans Colibri <input v-model="identite.managed_from" type="date">
       </label>
       <button type="button" class="aligne" @click="enregistrerIdentite">Enregistrer</button>
     </section>
@@ -132,14 +132,14 @@ const ajouterLot = () => lots.value.push({ id: null, code: '', designation: '', 
         <tr><th>Code</th><th>Désignation</th><th class="nombre">Surface (m²)</th><th class="nombre">Tantièmes</th><th /></tr>
       </thead>
       <tbody>
-        <tr v-for="(lot, i) in lots" :key="lot.id ?? `nouveau-${i}`" class="sans-clic">
-          <td><input v-model="lot.code" size="8"></td>
-          <td><input v-model="lot.designation" size="30"></td>
-          <td class="nombre"><input v-model="lot.surface_m2" class="nombre" size="7"></td>
-          <td class="nombre"><input v-model="lot.tantiemes" class="nombre" size="7"></td>
+        <tr v-for="(unit, i) in units" :key="unit.id ?? `nouveau-${i}`" class="sans-clic">
+          <td><input v-model="unit.code" size="8"></td>
+          <td><input v-model="unit.label" size="30"></td>
+          <td class="nombre"><input v-model="unit.area_m2" class="nombre" size="7"></td>
+          <td class="nombre"><input v-model="unit.charge_shares" class="nombre" size="7"></td>
           <td>
-            <button type="button" @click="enregistrerLot(lot)">Enregistrer</button>
-            <button type="button" class="danger" @click="supprimerLot(lot)">Supprimer</button>
+            <button type="button" @click="enregistrerLot(unit)">Enregistrer</button>
+            <button type="button" class="danger" @click="supprimerLot(unit)">Supprimer</button>
           </td>
         </tr>
       </tbody>
@@ -153,13 +153,13 @@ const ajouterLot = () => lots.value.push({ id: null, code: '', designation: '', 
   <h2>Autre immeuble</h2>
   <form v-if="nouveau" class="formulaire" @submit.prevent="creerImmeuble">
     <label>Code <input v-model="nouveau.code" required size="10" placeholder="MAISON"></label>
-    <label>Nom <input v-model="nouveau.nom" required size="30"></label>
-    <label>Adresse <input v-model="nouveau.adresse" size="40"></label>
+    <label>Nom <input v-model="nouveau.name" required size="30"></label>
+    <label>Adresse <input v-model="nouveau.address" size="40"></label>
     <button type="submit" class="principal">Créer</button>
     <button type="button" @click="nouveau = null">Annuler</button>
   </form>
   <p v-else>
-    <button type="button" @click="nouveau = { code: '', nom: '', adresse: '' }">+ Nouvel immeuble</button>
+    <button type="button" @click="nouveau = { code: '', name: '', address: '' }">+ Nouvel immeuble</button>
     <span class="discret"> L'immeuble affiché se choisit en haut à droite dès qu'il y en a plusieurs.</span>
   </p>
 </template>

@@ -20,13 +20,13 @@ const LARGEUR = 595
 const HAUTEUR = 842
 
 /** A one-page PDF: each row is [x, text] pieces on a line, from the top, in 10-point Helvetica. */
-async function facture(lignes: [number, string][][]): Promise<Uint8Array> {
+async function invoice(lines: [number, string][][]): Promise<Uint8Array> {
   const pdf = await PDFDocument.create()
   const page = pdf.addPage([LARGEUR, HAUTEUR])
   const police = await pdf.embedFont(StandardFonts.Helvetica)
-  lignes.forEach((ligne, i) => {
-    for (const [x, texte] of ligne) {
-      page.drawText(texte, { x, y: 800 - i * 16, size: 10, font: police })
+  lines.forEach((ligne, i) => {
+    for (const [x, text] of ligne) {
+      page.drawText(text, { x, y: 800 - i * 16, size: 10, font: police })
     }
   })
   return pdf.save()
@@ -62,41 +62,41 @@ export default class Exemple extends InvoiceExtractor {
 
 describe('zones to mask', () => {
   test('a term is found with its spaces and case ignored, on its line only', async () => {
-    const pages = await pagesDe(await facture(FACTURE))
+    const pages = await pagesDe(await invoice(FACTURE))
     const zones = masquage(pages, REGLAGES_PAR_DEFAUT, ['Mme Exemple', '12 RUE DES EXEMPLES', 'absent'])
     assert.equal(zones.length, 2)
-    const [nom, rue] = zones
-    assert.equal(nom!.origine, 'termes')
+    const [name, rue] = zones
+    assert.equal(name!.origin, 'terms')
     // « MME EXEMPLE » starts at x = 350 and is shorter than its piece (« MME EXEMPLE CLAIRE »)
-    assert.ok(Math.abs(nom!.x0 * LARGEUR - 349) < 1, String(nom!.x0 * LARGEUR))
-    assert.ok(nom!.x1 * LARGEUR < 350 + 100, 'not the whole piece')
+    assert.ok(Math.abs(name!.x0 * LARGEUR - 349) < 1, String(name!.x0 * LARGEUR))
+    assert.ok(name!.x1 * LARGEUR < 350 + 100, 'not the whole piece')
     // First line: baseline at 842 - 800 = 42 points from the top
-    assert.ok(nom!.y0 * HAUTEUR < 42 - 9 && nom!.y1 * HAUTEUR > 42, `${nom!.y0 * HAUTEUR} ${nom!.y1 * HAUTEUR}`)
-    assert.ok(rue!.y0 > nom!.y1 - 0.01, 'second line below')
+    assert.ok(name!.y0 * HAUTEUR < 42 - 9 && name!.y1 * HAUTEUR > 42, `${name!.y0 * HAUTEUR} ${name!.y1 * HAUTEUR}`)
+    assert.ok(rue!.y0 > name!.y1 - 0.01, 'second line below')
   })
 
   test('the redactions of an extractor: a regular expression', async () => {
     const classe = charger(compiler(EXTRACTEUR, ts))
-    const pages = await pagesDe(await facture(FACTURE))
+    const pages = await pagesDe(await invoice(FACTURE))
     const zones = masquage(pages, REGLAGES_PAR_DEFAUT, [], classe)
-    assert.deepEqual(zones.map((z) => z.origine), ['extracteur'])
+    assert.deepEqual(zones.map((z) => z.origin), ['extractor'])
     assert.ok(zones[0]!.x0 * LARGEUR < 41 && zones[0]!.x1 * LARGEUR > 150, 'the whole match')
   })
 
   test('a scanned page: its text is not searched, the zones drawn by hand mask it', async () => {
     const classe = charger(compiler(EXTRACTEUR, ts))
-    const pages = await pagesDe(await facture(FACTURE))
+    const pages = await pagesDe(await invoice(FACTURE))
     const dessinees = [{ page: 1, x0: 0.5, y0: 0.05, x1: 0.95, y1: 0.12 }, { page: 2, x0: 0, y0: 0, x1: 1, y1: 1 }]
-    assert.deepEqual(masquage(pages, REGLAGES_PAR_DEFAUT, ['MME EXEMPLE'], classe, { pages: [1], zones: dessinees, origine: 'main' }),
-      [{ page: 1, x0: 0.5, y0: 0.05, x1: 0.95, y1: 0.12, origine: 'main' }], 'neither the terms nor the extractor, no page 2')
+    assert.deepEqual(masquage(pages, REGLAGES_PAR_DEFAUT, ['MME EXEMPLE'], classe, { pages: [1], zones: dessinees, origin: 'manual' }),
+      [{ page: 1, x0: 0.5, y0: 0.05, x1: 0.95, y1: 0.12, origin: 'manual' }], 'neither the terms nor the extractor, no page 2')
   })
 
   test('a page of text: the zones drawn by hand are added to the terms and the extractor', async () => {
     const classe = charger(compiler(EXTRACTEUR, ts))
-    const pages = await pagesDe(await facture(FACTURE))
+    const pages = await pagesDe(await invoice(FACTURE))
     const zones = masquage(pages, REGLAGES_PAR_DEFAUT, ['MME EXEMPLE'], classe,
-      { pages: [], zones: [{ page: 1, x0: 0.1, y0: 0.8, x1: 0.3, y1: 0.95 }], origine: 'modele' })
-    assert.deepEqual(zones.map((z) => z.origine).sort(), ['extracteur', 'modele', 'termes'])
+      { pages: [], zones: [{ page: 1, x0: 0.1, y0: 0.8, x1: 0.3, y1: 0.95 }], origin: 'template' })
+    assert.deepEqual(zones.map((z) => z.origin).sort(), ['extractor', 'template', 'terms'])
   })
 })
 
@@ -149,14 +149,14 @@ describe('copy in images', () => {
 
 describe('what the editor shows masked', () => {
   test('a line cut where a term or a redaction is, the extractor over the terms', () => {
-    const lignes = ['Référence client : 123 456 789', 'Rien ici']
-    const [premiere, seconde] = lignesMasquees(lignes, ['client'], [{ pattern: /\d[\d ]+/ }])
+    const lines = ['Référence client : 123 456 789', 'Rien ici']
+    const [premiere, seconde] = lignesMasquees(lines, ['client'], [{ pattern: /\d[\d ]+/ }])
     assert.deepEqual(premiere, [
-      { texte: 'Référence ', origine: null },
-      { texte: 'client', origine: 'termes' },
-      { texte: ' : ', origine: null },
-      { texte: '123 456 789', origine: 'extracteur' },
+      { text: 'Référence ', origin: null },
+      { text: 'client', origin: 'terms' },
+      { text: ' : ', origin: null },
+      { text: '123 456 789', origin: 'extractor' },
     ])
-    assert.deepEqual(seconde, [{ texte: 'Rien ici', origine: null }])
+    assert.deepEqual(seconde, [{ text: 'Rien ici', origin: null }])
   })
 })

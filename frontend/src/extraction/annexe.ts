@@ -5,9 +5,9 @@ import { concatTransformationMatrix, drawObject, PDFDocument, popGraphicsState, 
 // pages are drawn by pdf.js in the browser (navigateur.ts); what is here runs in Node too (tests).
 
 /** How the pages are drawn: resolution, and the grey level (0 to 255) from which a pixel is white. */
-export type ReglagesAnnexe = { dpi: number, seuil: number }
+export type ReglagesAnnexe = { dpi: number, threshold: number }
 
-export const REGLAGES_ANNEXE: ReglagesAnnexe = { dpi: 200, seuil: 170 }
+export const REGLAGES_ANNEXE: ReglagesAnnexe = { dpi: 200, threshold: 170 }
 
 /** A page drawn in black and white: its size in points, its pixels, 1 bit each, rows padded to a byte. */
 export type PageImage = { largeur: number, hauteur: number, largeurPx: number, hauteurPx: number, bits: Uint8Array }
@@ -16,7 +16,7 @@ export type PageImage = { largeur: number, hauteur: number, largeurPx: number, h
  * The pixels of a canvas (RGBA, 4 bytes per pixel) in black and white, 1 bit per pixel: 1 white, 0 black, as the
  * colour space DeviceGray reads them; each row starts on a byte.
  */
-export function binariser(rgba: Uint8ClampedArray, largeurPx: number, hauteurPx: number, seuil: number): Uint8Array {
+export function binariser(rgba: Uint8ClampedArray, largeurPx: number, hauteurPx: number, threshold: number): Uint8Array {
   const parLigne = Math.ceil(largeurPx / 8)
   const bits = new Uint8Array(parLigne * hauteurPx)
   for (let y = 0; y < hauteurPx; y++) {
@@ -25,7 +25,7 @@ export function binariser(rgba: Uint8ClampedArray, largeurPx: number, hauteurPx:
       // Luminance (ITU-R BT.601); a transparent pixel is white paper
       const a = rgba[i + 3]! / 255
       const gris = (0.299 * rgba[i]! + 0.587 * rgba[i + 1]! + 0.114 * rgba[i + 2]!) * a + 255 * (1 - a)
-      if (gris >= seuil) {
+      if (gris >= threshold) {
         bits[y * parLigne + (x >> 3)]! |= 0x80 >> (x & 7)
       }
     }
@@ -43,9 +43,9 @@ export async function pdfEnImages(pages: PageImage[]): Promise<Uint8Array> {
       Type: 'XObject', Subtype: 'Image', Width: p.largeurPx, Height: p.hauteurPx,
       ColorSpace: 'DeviceGray', BitsPerComponent: 1,
     }))
-    const nom = page.node.newXObject('Im', image)
+    const name = page.node.newXObject('Im', image)
     page.pushOperators(
-      pushGraphicsState(), concatTransformationMatrix(p.largeur, 0, 0, p.hauteur, 0, 0), drawObject(nom), popGraphicsState(),
+      pushGraphicsState(), concatTransformationMatrix(p.largeur, 0, 0, p.hauteur, 0, 0), drawObject(name), popGraphicsState(),
     )
   }
   return pdf.save()

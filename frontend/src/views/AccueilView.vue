@@ -18,18 +18,18 @@ import { anneesARegulariser, regularisationsManquantes, type Manquante } from '.
 // then the user guide of every screen.
 
 type Etat = 'ok' | 'attention' | 'a-faire'
-type Etape = { numero: number, titre: string, lien: string, etat: Etat, resume: string, details: string[] }
+type Etape = { number: number, title: string, lien: string, state: Etat, resume: string, details: string[] }
 
-const { immeubles, immeubleId, pret } = useImmeuble()
-const debutGestion = () => immeubles.value.find((i) => i.id === immeubleId.value)?.debut_gestion ?? null
-const { debut, fin } = useExercice()
-const factures = ref<FactureResumee[]>([])
-const decompte = ref<Decompte | null>(null)
+const { buildings, immeubleId, pret } = useImmeuble()
+const debutGestion = () => buildings.value.find((i) => i.id === immeubleId.value)?.managed_from ?? null
+const { start, end } = useExercice()
+const invoices = ref<FactureResumee[]>([])
+const charge_statement = ref<Decompte | null>(null)
 const couverture = ref<Couverture | null>(null)
-const regularisations = ref<Regularisation[]>([])
-const paiements = ref<Paiement[]>([])
-const sejours = ref<Sejour[]>([])
-const releves = ref<ReleveResume[]>([])
+const charge_adjustments = ref<Regularisation[]>([])
+const payments = ref<Paiement[]>([])
+const tenancies = ref<Sejour[]>([])
+const statements = ref<ReleveResume[]>([])
 const mouvementsBanque = ref<Mouvement[]>([])
 // Missing regularisations of every finished year, not only of the exercise chosen
 const aRegulariser = ref<Manquante[]>([])
@@ -39,25 +39,25 @@ async function charger() {
   if (immeubleId.value === null) {
     return
   }
-  const exercice = { immeuble: immeubleId.value, debut: debut.value, fin: fin.value }
+  const period = { building: immeubleId.value, start: start.value, end: end.value }
   try {
-    const annees = [...new Set([Number(debut.value.slice(0, 4)), Number(fin.value.slice(0, 4))])]
+    const annees = [...new Set([Number(start.value.slice(0, 4)), Number(end.value.slice(0, 4))])]
     let lus: Paiement[][]
-    ;[factures.value, decompte.value, couverture.value, regularisations.value, sejours.value, releves.value,
+    ;[invoices.value, charge_statement.value, couverture.value, charge_adjustments.value, tenancies.value, statements.value,
       mouvementsBanque.value, ...lus] = await Promise.all([
-      api.factures(exercice.immeuble), api.decompte(exercice), api.couverture(exercice),
-      api.regularisations(exercice.immeuble), api.sejours(exercice.immeuble), api.releves(),
-      api.mouvements('tous', exercice.debut, exercice.fin),
-      ...annees.map((a) => api.paiements(exercice.immeuble, a)),
+      api.invoices(period.building), api.charge_statement(period), api.couverture(period),
+      api.charge_adjustments(period.building), api.tenancies(period.building), api.statements(),
+      api.transactions('tous', period.start, period.end),
+      ...annees.map((a) => api.payments(period.building, a)),
     ])
-    paiements.value = lus.flat()
+    payments.value = lus.flat()
     const aujourdhui = new Date().toISOString().slice(0, 10)
     // Calendar years only (the statement of the exercise chosen when it is one of them)
-    const decomptes = await Promise.all(anneesARegulariser(regularisations.value, aujourdhui, debutGestion()).map((a) =>
-      `${a}-01-01` === debut.value && `${a}-12-31` === fin.value
-        ? decompte.value! : api.decompte({ immeuble: exercice.immeuble, debut: `${a}-01-01`, fin: `${a}-12-31` })))
-    aRegulariser.value = decomptes.flatMap((x) => regularisationsManquantes(x, regularisations.value, aujourdhui, debutGestion()))
-      .sort((a, b) => a.debut.localeCompare(b.debut) || a.sejour.lot.localeCompare(b.sejour.lot))
+    const decomptes = await Promise.all(anneesARegulariser(charge_adjustments.value, aujourdhui, debutGestion()).map((a) =>
+      `${a}-01-01` === start.value && `${a}-12-31` === end.value
+        ? charge_statement.value! : api.charge_statement({ building: period.building, start: `${a}-01-01`, end: `${a}-12-31` })))
+    aRegulariser.value = decomptes.flatMap((x) => regularisationsManquantes(x, charge_adjustments.value, aujourdhui, debutGestion()))
+      .sort((a, b) => a.start.localeCompare(b.start) || a.tenancy.unit.localeCompare(b.tenancy.unit))
     erreur.value = null
   } catch (e) {
     erreur.value = (e as Error).message
@@ -68,59 +68,59 @@ onMounted(async () => {
   await pret
   await charger()
 })
-watch([immeubleId, debut, fin], charger)
+watch([immeubleId, start, end], charger)
 
 // « 1 facture validée », « 17 factures validées »: singular and plural given whole
 const nombre = (n: number, singulier: string, pluriel: string) => `${n} ${n > 1 ? pluriel : singulier}`
 
 const etapes = computed<Etape[]>(() => {
-  if (!decompte.value || !couverture.value) {
+  if (!charge_statement.value || !couverture.value) {
     return []
   }
-  const d = decompte.value
+  const d = charge_statement.value
   const c = couverture.value
-  const query = `?debut=${debut.value}&fin=${fin.value}`
+  const query = `?start=${start.value}&end=${end.value}`
 
   // 1. Invoices touching the exercise
-  const concernees = factures.value.filter((f) => f.debut && f.fin && f.debut <= fin.value && f.fin >= debut.value)
-  const brouillons = factures.value.filter((f) => f.statut === 'a_verifier')
+  const concernees = invoices.value.filter((f) => f.start && f.end && f.start <= end.value && f.end >= start.value)
+  const brouillons = invoices.value.filter((f) => f.status === 'draft')
   const factureEtape: Etape = {
-    numero: 1, titre: 'Factures', lien: '/factures',
-    etat: brouillons.length ? 'a-faire' : concernees.length ? 'ok' : 'attention',
-    resume: `${nombre(concernees.filter((f) => f.statut === 'validee').length, 'facture validée', 'factures validées')} sur l'exercice`
+    number: 1, title: 'Factures', lien: '/factures',
+    state: brouillons.length ? 'a-faire' : concernees.length ? 'ok' : 'attention',
+    resume: `${nombre(concernees.filter((f) => f.status === 'validated').length, 'facture validée', 'factures validées')} sur l'exercice`
       + (brouillons.length ? ` · ${nombre(brouillons.length, 'brouillon', 'brouillons')} à vérifier puis valider` : ''),
-    details: brouillons.map((f) => `Brouillon : ${f.fournisseur} n° ${f.numero} du ${dateFr(f.date_facture)}`),
+    details: brouillons.map((f) => `Brouillon : ${f.supplier} n° ${f.number} du ${dateFr(f.invoice_date)}`),
   }
 
   // 2. Stays present during the exercise
-  const presents = d.sejours.filter((s) => s.jours > 0)
-  const mouvements = presents.filter((s) => s.present_du !== debut.value || s.present_au !== fin.value)
+  const presents = d.tenancies.filter((s) => s.days > 0)
+  const transactions = presents.filter((s) => s.present_from !== start.value || s.present_to !== end.value)
   const sejourEtape: Etape = {
-    numero: 2, titre: 'Locataires', lien: '/sejours',
-    etat: presents.length ? 'ok' : 'attention',
+    number: 2, title: 'Locataires', lien: '/sejours',
+    state: presents.length ? 'ok' : 'attention',
     resume: `${nombre(presents.length, 'séjour', 'séjours')} sur l'exercice`
-      + (mouvements.length ? ` · ${nombre(mouvements.length, 'entrée ou sortie', 'entrées ou sorties')} en cours d'exercice` : ''),
-    details: mouvements.map((s) => `${s.locataire} (${s.lot}) : présent du ${dateFr(s.present_du)} au ${dateFr(s.present_au)}`),
+      + (transactions.length ? ` · ${nombre(transactions.length, 'entrée ou sortie', 'entrées ou sorties')} en cours d'exercice` : ''),
+    details: transactions.map((s) => `${s.tenant} (${s.unit}) : présent du ${dateFr(s.present_from)} au ${dateFr(s.present_to)}`),
   }
 
   // 3. Payments: provisions per stay and year, months without payment once monthly payments are recorded
   const manquantes = d.avertissements.filter((a) => a.startsWith('Aucune provision'))
-  const avecMois = paiements.value.filter((p) => p.mois).map((p) => p.mois!.slice(0, 7)).sort()
+  const avecMois = payments.value.filter((p) => p.month).map((p) => p.month!.slice(0, 7)).sort()
   const impayes: string[] = []
   if (avecMois[0]) {
-    const finSuivi = [fin.value.slice(0, 7), new Date().toISOString().slice(0, 7)].sort()[0]!
-    for (const s of sejours.value) {
+    const finSuivi = [end.value.slice(0, 7), new Date().toISOString().slice(0, 7)].sort()[0]!
+    for (const s of tenancies.value) {
       for (let m = avecMois[0]; m <= finSuivi; m = moisSuivant(m)) {
-        const present = s.entree <= `${m}-31` && (s.sortie === null || s.sortie >= `${m}-01`)
-        if (present && m >= debut.value.slice(0, 7) && !paiements.value.some((p) => p.sejour_id === s.id && p.mois?.startsWith(m))) {
-          impayes.push(`${s.locataire} (${s.lot}) : rien pour ${m.slice(5, 7)}/${m.slice(0, 4)}`)
+        const present = s.move_in <= `${m}-31` && (s.move_out === null || s.move_out >= `${m}-01`)
+        if (present && m >= start.value.slice(0, 7) && !payments.value.some((p) => p.tenancy_id === s.id && p.month?.startsWith(m))) {
+          impayes.push(`${s.tenant} (${s.unit}) : rien pour ${m.slice(5, 7)}/${m.slice(0, 4)}`)
         }
       }
     }
   }
   const provisionEtape: Etape = {
-    numero: 3, titre: 'Paiements', lien: manquantes.length && !avecMois.length ? '/provisions' : '/paiements',
-    etat: manquantes.length ? 'a-faire' : impayes.length ? 'attention' : 'ok',
+    number: 3, title: 'Paiements', lien: manquantes.length && !avecMois.length ? '/provisions' : '/paiements',
+    state: manquantes.length ? 'a-faire' : impayes.length ? 'attention' : 'ok',
     resume: [
       manquantes.length ? `${nombre(manquantes.length, 'provision', 'provisions')} à saisir` : 'Provisions connues pour tous les séjours',
       ...(impayes.length ? [`${nombre(impayes.length, 'mois sans paiement', 'mois sans paiement')}`] : []),
@@ -129,56 +129,56 @@ const etapes = computed<Etape[]>(() => {
   }
 
   // 4. Bank: statements imported, movements categorised, payments seen on a statement
-  const b = etatBanque(releves.value, mouvementsBanque.value, paiements.value, debut.value, fin.value)
+  const b = etatBanque(statements.value, mouvementsBanque.value, payments.value, start.value, end.value)
   const manquants = b.comptes.reduce((n, x) => n + x.manquants.length, 0)
   const banqueEtape: Etape = {
-    numero: 4, titre: 'Banque', lien: b.aCategoriser.length || !releves.value.length ? '/banque' : `/controles${query}`,
-    etat: !releves.value.length ? 'attention' : manquants || b.finManquante || b.aCategoriser.length ? 'a-faire'
+    number: 4, title: 'Banque', lien: b.aCategoriser.length || !statements.value.length ? '/banque' : `/controles${query}`,
+    state: !statements.value.length ? 'attention' : manquants || b.finManquante || b.aCategoriser.length ? 'a-faire'
       : b.incomplets.length || b.sansMouvement.length ? 'attention' : 'ok',
-    resume: !releves.value.length ? 'Aucun relevé importé' : [
+    resume: !statements.value.length ? 'Aucun relevé importé' : [
       b.finManquante ? `relevés importés jusqu'au ${dateFr(b.finManquante)}` : manquants ? `${nombre(manquants, 'relevé manquant', 'relevés manquants')}` : 'Relevés à jour',
       b.aCategoriser.length ? `${nombre(b.aCategoriser.length, 'mouvement', 'mouvements')} à catégoriser` : 'tout est catégorisé',
       ...(b.incomplets.length ? [`${b.incomplets.length} à rattacher`] : []),
       ...(b.sansMouvement.length ? [`${nombre(b.sansMouvement.length, 'paiement absent', 'paiements absents')} des relevés`] : []),
     ].join(' · '),
-    details: b.sansMouvement.map((p) => `Paiement du ${dateFr(p.date_paiement)}, ${p.locataire} : sur aucun relevé`),
+    details: b.sansMouvement.map((p) => `Paiement du ${dateFr(p.payment_date)}, ${p.tenant} : sur aucun relevé`),
   }
 
   // 5. Checks: coverage, overlaps, drafts
-  const trous = c.energies.flatMap((e) => e.trous.map((t) => ({ ...t, energie: e.energie })))
+  const trous = c.energies.flatMap((e) => e.trous.map((t) => ({ ...t, energy: e.energy })))
   const controleEtape: Etape = {
-    numero: 5, titre: 'Contrôles', lien: `/controles${query}`,
-    etat: trous.length || c.brouillons.length ? 'a-faire' : c.chevauchements.length ? 'attention' : 'ok',
+    number: 5, title: 'Contrôles', lien: `/controles${query}`,
+    state: trous.length || c.brouillons.length ? 'a-faire' : c.chevauchements.length ? 'attention' : 'ok',
     resume: [
       trous.length ? `${nombre(trous.length, 'période', 'périodes')} sans facture validée` : 'Toute la période est facturée',
       c.chevauchements.length ? `${nombre(c.chevauchements.length, 'chevauchement', 'chevauchements')} à examiner` : 'aucun chevauchement',
     ].join(' · '),
-    details: trous.map((t) => `${ENERGIES[t.energie]} : aucune facture validée du ${dateFr(t.debut)} au ${dateFr(t.fin)}`),
+    details: trous.map((t) => `${ENERGIES[t.energy]} : aucune facture validée du ${dateFr(t.start)} au ${dateFr(t.end)}`),
   }
 
   // 6. Statement
-  const somme = (cle: 'total' | 'provisions' | 'solde') =>
-    d.sejours.reduce((t, s) => t.plus(s[cle]), new Big(0)).toString()
+  const somme = (cle: 'total' | 'advances' | 'balance') =>
+    d.tenancies.reduce((t, s) => t.plus(s[cle]), new Big(0)).toString()
   const decompteEtape: Etape = {
-    numero: 6, titre: 'Décompte', lien: `/decompte${query}`,
-    etat: d.avertissements.some((a) => !a.includes('chevauchement')) ? 'attention' : 'ok',
-    resume: `Charges des locataires ${euros(somme('total'))} · provisions ${euros(somme('provisions'))} · `
-      + `solde ${euros(somme('solde'))}`,
+    number: 6, title: 'Décompte', lien: `/decompte${query}`,
+    state: d.avertissements.some((a) => !a.includes('chevauchement')) ? 'attention' : 'ok',
+    resume: `Charges des locataires ${euros(somme('total'))} · provisions ${euros(somme('advances'))} · `
+      + `solde ${euros(somme('balance'))}`,
     details: [],
   }
 
   // 7. Regularisations of the exercise (current ones: not replaced)
-  const courantes = regularisations.value.filter((r) => r.debut === debut.value && r.fin === fin.value && !r.remplacee_par)
-  const envoyees = courantes.filter((r) => r.etat !== 'brouillon')
+  const courantes = charge_adjustments.value.filter((r) => r.start === start.value && r.end === end.value && !r.replaced_by)
+  const envoyees = courantes.filter((r) => r.state !== 'draft')
   const enAttente = envoyees.filter(aEncaisser)
   // Missing over a finished year (this exercise or another): the creation page of the first one
   const manque = aRegulariser.value[0]
   const regularisationEtape: Etape = {
     // Stays still without a regularisation over the exercise: the creation page, else the list
-    numero: 7, titre: 'Régularisations',
-    lien: manque ? `/regularisations/nouvelle?debut=${manque.debut}&fin=${manque.fin}`
+    number: 7, title: 'Régularisations',
+    lien: manque ? `/regularisations/nouvelle?start=${manque.start}&end=${manque.end}`
       : courantes.length < presents.length ? `/regularisations/nouvelle${query}` : '/regularisations',
-    etat: manque ? 'a-faire' : envoyees.length >= presents.length && presents.length ? 'ok' : courantes.length ? 'attention' : 'a-faire',
+    state: manque ? 'a-faire' : envoyees.length >= presents.length && presents.length ? 'ok' : courantes.length ? 'attention' : 'a-faire',
     resume: [
       ...(aRegulariser.value.length ? [nombre(aRegulariser.value.length, 'régularisation manquante', 'régularisations manquantes')] : []),
       `${nombre(envoyees.length, 'envoyée', 'envoyées')} sur ${nombre(presents.length, 'séjour', 'séjours')}`
@@ -187,19 +187,19 @@ const etapes = computed<Etape[]>(() => {
         + (enAttente.length ? ` · ${enAttente.length} en attente de paiement ou de remboursement` : ''),
     ].join(' · '),
     details: [
-      ...aRegulariser.value.map((m) => `Manquante : ${m.sejour.locataire} (${m.sejour.lot}), ${m.debut.slice(0, 4)}`
-        + (m.debut.slice(0, 4) !== m.fin.slice(0, 4) ? `-${m.fin.slice(0, 4)}` : '') + ' : '
-        + (new Big(m.sejour.solde).gt(0) ? `${euros(m.sejour.solde)} à réclamer`
-          : new Big(m.sejour.solde).lt(0) ? `${euros(new Big(m.sejour.solde).neg().toString())} à rembourser` : 'solde nul')),
-      ...enAttente.map((r) => `${r.locataire} : reste ${euros(new Big(r.solde).minus(r.montant_recu).toString())}`),
+      ...aRegulariser.value.map((m) => `Manquante : ${m.tenancy.tenant} (${m.tenancy.unit}), ${m.start.slice(0, 4)}`
+        + (m.start.slice(0, 4) !== m.end.slice(0, 4) ? `-${m.end.slice(0, 4)}` : '') + ' : '
+        + (new Big(m.tenancy.balance).gt(0) ? `${euros(m.tenancy.balance)} à réclamer`
+          : new Big(m.tenancy.balance).lt(0) ? `${euros(new Big(m.tenancy.balance).neg().toString())} à rembourser` : 'solde nul')),
+      ...enAttente.map((r) => `${r.tenant} : reste ${euros(new Big(r.balance).minus(r.amount_received).toString())}`),
     ],
   }
 
   // 8. Tax summary of the calendar year of the end of the exercise
-  const anneeFiscale = Number(fin.value.slice(0, 4))
+  const anneeFiscale = Number(end.value.slice(0, 4))
   const fiscalEtape: Etape = {
-    numero: 8, titre: 'Synthèse fiscale', lien: '/fiscal',
-    etat: 'ok',
+    number: 8, title: 'Synthèse fiscale', lien: '/fiscal',
+    state: 'ok',
     resume: `Charges non récupérées et vacance de ${anneeFiscale}, pour la déclaration de revenus fonciers`,
     details: [],
   }
@@ -228,14 +228,14 @@ const SYMBOLES: Record<Etat, string> = { ok: '✓', attention: '!', 'a-faire': '
 
   <div class="cycle">
     <div class="phase">Tenue des comptes, au fil de l'année</div>
-    <template v-for="e in etapes" :key="e.numero">
-      <div v-if="e.numero === 5" class="phase">Bilan de l'exercice</div>
-      <div v-if="e.numero === 8" class="phase">Clôture</div>
-      <RouterLink :to="e.lien" class="etape" :class="e.etat">
-        <span class="pastille-etape">{{ SYMBOLES[e.etat] }}</span>
-        <span class="numero">{{ e.numero }}</span>
+    <template v-for="e in etapes" :key="e.number">
+      <div v-if="e.number === 5" class="phase">Bilan de l'exercice</div>
+      <div v-if="e.number === 8" class="phase">Clôture</div>
+      <RouterLink :to="e.lien" class="etape" :class="e.state">
+        <span class="pastille-etape">{{ SYMBOLES[e.state] }}</span>
+        <span class="numero">{{ e.number }}</span>
         <span class="contenu">
-          <strong>{{ e.titre }}</strong>
+          <strong>{{ e.title }}</strong>
           <span>{{ e.resume }}</span>
           <ul v-if="e.details.length" class="details-etape">
             <li v-for="(d, i) in e.details.slice(0, 4)" :key="i">{{ d }}</li>

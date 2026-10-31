@@ -15,75 +15,75 @@ import {
 
 const NOTE_RETENUE = 'Retenue sur le dépôt de garantie'
 
-const COLUMNS = `vd.id, vd.sejour_id, lo.nom AS locataire, lt.code AS lot, vd.date_versement::text, vd.montant::text,
-  vd.mouvement_id, vd.note`
-const FROM = `versement_depot vd JOIN sejour s ON s.id = vd.sejour_id JOIN lot lt ON lt.id = s.lot_id
-  JOIN locataire lo ON lo.id = s.locataire_id`
+const COLUMNS = `vd.id, vd.tenancy_id, lo.name AS tenant, lt.code AS unit, vd.payment_date::text, vd.amount::text,
+  vd.bank_transaction_id, vd.note`
+const FROM = `deposit_payment vd JOIN tenancy s ON s.id = vd.tenancy_id JOIN unit lt ON lt.id = s.unit_id
+  JOIN tenant lo ON lo.id = s.tenant_id`
 
-type Saisie = { sejour_id: number, date_versement: string, montant: string, mouvement_id: number | null, note: string | null }
+type Saisie = { tenancy_id: number, payment_date: string, amount: string, bank_transaction_id: number | null, note: string | null }
 
 function readDepot(raw: Record<string, unknown>): Saisie {
-  const montant = requiredDecimal(raw.montant, 'Montant')
-  if (new Big(montant).eq(0)) {
+  const amount = requiredDecimal(raw.amount, 'Montant')
+  if (new Big(amount).eq(0)) {
     throw new InputError('Montant : positif s\'il est versé par le locataire, négatif s\'il lui est remboursé')
   }
   return {
-    sejour_id: requiredId(raw.sejour_id, 'Séjour'),
-    date_versement: requiredDate(raw.date_versement, 'Date'),
-    montant,
-    mouvement_id: raw.mouvement_id ? requiredId(raw.mouvement_id, 'Mouvement') : null,
+    tenancy_id: requiredId(raw.tenancy_id, 'Séjour'),
+    payment_date: requiredDate(raw.payment_date, 'Date'),
+    amount,
+    bank_transaction_id: raw.bank_transaction_id ? requiredId(raw.bank_transaction_id, 'Mouvement') : null,
     note: optionalText(raw.note),
   }
 }
 
 /** Seen on a bank statement: a tenant payment (with the rent) or a deposit alone, of the same sign. */
 async function checkMouvement(db: Pool | PoolClient, d: Saisie, id: number | null) {
-  if (d.mouvement_id) {
-    const montant = new Big(d.montant)
-    await verifierMouvement(db, d.mouvement_id, {
-      categories: ['locataire', 'depot_garantie'], signe: montant.gt(0) ? 1 : -1, montant, detail: 'versement_depot', exclure: id,
+  if (d.bank_transaction_id) {
+    const amount = new Big(d.amount)
+    await verifierMouvement(db, d.bank_transaction_id, {
+      categories: ['tenant', 'security_deposit'], signe: amount.gt(0) ? 1 : -1, amount, detail: 'deposit_payment', exclure: id,
     })
   }
 }
 
 /** Deposits paid less refunded, and what the retention keeps, of a stay. */
 async function soldeDepot(db: Pool | PoolClient, sejourId: number) {
-  const { rows: [r] } = await db.query<{ verse: string, retenu: string }>(
-    `SELECT (SELECT coalesce(sum(montant), 0) FROM versement_depot WHERE sejour_id = $1)::text AS verse,
-            (SELECT coalesce(sum(loyer + provision + regularisation), 0) FROM paiement
-             WHERE sejour_id = $1 AND mode = 'depot')::text AS retenu`, [sejourId])
-  return { verse: new Big(r!.verse), retenu: new Big(r!.retenu) }
+  const { rows: [r] } = await db.query<{ paid: string, retained: string }>(
+    `SELECT (SELECT coalesce(sum(amount), 0) FROM deposit_payment WHERE tenancy_id = $1)::text AS paid,
+            (SELECT coalesce(sum(rent + charge_advance + charge_adjustment), 0) FROM payment
+             WHERE tenancy_id = $1 AND method = 'deposit')::text AS retained`, [sejourId])
+  return { paid: new Big(r!.paid), retained: new Big(r!.retained) }
 }
 
 /** A change of the deposits may not leave less than the retention keeps. */
 async function checkRetenue(db: Pool | PoolClient, sejourId: number, changement: Big) {
-  const { verse, retenu } = await soldeDepot(db, sejourId)
-  if (retenu.gt(0) && verse.plus(changement).lt(retenu)) {
-    throw new InputError(`La retenue (${retenu.toFixed(2)} €) dépasserait le dépôt versé : modifier d'abord la retenue`)
+  const { paid, retained } = await soldeDepot(db, sejourId)
+  if (retained.gt(0) && paid.plus(changement).lt(retained)) {
+    throw new InputError(`La retenue (${retained.toFixed(2)} €) dépasserait le dépôt versé : modifier d'abord la retenue`)
   }
 }
 
-type LigneRetenue = { mois: string | null, loyer: string, provision: string, regularisation_id: number | null, regularisation: string }
+type LigneRetenue = { month: string | null, rent: string, charge_advance: string, charge_adjustment_id: number | null, charge_adjustment: string }
 
 function readRetenue(raw: Record<string, unknown>) {
   const date = requiredDate(raw.date, 'Date de la retenue')
-  const lignes: LigneRetenue[] = (Array.isArray(raw.lignes) ? raw.lignes : []).map((x: Record<string, unknown>, i: number) => {
+  const lines: LigneRetenue[] = (Array.isArray(raw.lines) ? raw.lines : []).map((x: Record<string, unknown>, i: number) => {
     const n = `Ligne ${i + 1}`
-    if (x.regularisation_id) {
-      const montant = requiredDecimal(x.regularisation, `${n}, montant`)
-      if (!new Big(montant).gt(0)) {
+    if (x.charge_adjustment_id) {
+      const amount = requiredDecimal(x.charge_adjustment, `${n}, montant`)
+      if (!new Big(amount).gt(0)) {
         throw new InputError(`${n} : montant positif attendu`)
       }
-      return { mois: null, loyer: '0', provision: '0', regularisation_id: requiredId(x.regularisation_id, n), regularisation: montant }
+      return { month: null, rent: '0', charge_advance: '0', charge_adjustment_id: requiredId(x.charge_adjustment_id, n), charge_adjustment: amount }
     }
-    const loyer = optionalDecimal(x.loyer, `${n}, loyer`) ?? '0'
-    const provision = optionalDecimal(x.provision, `${n}, provision`) ?? '0'
-    if (new Big(loyer).lt(0) || new Big(provision).lt(0) || new Big(loyer).plus(provision).eq(0)) {
+    const rent = optionalDecimal(x.rent, `${n}, loyer`) ?? '0'
+    const charge_advance = optionalDecimal(x.charge_advance, `${n}, provision`) ?? '0'
+    if (new Big(rent).lt(0) || new Big(charge_advance).lt(0) || new Big(rent).plus(charge_advance).eq(0)) {
       throw new InputError(`${n} : loyer et provision positifs attendus`)
     }
-    return { mois: requiredDate(`${String(x.mois ?? '').slice(0, 7)}-01`, `${n}, mois`), loyer, provision, regularisation_id: null, regularisation: '0' }
+    return { month: requiredDate(`${String(x.month ?? '').slice(0, 7)}-01`, `${n}, mois`), rent, charge_advance, charge_adjustment_id: null, charge_adjustment: '0' }
   })
-  return { date, lignes }
+  return { date, lines }
 }
 
 const depotRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
@@ -92,10 +92,10 @@ const depotRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
   // The deposits paid and refunded of a building, by stay then date
   app.get('/depots', async (request, reply) => {
     try {
-      const immeuble = requiredId(query(request).immeuble, 'Immeuble')
+      const building = requiredId(query(request).building, 'Immeuble')
       const { rows } = await db.query(
-        `SELECT ${COLUMNS} FROM ${FROM} WHERE lt.immeuble_id = $1 ORDER BY lt.code, lower(s.periode), vd.date_versement, vd.id`,
-        [immeuble])
+        `SELECT ${COLUMNS} FROM ${FROM} WHERE lt.building_id = $1 ORDER BY lt.code, lower(s.period), vd.payment_date, vd.id`,
+        [building])
       return rows
     } catch (error) {
       return sendError(reply, error)
@@ -106,11 +106,11 @@ const depotRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
     try {
       const d = readDepot(body(request))
       await checkMouvement(db, d, null)
-      await checkRetenue(db, d.sejour_id, new Big(d.montant))
+      await checkRetenue(db, d.tenancy_id, new Big(d.amount))
       const { rows: [created] } = await db.query<{ id: number }>(
-        `INSERT INTO versement_depot (sejour_id, date_versement, montant, mouvement_id, note)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`, [d.sejour_id, d.date_versement, d.montant, d.mouvement_id, d.note])
-      await categoriserSiVide(db, d.mouvement_id, new Big(d.montant).gt(0) ? 'locataire' : 'depot_garantie')
+        `INSERT INTO deposit_payment (tenancy_id, payment_date, amount, bank_transaction_id, note)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`, [d.tenancy_id, d.payment_date, d.amount, d.bank_transaction_id, d.note])
+      await categoriserSiVide(db, d.bank_transaction_id, new Big(d.amount).gt(0) ? 'tenant' : 'security_deposit')
       return reply.code(201).send(await load(created!.id))
     } catch (error) {
       return sendError(reply, error)
@@ -123,16 +123,16 @@ const depotRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
       const id = idParam(request)
       const d = readDepot(raw)
       // Without « mouvement_id », a change keeps the link to the bank movement
-      if (!('mouvement_id' in raw)) {
-        const { rows: [actuel] } = await db.query<{ mouvement_id: number | null }>('SELECT mouvement_id FROM versement_depot WHERE id = $1', [id])
-        d.mouvement_id = actuel?.mouvement_id ?? null
+      if (!('bank_transaction_id' in raw)) {
+        const { rows: [actuel] } = await db.query<{ bank_transaction_id: number | null }>('SELECT bank_transaction_id FROM deposit_payment WHERE id = $1', [id])
+        d.bank_transaction_id = actuel?.bank_transaction_id ?? null
       }
       await checkMouvement(db, d, id)
-      const { rows: [avant] } = await db.query<{ montant: string }>('SELECT montant::text FROM versement_depot WHERE id = $1', [id])
-      await checkRetenue(db, d.sejour_id, new Big(d.montant).minus(avant?.montant ?? '0'))
+      const { rows: [avant] } = await db.query<{ amount: string }>('SELECT amount::text FROM deposit_payment WHERE id = $1', [id])
+      await checkRetenue(db, d.tenancy_id, new Big(d.amount).minus(avant?.amount ?? '0'))
       const { rowCount } = await db.query(
-        `UPDATE versement_depot SET sejour_id = $2, date_versement = $3, montant = $4, mouvement_id = $5, note = $6 WHERE id = $1`,
-        [id, d.sejour_id, d.date_versement, d.montant, d.mouvement_id, d.note])
+        `UPDATE deposit_payment SET tenancy_id = $2, payment_date = $3, amount = $4, bank_transaction_id = $5, note = $6 WHERE id = $1`,
+        [id, d.tenancy_id, d.payment_date, d.amount, d.bank_transaction_id, d.note])
       return rowCount ? load(id) : reply.code(404).send({ message: 'Versement introuvable' })
     } catch (error) {
       return sendError(reply, error)
@@ -141,13 +141,13 @@ const depotRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
 
   app.delete('/depots/:id', async (request, reply) => {
     try {
-      const { rows: [d] } = await db.query<{ sejour_id: number, montant: string }>(
-        'SELECT sejour_id, montant::text FROM versement_depot WHERE id = $1', [idParam(request)])
+      const { rows: [d] } = await db.query<{ tenancy_id: number, amount: string }>(
+        'SELECT tenancy_id, amount::text FROM deposit_payment WHERE id = $1', [idParam(request)])
       if (!d) {
         return reply.code(404).send({ message: 'Versement introuvable' })
       }
-      await checkRetenue(db, d.sejour_id, new Big(d.montant).neg())
-      await db.query('DELETE FROM versement_depot WHERE id = $1', [idParam(request)])
+      await checkRetenue(db, d.tenancy_id, new Big(d.amount).neg())
+      await db.query('DELETE FROM deposit_payment WHERE id = $1', [idParam(request)])
       return reply.code(204).send()
     } catch (error) {
       return sendError(reply, error)
@@ -160,53 +160,53 @@ const depotRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
     const sejourId = idParam(request)
     const client = await db.connect()
     try {
-      const { date, lignes } = readRetenue(body(request))
+      const { date, lines } = readRetenue(body(request))
       await client.query('BEGIN')
-      const { rows: [sejour] } = await client.query<{ entree: string, sortie: string | null }>(
-        'SELECT lower(periode)::text AS entree, (upper(periode) - 1)::text AS sortie FROM sejour WHERE id = $1', [sejourId])
-      if (!sejour) {
+      const { rows: [tenancy] } = await client.query<{ move_in: string, move_out: string | null }>(
+        'SELECT lower(period)::text AS move_in, (upper(period) - 1)::text AS move_out FROM tenancy WHERE id = $1', [sejourId])
+      if (!tenancy) {
         await client.query('ROLLBACK')
         return reply.code(404).send({ message: 'Séjour introuvable' })
       }
-      await client.query(`DELETE FROM paiement WHERE sejour_id = $1 AND mode = 'depot'`, [sejourId])
-      for (const l of lignes.filter((x) => x.mois)) {
-        if (l.mois! < `${sejour.entree.slice(0, 7)}-01` || (sejour.sortie && l.mois! > sejour.sortie)) {
-          throw new InputError(`${l.mois!.slice(0, 7)} : hors du séjour`)
+      await client.query(`DELETE FROM payment WHERE tenancy_id = $1 AND method = 'deposit'`, [sejourId])
+      for (const l of lines.filter((x) => x.month)) {
+        if (l.month! < `${tenancy.move_in.slice(0, 7)}-01` || (tenancy.move_out && l.month! > tenancy.move_out)) {
+          throw new InputError(`${l.month!.slice(0, 7)} : hors du séjour`)
         }
       }
       // What each regularisation lacks, after its other payments (the retention being replaced)
       const parRegularisation = new Map<number, Big>()
-      for (const l of lignes.filter((x) => x.regularisation_id)) {
-        parRegularisation.set(l.regularisation_id!, (parRegularisation.get(l.regularisation_id!) ?? new Big(0)).plus(l.regularisation))
+      for (const l of lines.filter((x) => x.charge_adjustment_id)) {
+        parRegularisation.set(l.charge_adjustment_id!, (parRegularisation.get(l.charge_adjustment_id!) ?? new Big(0)).plus(l.charge_adjustment))
       }
-      for (const [id, montant] of parRegularisation) {
-        const { rows: [r] } = await client.query<{ sejour_id: number, envoyee: boolean, remplacee: boolean, decision: string | null, reste: string }>(
-          `SELECT r.sejour_id, r.date_envoi IS NOT NULL AS envoyee, r.decision,
-                  EXISTS (SELECT 1 FROM regularisation n WHERE n.remplace_id = r.id) AS remplacee,
-                  (r.solde - regularisation_verse(r.id))::text AS reste
-           FROM regularisation r WHERE r.id = $1`, [id])
-        if (!r || r.sejour_id !== sejourId || !r.envoyee || r.remplacee || r.decision) {
+      for (const [id, amount] of parRegularisation) {
+        const { rows: [r] } = await client.query<{ tenancy_id: number, sent: boolean, replaced: boolean, decision: string | null, remaining: string }>(
+          `SELECT r.tenancy_id, r.sent_on IS NOT NULL AS sent, r.decision,
+                  EXISTS (SELECT 1 FROM charge_adjustment n WHERE n.replaces_id = r.id) AS replaced,
+                  (r.balance - charge_adjustment_paid(r.id))::text AS remaining
+           FROM charge_adjustment r WHERE r.id = $1`, [id])
+        if (!r || r.tenancy_id !== sejourId || !r.sent || r.replaced || r.decision) {
           throw new InputError('Seule une régularisation envoyée, en cours, de ce séjour reçoit une retenue')
         }
-        if (montant.gt(r.reste)) {
-          throw new InputError(`Retenue de ${montant.toFixed(2)} € sur une régularisation dont le reste est ${new Big(r.reste).toFixed(2)} €`)
+        if (amount.gt(r.remaining)) {
+          throw new InputError(`Retenue de ${amount.toFixed(2)} € sur une régularisation dont le reste est ${new Big(r.remaining).toFixed(2)} €`)
         }
       }
-      const total = lignes.reduce((t, l) => t.plus(l.loyer).plus(l.provision).plus(l.regularisation), new Big(0))
-      const { verse } = await soldeDepot(client, sejourId)
-      if (total.gt(verse)) {
-        throw new InputError(`Retenue de ${total.toFixed(2)} € pour un dépôt versé de ${verse.toFixed(2)} €`)
+      const total = lines.reduce((t, l) => t.plus(l.rent).plus(l.charge_advance).plus(l.charge_adjustment), new Big(0))
+      const { paid } = await soldeDepot(client, sejourId)
+      if (total.gt(paid)) {
+        throw new InputError(`Retenue de ${total.toFixed(2)} € pour un dépôt versé de ${paid.toFixed(2)} €`)
       }
-      for (const l of lignes) {
+      for (const l of lines) {
         await client.query(
-          `INSERT INTO paiement (sejour_id, date_paiement, mois, loyer, provision, regularisation_id, regularisation, mode, note)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'depot', $8)`,
-          [sejourId, date, l.mois, l.loyer, l.provision, l.regularisation_id, l.regularisation, NOTE_RETENUE])
+          `INSERT INTO payment (tenancy_id, payment_date, month, rent, charge_advance, charge_adjustment_id, charge_adjustment, method, note)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'deposit', $8)`,
+          [sejourId, date, l.month, l.rent, l.charge_advance, l.charge_adjustment_id, l.charge_adjustment, NOTE_RETENUE])
       }
       await client.query('COMMIT')
       const { rows } = await db.query(
-        `SELECT id, date_paiement::text, mois::text, loyer::text, provision::text, regularisation_id, regularisation::text
-         FROM paiement WHERE sejour_id = $1 AND mode = 'depot' ORDER BY mois NULLS LAST, regularisation_id, id`, [sejourId])
+        `SELECT id, payment_date::text, month::text, rent::text, charge_advance::text, charge_adjustment_id, charge_adjustment::text
+         FROM payment WHERE tenancy_id = $1 AND method = 'deposit' ORDER BY month NULLS LAST, charge_adjustment_id, id`, [sejourId])
       return rows
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined)

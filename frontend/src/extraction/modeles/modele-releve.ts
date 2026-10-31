@@ -41,12 +41,12 @@ export default class NewBankExtractor extends BankStatementExtractor {
   }
 
   readMovement(match: RegExpMatchArray, { row }: MovementContext) {
-    const montant = row.pieces.at(-1)!
+    const amount = row.pieces.at(-1)!
     return {
       date: this.frenchDate(match[1]),
       label: match[2]!,
-      amount: this.amount(montant.text),
-      side: this.column(montant, COLONNES),
+      amount: this.amount(amount.text),
+      side: this.column(amount, COLONNES),
     }
   }
 }

@@ -10,7 +10,7 @@ import { enregistrer, nomAppareil } from '../auth/passkey'
 
 const route = useRoute()
 const jeton = typeof route.query.jeton === 'string' ? route.query.jeton : ''
-const appareil = ref(nomAppareil())
+const device = ref(nomAppareil())
 const occupe = ref(false)
 const erreur = ref<string | null>(null)
 const compatible = browserSupportsWebAuthn()
@@ -19,7 +19,7 @@ async function creer() {
   occupe.value = true
   erreur.value = null
   try {
-    await enregistrer(jeton, appareil.value.trim() || nomAppareil())
+    await enregistrer(jeton, device.value.trim() || nomAppareil())
     window.location.assign('/')
   } catch (e) {
     erreur.value = (e as Error).message
@@ -33,7 +33,7 @@ async function creer() {
     <h1>Colibri <small>rent book</small></h1>
     <template v-if="jeton">
       <p>Créer une passkey sur cet appareil : vous vous connecterez ensuite avec son empreinte, son visage ou son code.</p>
-      <label>Nom de cet appareil <input v-model="appareil" maxlength="60"></label>
+      <label>Nom de cet appareil <input v-model="device" maxlength="60"></label>
       <p v-if="!compatible" class="message erreur">Ce navigateur ne gère pas les passkeys.</p>
       <button type="button" class="principal" :disabled="occupe || !compatible" @click="creer">
         <span class="oi oi-key" /> Créer ma passkey

@@ -18,7 +18,7 @@ import { useImmeuble } from '../immeuble'
 // movements and payments seen on them (ControleBanque).
 
 const { immeubleId, pret } = useImmeuble()
-const { debut, fin } = useExercice()
+const { start, end } = useExercice()
 const couverture = ref<Couverture | null>(null)
 const erreur = ref<string | null>(null)
 
@@ -27,7 +27,7 @@ async function charger() {
     return
   }
   try {
-    couverture.value = await api.couverture({ immeuble: immeubleId.value, debut: debut.value, fin: fin.value })
+    couverture.value = await api.couverture({ building: immeubleId.value, start: start.value, end: end.value })
     erreur.value = null
   } catch (e) {
     erreur.value = (e as Error).message
@@ -38,7 +38,7 @@ onMounted(async () => {
   await pret
   await charger()
 })
-watch([immeubleId, debut, fin], charger)
+watch([immeubleId, start, end], charger)
 
 const nbTrous = computed(() => (couverture.value?.energies ?? []).reduce((n, e) => n + e.trous.length, 0))
 const problemesFactures = computed(() =>
@@ -46,10 +46,10 @@ const problemesFactures = computed(() =>
 
 const pistes = computed<Piste[]>(() =>
   (couverture.value?.energies ?? []).map((e) => ({
-    libelle: ENERGIES[e.energie],
+    label: ENERGIES[e.energy],
     segments: [
-      ...e.couvert.map((p) => ({ ...p, libelle: '', classe: 'couvert', titre: `Couvert : ${dateFr(p.debut)} → ${dateFr(p.fin)}` })),
-      ...e.trous.map((p) => ({ ...p, libelle: 'trou', classe: 'trou', titre: `Aucune facture validée : ${dateFr(p.debut)} → ${dateFr(p.fin)}` })),
+      ...e.covered.map((p) => ({ ...p, label: '', classe: 'covered', title: `Couvert : ${dateFr(p.start)} → ${dateFr(p.end)}` })),
+      ...e.trous.map((p) => ({ ...p, label: 'trou', classe: 'trou', title: `Aucune facture validée : ${dateFr(p.start)} → ${dateFr(p.end)}` })),
     ],
   })),
 )
@@ -74,14 +74,14 @@ const pistes = computed<Piste[]>(() =>
     <p class="discret">
       Gaz et électricité : lignes de consommation ; eau et ordures ménagères : toutes les lignes récupérables.
     </p>
-    <Frise :debut="couverture.debut" :fin="couverture.fin" :pistes="pistes" />
+    <Frise :start="couverture.start" :end="couverture.end" :pistes="pistes" />
 
     <template v-if="nbTrous">
       <h3>Trous</h3>
       <ul class="constats">
-        <template v-for="e in couverture.energies" :key="e.energie">
-          <li v-for="t in e.trous" :key="t.debut" class="erreur">
-            <strong>{{ ENERGIES[e.energie] }}</strong> : aucune facture validée du {{ dateFr(t.debut) }} au {{ dateFr(t.fin) }}
+        <template v-for="e in couverture.energies" :key="e.energy">
+          <li v-for="t in e.trous" :key="t.start" class="erreur">
+            <strong>{{ ENERGIES[e.energy] }}</strong> : aucune facture validée du {{ dateFr(t.start) }} au {{ dateFr(t.end) }}
           </li>
         </template>
       </ul>
@@ -91,8 +91,8 @@ const pistes = computed<Piste[]>(() =>
       <h3>Brouillons sur la période</h3>
       <ul class="constats">
         <li v-for="b in couverture.brouillons" :key="b.id" class="avertissement">
-          <RouterLink :to="{ name: 'facture', params: { id: b.id } }">{{ b.fournisseur }} n° {{ b.numero }}</RouterLink>
-          ({{ ENERGIES[b.energie] }}, {{ dateFr(b.date_facture) }}) : à vérifier puis valider pour qu'elle compte
+          <RouterLink :to="{ name: 'invoice', params: { id: b.id } }">{{ b.supplier }} n° {{ b.number }}</RouterLink>
+          ({{ ENERGIES[b.energy] }}, {{ dateFr(b.invoice_date) }}) : à vérifier puis valider pour qu'elle compte
         </li>
       </ul>
     </template>
@@ -105,15 +105,15 @@ const pistes = computed<Piste[]>(() =>
         </thead>
         <tbody>
           <tr v-for="(c, i) in couverture.chevauchements" :key="i" class="sans-clic">
-            <td>{{ ENERGIES[c.energie] }}</td>
-            <td>{{ dateFr(c.debut) }} → {{ dateFr(c.fin) }}</td>
+            <td>{{ ENERGIES[c.energy] }}</td>
+            <td>{{ dateFr(c.start) }} → {{ dateFr(c.end) }}</td>
             <td>
-              <RouterLink :to="{ name: 'facture', params: { id: c.ligne_a.facture_id } }">{{ c.ligne_a.numero }}</RouterLink>
-              {{ c.ligne_a.libelle }} ({{ dateFr(c.ligne_a.debut) }} → {{ dateFr(c.ligne_a.fin) }})
+              <RouterLink :to="{ name: 'invoice', params: { id: c.line_a.invoice_id } }">{{ c.line_a.number }}</RouterLink>
+              {{ c.line_a.label }} ({{ dateFr(c.line_a.start) }} → {{ dateFr(c.line_a.end) }})
             </td>
             <td>
-              <RouterLink :to="{ name: 'facture', params: { id: c.ligne_b.facture_id } }">{{ c.ligne_b.numero }}</RouterLink>
-              {{ c.ligne_b.libelle }} ({{ dateFr(c.ligne_b.debut) }} → {{ dateFr(c.ligne_b.fin) }})
+              <RouterLink :to="{ name: 'invoice', params: { id: c.line_b.invoice_id } }">{{ c.line_b.number }}</RouterLink>
+              {{ c.line_b.label }} ({{ dateFr(c.line_b.start) }} → {{ dateFr(c.line_b.end) }})
             </td>
           </tr>
         </tbody>
@@ -121,7 +121,7 @@ const pistes = computed<Piste[]>(() =>
     </template>
   </section>
 
-  <PaiementsRecus v-if="immeubleId !== null" :immeuble="immeubleId" :debut="debut" :fin="fin" />
-  <RegularisationsRecues v-if="immeubleId !== null" :immeuble="immeubleId" :debut="debut" :fin="fin" />
-  <ControleBanque v-if="immeubleId !== null" :immeuble="immeubleId" :debut="debut" :fin="fin" />
+  <PaiementsRecus v-if="immeubleId !== null" :building="immeubleId" :start="start" :end="end" />
+  <RegularisationsRecues v-if="immeubleId !== null" :building="immeubleId" :start="start" :end="end" />
+  <ControleBanque v-if="immeubleId !== null" :building="immeubleId" :start="start" :end="end" />
 </template>

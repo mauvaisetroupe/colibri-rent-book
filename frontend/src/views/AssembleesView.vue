@@ -10,7 +10,7 @@ import { dateFr } from '../format'
 
 const router = useRouter()
 const assemblees = ref<AssembleeResumee[]>([])
-const nouvelle = reactive({ type: 'ordinaire' as TypeAssemblee, date: '', lieu: '', modele: 'annuelle' as 'annuelle' | 'vide' })
+const nouvelle = reactive({ type: 'ordinary' as TypeAssemblee, date: '', place: '', modele: 'annuelle' as 'annuelle' | 'vide' })
 const formulaire = ref(false)
 const message = ref<string | null>(null)
 
@@ -24,8 +24,8 @@ onMounted(async () => {
 
 async function creer() {
   try {
-    const a = await api.creerAssemblee({ ...nouvelle, lieu: nouvelle.lieu || null })
-    await router.push({ name: 'assemblee', params: { id: a.id } })
+    const a = await api.creerAssemblee({ ...nouvelle, place: nouvelle.place || null })
+    await router.push({ name: 'general_meeting', params: { id: a.id } })
   } catch (e) {
     message.value = (e as Error).message
   }
@@ -55,7 +55,7 @@ async function creer() {
       </select>
     </label>
     <label>Date <input v-model="nouvelle.date" type="date" required></label>
-    <label>Lieu <input v-model="nouvelle.lieu" size="24" placeholder="au siège social"></label>
+    <label>Lieu <input v-model="nouvelle.place" size="24" placeholder="au siège social"></label>
     <label>Contenu
       <select v-model="nouvelle.modele">
         <option value="annuelle">Assemblée annuelle (comptes de l'année précédente)</option>
@@ -68,13 +68,13 @@ async function creer() {
   <table v-if="assemblees.length" class="liste">
     <thead><tr><th>N°</th><th>Date</th><th>Type</th><th class="nombre">Résolutions</th><th>État</th><th>PV signé</th></tr></thead>
     <tbody>
-      <tr v-for="a in assemblees" :key="a.id" @click="router.push({ name: 'assemblee', params: { id: a.id } })">
-        <td>{{ a.numero ?? '—' }}</td>
+      <tr v-for="a in assemblees" :key="a.id" @click="router.push({ name: 'general_meeting', params: { id: a.id } })">
+        <td>{{ a.number ?? '—' }}</td>
         <td>{{ dateFr(a.date) }}</td>
-        <td>{{ a.type === 'ordinaire' ? 'Ordinaire' : 'Extraordinaire' }}</td>
-        <td class="nombre">{{ a.nb_resolutions }}</td>
-        <td><span class="pastille" :class="a.statut === 'close' ? 'validee' : 'a_verifier'">{{ a.statut === 'close' ? 'Close' : 'Brouillon' }}</span></td>
-        <td>{{ a.statut === 'close' ? (a.pv_signe ? 'joint' : 'à joindre') : '' }}</td>
+        <td>{{ a.type === 'ordinary' ? 'Ordinaire' : 'Extraordinaire' }}</td>
+        <td class="nombre">{{ a.resolution_count }}</td>
+        <td><span class="pastille" :class="a.status === 'closed' ? 'validated' : 'draft'">{{ a.status === 'closed' ? 'Close' : 'Brouillon' }}</span></td>
+        <td>{{ a.status === 'closed' ? (a.signed_minutes ? 'joint' : 'à joindre') : '' }}</td>
       </tr>
     </tbody>
   </table>

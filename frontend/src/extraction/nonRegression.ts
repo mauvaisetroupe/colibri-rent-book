@@ -8,28 +8,28 @@ import { morceauxDuPdf } from './navigateur'
 // compared with what is stored (comparaison.ts).
 
 export type Comparaison = {
-  facture: FactureAvecPdf
+  invoice: FactureAvecPdf
   differences: string[]
   remarques: string[]
 }
 
-export async function comparer(extracteur: ClasseExtracteur, reglages: Reglages, facture: FactureAvecPdf): Promise<Comparaison> {
+export async function comparer(extractor: ClasseExtracteur, settings: Reglages, invoice: FactureAvecPdf): Promise<Comparaison> {
   try {
-    const pdf = await (await fetch(api.pdfUrl(facture.id))).blob()
-    const document = documentDe(await morceauxDuPdf(pdf), reglages)
-    if (!reconnait(extracteur, document)) {
-      return { facture, differences: ['PDF non reconnu par cette version'], remarques: [] }
+    const pdf = await (await fetch(api.pdfUrl(invoice.id))).blob()
+    const document = documentDe(await morceauxDuPdf(pdf), settings)
+    if (!reconnait(extractor, document)) {
+      return { invoice, differences: ['PDF non reconnu par cette version'], remarques: [] }
     }
-    const lue = extraire(extracteur, document)
-    const { facture: enregistree, lignes } = await api.facture(facture.id)
-    const erreurs = (['numero', 'date', 'total', 'lignes'] as const)
+    const lue = extraire(extractor, document)
+    const { invoice: enregistree, lines } = await api.invoice(invoice.id)
+    const erreurs = (['number', 'date', 'total', 'lines'] as const)
       .filter((c) => lue[c].erreur).map((c) => `${c} : ${lue[c].erreur}`)
     const { differences, remarques } = ecarts(
-      { numero: lue.numero.valeur, date: lue.date.valeur, total: lue.total.valeur, lignes: lue.lignes.valeur ?? [] },
-      { ...enregistree, lignes },
+      { number: lue.number.valeur, date: lue.date.valeur, total: lue.total.valeur, lines: lue.lines.valeur ?? [] },
+      { ...enregistree, lines },
     )
-    return { facture, differences: [...erreurs, ...differences], remarques }
+    return { invoice, differences: [...erreurs, ...differences], remarques }
   } catch (e) {
-    return { facture, differences: [`lecture impossible : ${(e as Error).message}`], remarques: [] }
+    return { invoice, differences: [`lecture impossible : ${(e as Error).message}`], remarques: [] }
   }
 }

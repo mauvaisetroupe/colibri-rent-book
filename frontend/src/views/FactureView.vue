@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, RouterLink, useRouter } from 'vue-router'
 
 import {
-  api, ApiError, CATEGORIES, ENERGIES, STATUTS, type AnnexeFacture, type Controle, type Facture, type FactureDetail,
+  api, ApiError, CATEGORIES, ENERGIES, STATUTS, type AnnexeFacture, type Checks, type Facture, type FactureDetail,
   type FactureResumee, type FactureSaisie, type LiensFacture, type MouvementPourFacture, type ReglementFacture,
   type RegularisationTouchee, type ZoneSaisie,
 } from '../api'
@@ -16,41 +16,41 @@ import { dateFr, depuisGrille, euros, ligneVide, nombreApi, nombreFr, versGrille
 const props = defineProps<{ id: number }>()
 const router = useRouter()
 
-const facture = ref<Facture | null>(null)
-const entete = reactive({ numero: '', date_facture: '', montant_ttc: '', energie: 'gaz' as Facture['energie'], note: '' })
-const lignes = ref<LigneGrille[]>([])
-const controle = ref<Controle | null>(null)
+const invoice = ref<Facture | null>(null)
+const entete = reactive({ number: '', invoice_date: '', total_incl_tax: '', energy: 'gas' as Facture['energy'], note: '' })
+const lines = ref<LigneGrille[]>([])
+const checks = ref<Checks | null>(null)
 const modifie = ref(false)
 const occupe = ref(false)
-const message = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
+const message = ref<{ text: string, type: 'info' | 'erreur' } | null>(null)
 const ligneActive = ref<number | null>(null)
 
 const liens = ref<LiensFacture | null>(null)
 // Its payments by bank movements (ADR 0022), and the debits offered to link one
-const reglements = ref<ReglementFacture[]>([])
-const reglement = ref<{ mouvements: MouvementPourFacture[], choisi: number | null } | null>(null)
+const payments = ref<ReglementFacture[]>([])
+const reglement = ref<{ transactions: MouvementPourFacture[], choisi: number | null } | null>(null)
 // Sent regularisations touched by a replacement just made: to check (ADR 0017)
 const touchees = ref<RegularisationTouchee[]>([])
 // Its copy joined to the supporting documents (ADR 0024), and whether the preview shows it instead of the original
-const annexe = ref<AnnexeFacture | null>(null)
+const tenant_copy = ref<AnnexeFacture | null>(null)
 const voirCopie = ref(false)
 
-const validee = computed(() => facture.value?.statut === 'validee')
+const validee = computed(() => invoice.value?.status === 'validated')
 // Paid by bank movements (ADR 0022): a validated invoice, or a draft whose total is known (an invoice still to find)
-const reglable = computed(() => facture.value !== null && facture.value.statut !== 'remplacee' && facture.value.montant_ttc !== null)
+const reglable = computed(() => invoice.value !== null && invoice.value.status !== 'replaced' && invoice.value.total_incl_tax !== null)
 // Validated or replaced: never edited (ADR 0003, 0017)
-const figee = computed(() => facture.value !== null && facture.value.statut !== 'a_verifier')
+const figee = computed(() => invoice.value !== null && invoice.value.status !== 'draft')
 
 const colonnes: ColumnRegular[] = [
-  { prop: 'categorie', name: 'Catégorie', size: 130 },
-  { prop: 'libelle', name: 'Libellé', size: 280 },
-  { prop: 'debut', name: 'Début', size: 110 },
-  { prop: 'fin', name: 'Fin', size: 110 },
+  { prop: 'category', name: 'Catégorie', size: 130 },
+  { prop: 'label', name: 'Libellé', size: 280 },
+  { prop: 'start', name: 'Début', size: 110 },
+  { prop: 'end', name: 'Fin', size: 110 },
   { prop: 'kwh', name: 'kWh', size: 75 },
-  { prop: 'montant_ht', name: 'HT', size: 85 },
-  { prop: 'taux_tva', name: 'TVA %', size: 65 },
-  { prop: 'montant_ttc', name: 'TTC', size: 85 },
-  { prop: 'affectation', name: 'Affectation', size: 110 },
+  { prop: 'amount_excl_tax', name: 'HT', size: 85 },
+  { prop: 'vat_rate', name: 'TVA %', size: 65 },
+  { prop: 'amount_incl_tax', name: 'TTC', size: 85 },
+  { prop: 'allocation', name: 'Affectation', size: 110 },
   { prop: 'note', name: 'Note', size: 260 },
 ]
 
@@ -65,41 +65,41 @@ watch(() => props.id, () => {
 
 async function charger() {
   try {
-    appliquer(await api.facture(props.id))
+    appliquer(await api.invoice(props.id))
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 
 function appliquer(detail: FactureDetail) {
-  facture.value = detail.facture
+  invoice.value = detail.invoice
   liens.value = detail.liens
-  reglements.value = detail.reglements
-  annexe.value = detail.annexe
+  payments.value = detail.payments
+  tenant_copy.value = detail.tenant_copy
   probleme.value = null
-  if (!detail.annexe) {
+  if (!detail.tenant_copy) {
     voirCopie.value = false
   }
   Object.assign(entete, {
-    numero: detail.facture.numero,
-    date_facture: detail.facture.date_facture,
-    montant_ttc: nombreFr(detail.facture.montant_ttc),
-    energie: detail.facture.energie,
-    note: detail.facture.note ?? '',
+    number: detail.invoice.number,
+    invoice_date: detail.invoice.invoice_date,
+    total_incl_tax: nombreFr(detail.invoice.total_incl_tax),
+    energy: detail.invoice.energy,
+    note: detail.invoice.note ?? '',
   })
-  lignes.value = detail.lignes.map(versGrille)
-  controle.value = detail.controle
+  lines.value = detail.lines.map(versGrille)
+  checks.value = detail.checks
   surligner()
   modifie.value = false
 }
 
 const saisie = (): FactureSaisie => ({
-  numero: entete.numero,
-  date_facture: entete.date_facture,
-  montant_ttc: nombreApi(entete.montant_ttc) ?? '',
-  energie: entete.energie,
+  number: entete.number,
+  invoice_date: entete.invoice_date,
+  total_incl_tax: nombreApi(entete.total_incl_tax) ?? '',
+  energy: entete.energy,
   note: entete.note.trim() || null,
-  lignes: lignes.value.map(depuisGrille),
+  lines: lines.value.map(depuisGrille),
 })
 
 // ---------------------------------------------------------------- live checks (ADR 0005)
@@ -115,37 +115,37 @@ function changer() {
 }
 
 async function controler() {
-  const numero = ++sequence
-  const { montant_ttc, lignes: aControler } = saisie()
+  const number = ++sequence
+  const { total_incl_tax, lines: aControler } = saisie()
   try {
-    const resultat = await api.controler({ montant_ttc, lignes: aControler })
+    const resultat = await api.controler({ total_incl_tax, lines: aControler })
     // An older answer arriving late must not overwrite a newer one
-    if (numero === sequence) {
-      controle.value = resultat
+    if (number === sequence) {
+      checks.value = resultat
       surligner()
     }
   } catch (e) {
-    message.value = { texte: `Contrôle impossible : ${(e as Error).message}`, type: 'erreur' }
+    message.value = { text: `Contrôle impossible : ${(e as Error).message}`, type: 'erreur' }
   }
 }
 
 /** Highlights the lines that have a finding: an error wins over a warning. */
 function surligner() {
-  const parLigne = new Map<number, 'erreur' | 'avertissement'>()
-  for (const c of controle.value?.constats ?? []) {
-    if (c.ligne !== null && parLigne.get(c.ligne) !== 'erreur') {
-      parLigne.set(c.ligne, c.severite)
+  const parLigne = new Map<number, 'error' | 'warning'>()
+  for (const c of checks.value?.findings ?? []) {
+    if (c.line !== null && parLigne.get(c.line) !== 'error') {
+      parLigne.set(c.line, c.severity)
     }
   }
-  lignes.value = lignes.value.map((l, i) => {
+  lines.value = lines.value.map((l, i) => {
     const severite = parLigne.get(i)
     return { ...l, _classe: severite ? `ligne-${severite}` : '' }
   })
 }
 
 const constats = computed(() =>
-  [...(controle.value?.constats ?? [])].sort((a, b) =>
-    (a.severite === b.severite ? 0 : a.severite === 'erreur' ? -1 : 1) || (a.ligne ?? -1) - (b.ligne ?? -1)),
+  [...(checks.value?.findings ?? [])].sort((a, b) =>
+    (a.severity === b.severity ? 0 : a.severity === 'error' ? -1 : 1) || (a.line ?? -1) - (b.line ?? -1)),
 )
 
 // ---------------------------------------------------------------- grid events
@@ -158,13 +158,13 @@ type EditDetail =
 function apresEdition(event: CustomEvent<EditDetail>) {
   const detail = event.detail
   if ('prop' in detail) {
-    const ligne = lignes.value[detail.rowIndex]
+    const ligne = lines.value[detail.rowIndex]
     if (ligne) {
       ligne[detail.prop] = String(detail.val ?? '')
     }
   } else {
     for (const [index, valeurs] of Object.entries(detail.data)) {
-      const ligne = lignes.value[Number(index)]
+      const ligne = lines.value[Number(index)]
       if (ligne) {
         Object.assign(ligne, valeurs)
       }
@@ -178,35 +178,35 @@ function apresFocus(event: CustomEvent<{ rowIndex?: number }>) {
 }
 
 function ajouterLigne() {
-  lignes.value = [...lignes.value, ligneVide()]
+  lines.value = [...lines.value, ligneVide()]
   changer()
 }
 
 function supprimerLigne() {
-  if (ligneActive.value === null || !lignes.value[ligneActive.value]) {
+  if (ligneActive.value === null || !lines.value[ligneActive.value]) {
     return
   }
-  lignes.value = lignes.value.filter((_, i) => i !== ligneActive.value)
+  lines.value = lines.value.filter((_, i) => i !== ligneActive.value)
   ligneActive.value = null
   changer()
 }
 
 // ---------------------------------------------------------------- actions
 
-async function executer(action: () => Promise<FactureDetail & { regularisations?: RegularisationTouchee[] }>, succes: string) {
+async function executer(action: () => Promise<FactureDetail & { charge_adjustments?: RegularisationTouchee[] }>, succes: string) {
   occupe.value = true
   try {
     const detail = await action()
     appliquer(detail)
-    touchees.value = detail.regularisations ?? []
-    message.value = { texte: succes, type: 'info' }
+    touchees.value = detail.charge_adjustments ?? []
+    message.value = { text: succes, type: 'info' }
     return true
   } catch (e) {
-    if (e instanceof ApiError && e.body.controle) {
-      controle.value = e.body.controle as Controle
+    if (e instanceof ApiError && e.body.checks) {
+      checks.value = e.body.checks as Checks
       surligner()
     }
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
     return false
   } finally {
     occupe.value = false
@@ -219,10 +219,10 @@ const enregistrer = () => executer(() => api.enregistrer(props.id, saisie()), 'B
 
 async function ouvrirReglement() {
   try {
-    const mouvements = await api.mouvementsPourFacture(props.id)
-    reglement.value = { mouvements, choisi: mouvements.find((m) => m.correspond)?.id ?? null }
+    const transactions = await api.mouvementsPourFacture(props.id)
+    reglement.value = { transactions, choisi: transactions.find((m) => m.correspond)?.id ?? null }
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 
@@ -244,7 +244,7 @@ async function valider() {
   await executer(
     () => api.valider(props.id),
     corrige
-      ? `Facture validée : elle remplace la facture corrigée (${corrige.fournisseur} n° ${corrige.numero}) dans les décomptes`
+      ? `Facture validée : elle remplace la facture corrigée (${corrige.supplier} n° ${corrige.number}) dans les décomptes`
       : 'Facture validée : elle entre dans les décomptes',
   )
 }
@@ -254,11 +254,11 @@ async function valider() {
 const remplacement = ref<{ candidates: FactureResumee[], par: number | null, motif: string } | null>(null)
 
 async function ouvrirRemplacement() {
-  if (!facture.value) {
+  if (!invoice.value) {
     return
   }
-  const candidates = (await api.factures(facture.value.immeuble_id))
-    .filter((f) => f.statut === 'validee' && f.id !== facture.value?.id)
+  const candidates = (await api.invoices(invoice.value.building_id))
+    .filter((f) => f.status === 'validated' && f.id !== invoice.value?.id)
   remplacement.value = { candidates, par: null, motif: '' }
 }
 
@@ -280,12 +280,12 @@ async function corriger() {
   occupe.value = true
   try {
     const copie = await api.corriger(props.id)
-    await router.push({ name: 'facture', params: { id: copie.facture.id } })
+    await router.push({ name: 'invoice', params: { id: copie.invoice.id } })
   } catch (e) {
-    const existante = e instanceof ApiError ? e.body.facture_id as number | undefined : undefined
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    const existante = e instanceof ApiError ? e.body.invoice_id as number | undefined : undefined
+    message.value = { text: (e as Error).message, type: 'erreur' }
     if (existante) {
-      await router.push({ name: 'facture', params: { id: existante } })
+      await router.push({ name: 'invoice', params: { id: existante } })
     }
   } finally {
     occupe.value = false
@@ -295,37 +295,37 @@ async function corriger() {
 // ---------------------------------------------------------------- copy joined to the supporting documents (ADR 0024)
 
 // State of the version for the tenant, on its button above the preview
-const ETATS_ANNEXE: Record<Facture['annexe'], string> = {
-  confidentiel: 'jamais jointe',
-  sans_pdf: '',
-  a_faire: 'à créer',
-  a_verifier: 'à contrôler',
-  verifiee: '✓ contrôlée',
+const ETATS_ANNEXE: Record<Facture['tenant_copy'], string> = {
+  confidential: 'jamais jointe',
+  no_pdf: '',
+  to_make: 'à créer',
+  to_check: 'à contrôler',
+  checked: '✓ contrôlée',
 }
 // The version for the tenant can be shown: made from the current PDF
-const copieAJour = computed(() => !!annexe.value && facture.value?.annexe !== 'a_faire')
+const copieAJour = computed(() => !!tenant_copy.value && invoice.value?.tenant_copy !== 'to_make')
 
 async function preparer(succes = 'Version locataire créée : la contrôler') {
-  if (await executer(() => preparerAnnexe(facture.value!), succes)) {
+  if (await executer(() => preparerAnnexe(invoice.value!), succes)) {
     voirCopie.value = true
   }
 }
 
-const verifier = () => executer(() => api.verifierAnnexe(props.id, annexe.value!.id),
+const verifier = () => executer(() => api.verifierAnnexe(props.id, tenant_copy.value!.id),
   'Version locataire contrôlée : elle sera jointe au justificatif')
 
 // « Il reste une information personnelle » : a text to mask on every invoice, or the masking of the supplier
-const probleme = ref<{ texte: string, extracteur: number | null } | null>(null)
+const probleme = ref<{ text: string, extractor: number | null } | null>(null)
 // Shorter, a text would be masked where it is useful (« FONTOY » would hide the address of the building)
 const LONGUEUR_MINIMALE = 5
 
 async function signalerProbleme() {
-  probleme.value = { texte: '', extracteur: null }
+  probleme.value = { text: '', extractor: null }
   try {
-    const extracteurs = await api.extracteurs()
-    const dernier = extracteurs.find((e) => e.derniere && (e.type ?? 'facture') === 'facture' && e.fournisseur === facture.value?.fournisseur)
+    const extractors = await api.extractors()
+    const last = extractors.find((e) => e.latest && (e.type ?? 'invoice') === 'invoice' && e.supplier === invoice.value?.supplier)
     if (probleme.value) {
-      probleme.value.extracteur = dernier?.id ?? null
+      probleme.value.extractor = last?.id ?? null
     }
   } catch {
     // Without the list, the link goes to a new extractor of the supplier
@@ -335,7 +335,7 @@ async function signalerProbleme() {
 // ---------------------------------------------------------------- zones drawn by hand (ADR 0025)
 
 // Its version was made from a scan: masked by zones drawn by hand only; on a page of text, they are added to the terms
-const scannee = computed(() => copieAJour.value && !!annexe.value?.pages_scannees.length)
+const scannee = computed(() => copieAJour.value && !!tenant_copy.value?.scanned_pages.length)
 // The zones being adjusted, in a window over the pages of the PDF
 const zonesFacture = ref<{ zones: ZoneSaisie[], contenu: Uint8Array, automatiques: Zone[] } | null>(null)
 const fenetreZones = ref<HTMLDialogElement | null>(null)
@@ -343,19 +343,19 @@ const fenetreZones = ref<HTMLDialogElement | null>(null)
 async function ajusterZones() {
   probleme.value = null
   try {
-    const [contenu, fournisseur] = await Promise.all([
+    const [contenu, supplier] = await Promise.all([
       fetch(api.pdfUrl(props.id)).then(async (r) => new Uint8Array(await r.arrayBuffer())),
-      api.fournisseur(facture.value!.fournisseur_id),
+      api.supplier(invoice.value!.supplier_id),
     ])
-    zonesFacture.value = { contenu, zones: (facture.value!.zones_masquees ?? fournisseur.zones_masquees).map((z) => ({ ...z })), automatiques: [] }
+    zonesFacture.value = { contenu, zones: (invoice.value!.masked_zones ?? supplier.masked_zones).map((z) => ({ ...z })), automatiques: [] }
     fenetreZones.value?.showModal()
     // What the terms and the extractor already mask, shown in the editor: not to be drawn again
-    const automatiques = await zonesAutomatiques(contenu.slice(), facture.value!.fournisseur)
+    const automatiques = await zonesAutomatiques(contenu.slice(), invoice.value!.supplier)
     if (zonesFacture.value?.contenu === contenu) {
       zonesFacture.value.automatiques = automatiques
     }
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 
@@ -372,26 +372,26 @@ async function enregistrerZones(zones: ZoneSaisie[] | null) {
   }
 }
 
-const masquageDuFournisseur = computed(() => (probleme.value?.extracteur
-  ? { name: 'extracteur', params: { id: probleme.value.extracteur }, query: { onglet: 'masquage', facture: props.id } }
-  : { name: 'nouvel-extracteur', query: { fournisseur: facture.value?.fournisseur, onglet: 'masquage', facture: props.id } }))
+const masquageDuFournisseur = computed(() => (probleme.value?.extractor
+  ? { name: 'extractor', params: { id: probleme.value.extractor }, query: { onglet: 'masquage', invoice: props.id } }
+  : { name: 'nouvel-extracteur', query: { supplier: invoice.value?.supplier, onglet: 'masquage', invoice: props.id } }))
 
 async function masquerEtRecreer() {
-  const texte = probleme.value?.texte.trim() ?? ''
-  if (texte.length < LONGUEUR_MINIMALE) {
+  const text = probleme.value?.text.trim() ?? ''
+  if (text.length < LONGUEUR_MINIMALE) {
     return
   }
   occupe.value = true
   try {
-    await api.modifierTermesMasques([...await api.termesMasques(), texte])
+    await api.modifierTermesMasques([...await api.termesMasques(), text])
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
     occupe.value = false
     return
   }
   occupe.value = false
   probleme.value = null
-  await preparer(`« ${texte} » est masqué sur toutes les factures ; version locataire recréée : la contrôler de nouveau`)
+  await preparer(`« ${text} » est masqué sur toutes les factures ; version locataire recréée : la contrôler de nouveau`)
 }
 
 // ---------------------------------------------------------------- invoice PDF
@@ -408,17 +408,17 @@ async function joindre(files: FileList | null | undefined) {
   try {
     const autre = await autreFacture(file)
     if (autre) {
-      message.value = { texte: `Ce PDF est la facture ${autre}, pas ${facture.value?.fournisseur} n° ${facture.value?.numero}`, type: 'erreur' }
+      message.value = { text: `Ce PDF est la facture ${autre}, pas ${invoice.value?.supplier} n° ${invoice.value?.number}`, type: 'erreur' }
       return
     }
     const detail = await api.joindrePdf(props.id, file)
-    facture.value = detail.facture
-    annexe.value = detail.annexe
+    invoice.value = detail.invoice
+    tenant_copy.value = detail.tenant_copy
     voirCopie.value = false
     versionPdf.value++
-    message.value = { texte: 'PDF de la facture enregistré', type: 'info' }
+    message.value = { text: 'PDF de la facture enregistré', type: 'info' }
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   } finally {
     occupe.value = false
   }
@@ -429,11 +429,11 @@ async function autreFacture(file: File): Promise<string | null> {
   try {
     const { candidats, lire, morceauxDuPdf } = await import('../extraction/navigateur')
     const pages = await morceauxDuPdf(file)
-    for (const candidat of candidats(pages, await api.extracteurs())) {
-      const numero = lire(pages, candidat).numero.valeur
-      const fournisseur = candidat.enregistre.fournisseur
-      if (numero && (fournisseur !== facture.value?.fournisseur || numero !== facture.value?.numero)) {
-        return `${fournisseur} n° ${numero}`
+    for (const candidat of candidats(pages, await api.extractors())) {
+      const number = lire(pages, candidat).number.valeur
+      const supplier = candidat.enregistre.supplier
+      if (number && (supplier !== invoice.value?.supplier || number !== invoice.value?.number)) {
+        return `${supplier} n° ${number}`
       }
     }
   } catch {
@@ -448,18 +448,18 @@ function choisirPdf(event: Event) {
 }
 
 async function supprimer() {
-  const texte = liens.value?.corrige
-    ? 'Supprimer ce brouillon ? La correction est abandonnée, la facture d\'origine reste validée.'
+  const text = liens.value?.corrige
+    ? 'Supprimer ce brouillon ? La correction est abandonnée, la facture d\'origin reste validée.'
     : 'Supprimer ce brouillon ? Le PDF pourra être importé à nouveau.'
-  if (!confirm(texte)) {
+  if (!confirm(text)) {
     return
   }
   try {
     await api.supprimer(props.id)
     modifie.value = false
-    await router.push({ name: 'factures' })
+    await router.push({ name: 'invoices' })
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 
@@ -480,72 +480,72 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <p><RouterLink :to="{ name: 'factures' }">← Factures</RouterLink></p>
+  <p><RouterLink :to="{ name: 'invoices' }">← Factures</RouterLink></p>
 
-  <template v-if="facture">
+  <template v-if="invoice">
     <section class="entete-facture">
       <h1>
-        {{ facture.fournisseur }}
-        <span class="pastille" :class="facture.statut">{{ STATUTS[facture.statut] }}</span>
+        {{ invoice.supplier }}
+        <span class="pastille" :class="invoice.status">{{ STATUTS[invoice.status] }}</span>
       </h1>
       <div class="champs">
-        <label>N° <input v-model="entete.numero" :disabled="figee" @input="changer"></label>
-        <label>Date <input v-model="entete.date_facture" type="date" :disabled="figee" @input="changer"></label>
+        <label>N° <input v-model="entete.number" :disabled="figee" @input="changer"></label>
+        <label>Date <input v-model="entete.invoice_date" type="date" :disabled="figee" @input="changer"></label>
         <label>Énergie
-          <select v-model="entete.energie" :disabled="figee" @change="changer">
-            <option v-for="(nom, code) in ENERGIES" :key="code" :value="code">{{ nom }}</option>
+          <select v-model="entete.energy" :disabled="figee" @change="changer">
+            <option v-for="(name, code) in ENERGIES" :key="code" :value="code">{{ name }}</option>
           </select>
         </label>
         <label>Total imprimé TTC
-          <input v-model="entete.montant_ttc" class="nombre" :disabled="figee" @input="changer">
+          <input v-model="entete.total_incl_tax" class="nombre" :disabled="figee" @input="changer">
         </label>
         <label class="note">Note <input v-model="entete.note" :disabled="figee" @input="changer"></label>
       </div>
     </section>
 
-    <section v-if="controle" class="bandeau" :class="controle.validable ? 'ok' : 'ko'">
-      <span>Somme des lignes <strong>{{ euros(controle.total_lignes) }}</strong></span>
-      <template v-if="entete.montant_ttc.trim()">
-        <span>Total imprimé <strong>{{ euros(nombreApi(entete.montant_ttc)) }}</strong></span>
-        <span>Écart <strong :class="controle.ok ? 'ok' : 'ko'">{{ euros(controle.ecart) }}</strong></span>
+    <section v-if="checks" class="bandeau" :class="checks.can_validate ? 'ok' : 'ko'">
+      <span>Somme des lignes <strong>{{ euros(checks.lines_total) }}</strong></span>
+      <template v-if="entete.total_incl_tax.trim()">
+        <span>Total imprimé <strong>{{ euros(nombreApi(entete.total_incl_tax)) }}</strong></span>
+        <span>Écart <strong :class="checks.ok ? 'ok' : 'ko'">{{ euros(checks.gap) }}</strong></span>
       </template>
       <span v-else>Total imprimé <strong class="ko">à saisir</strong></span>
-      <span>{{ controle.validable ? '✓ Contrôles bloquants passés' : '✗ Validation impossible' }}</span>
+      <span>{{ checks.can_validate ? '✓ Contrôles bloquants passés' : '✗ Validation impossible' }}</span>
       <span v-if="modifie" class="discret">modifications non enregistrées</span>
     </section>
 
     <!-- Replacement links (ADR 0017) -->
-    <p v-if="facture.statut === 'remplacee'" class="message avertissement">
-      Facture <strong>remplacée</strong> le {{ dateFr(facture.remplacee_le?.slice(0, 10) ?? null) }}
+    <p v-if="invoice.status === 'replaced'" class="message avertissement">
+      Facture <strong>remplacée</strong> le {{ dateFr(invoice.replaced_at?.slice(0, 10) ?? null) }}
       <template v-if="liens?.remplacante">
-        par <RouterLink :to="{ name: 'facture', params: { id: liens.remplacante.id } }">{{ liens.remplacante.fournisseur }} n° {{ liens.remplacante.numero }}</RouterLink>
+        par <RouterLink :to="{ name: 'invoice', params: { id: liens.remplacante.id } }">{{ liens.remplacante.supplier }} n° {{ liens.remplacante.number }}</RouterLink>
       </template>
-      ({{ facture.motif_remplacement }}) : elle n'entre plus dans les décomptes ni dans la synthèse fiscale.
+      ({{ invoice.replacement_reason }}) : elle n'entre plus dans les décomptes ni dans la synthèse fiscale.
     </p>
-    <p v-if="liens?.corrige && facture.statut === 'a_verifier'" class="message info">
-      Correction de <RouterLink :to="{ name: 'facture', params: { id: liens.corrige.id } }">{{ liens.corrige.fournisseur }} n° {{ liens.corrige.numero }}</RouterLink>,
+    <p v-if="liens?.corrige && invoice.status === 'draft'" class="message info">
+      Correction de <RouterLink :to="{ name: 'invoice', params: { id: liens.corrige.id } }">{{ liens.corrige.supplier }} n° {{ liens.corrige.number }}</RouterLink>,
       validée : à la validation de ce brouillon, elle est remplacée ; jusque-là, c'est elle qui compte. La note est reprise
       dans le motif.
     </p>
     <p v-if="liens?.correction" class="message info">
       Correction en cours :
-      <RouterLink :to="{ name: 'facture', params: { id: liens.correction.id } }">brouillon {{ liens.correction.fournisseur }} n° {{ liens.correction.numero }}</RouterLink>.
+      <RouterLink :to="{ name: 'invoice', params: { id: liens.correction.id } }">brouillon {{ liens.correction.supplier }} n° {{ liens.correction.number }}</RouterLink>.
     </p>
     <p v-if="liens?.remplacees.length" class="discret">
       Remplace :
       <template v-for="(r, i) in liens.remplacees" :key="r.id">
-        {{ i ? ', ' : '' }}<RouterLink :to="{ name: 'facture', params: { id: r.id } }">{{ r.fournisseur }} n° {{ r.numero }}</RouterLink>
+        {{ i ? ', ' : '' }}<RouterLink :to="{ name: 'invoice', params: { id: r.id } }">{{ r.supplier }} n° {{ r.number }}</RouterLink>
       </template>
     </p>
 
-    <p v-if="message" class="message" :class="message.type">{{ message.texte }}</p>
+    <p v-if="message" class="message" :class="message.type">{{ message.text }}</p>
     <div v-if="touchees.length" class="message avertissement">
       Régularisations envoyées dont la période touche cette facture : leur décompte refait peut différer du montant
       envoyé (« à rectifier » s'il diffère de plus de 5 €).
       <ul>
         <li v-for="r in touchees" :key="r.id">
-          <RouterLink :to="{ name: 'regularisation', params: { id: r.id } }">{{ r.locataire }} ({{ r.lot }}), {{ dateFr(r.debut) }} → {{ dateFr(r.fin) }}</RouterLink>
-          : solde envoyé {{ euros(r.solde) }}
+          <RouterLink :to="{ name: 'charge_adjustment', params: { id: r.id } }">{{ r.tenant }} ({{ r.unit }}), {{ dateFr(r.start) }} → {{ dateFr(r.end) }}</RouterLink>
+          : solde envoyé {{ euros(r.balance) }}
         </li>
       </ul>
     </div>
@@ -562,7 +562,7 @@ onBeforeUnmount(() => {
 
         <div class="grille">
           <VGrid
-            :source="lignes"
+            :source="lines"
             :columns="colonnes"
             :readonly="figee"
             :range="true"
@@ -577,15 +577,15 @@ onBeforeUnmount(() => {
         </div>
 
         <ul v-if="constats.length" class="constats">
-          <li v-for="(c, i) in constats" :key="i" :class="c.severite">
-            <strong>{{ c.ligne === null ? 'Facture' : `Ligne ${c.ligne + 1}` }}</strong> : {{ c.message }}
+          <li v-for="(c, i) in constats" :key="i" :class="c.severity">
+            <strong>{{ c.line === null ? 'Facture' : `Ligne ${c.line + 1}` }}</strong> : {{ c.message }}
           </li>
         </ul>
 
         <div class="actions">
           <template v-if="!figee">
             <button type="button" :disabled="occupe || !modifie" @click="enregistrer">Enregistrer le brouillon</button>
-            <button type="button" class="principal" :disabled="occupe || !controle?.validable" @click="valider">
+            <button type="button" class="principal" :disabled="occupe || !checks?.can_validate" @click="valider">
               Valider la facture
             </button>
             <button type="button" class="danger" :disabled="occupe" @click="supprimer">Supprimer le brouillon</button>
@@ -601,31 +601,31 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Payments by bank movements (ADR 0022) -->
-        <section v-if="reglable || reglements.length" class="reglements">
+        <section v-if="reglable || payments.length" class="reglements">
           <h2>
             Paiement
-            <span v-if="Number(facture.reste) < 0" class="ok">✓ payée, écart de {{ euros(facture.reste.replace('-', '')) }} (solde arrondi)</span>
-            <span v-else-if="Number(facture.reste) <= 0" class="ok">✓ payée</span>
-            <span v-else-if="reglements.length">reste {{ euros(facture.reste) }} à payer</span>
+            <span v-if="Number(invoice.remaining) < 0" class="ok">✓ payée, écart de {{ euros(invoice.remaining.replace('-', '')) }} (solde arrondi)</span>
+            <span v-else-if="Number(invoice.remaining) <= 0" class="ok">✓ payée</span>
+            <span v-else-if="payments.length">reste {{ euros(invoice.remaining) }} à payer</span>
             <span v-else class="discret">aucun mouvement bancaire rattaché</span>
           </h2>
-          <ul v-if="reglements.length">
-            <li v-for="r in reglements" :key="r.id">
-              {{ dateFr(r.date_paiement) }} · {{ r.libelle }} :
-              <template v-if="Number(r.montant) < 0">remboursement de <strong>{{ euros(r.montant.replace('-', '')) }}</strong></template>
-              <strong v-else>{{ euros(r.montant) }}</strong>
-              <RouterLink :to="{ name: 'banque', query: { mouvement: r.mouvement_id } }">voir dans la banque</RouterLink>
+          <ul v-if="payments.length">
+            <li v-for="r in payments" :key="r.id">
+              {{ dateFr(r.payment_date) }} · {{ r.label }} :
+              <template v-if="Number(r.amount) < 0">remboursement de <strong>{{ euros(r.amount.replace('-', '')) }}</strong></template>
+              <strong v-else>{{ euros(r.amount) }}</strong>
+              <RouterLink :to="{ name: 'bank', query: { bank_transaction: r.bank_transaction_id } }">voir dans la banque</RouterLink>
               <button v-if="reglable" type="button" :disabled="occupe" @click="detacherReglement(r)">Détacher</button>
             </li>
           </ul>
           <template v-if="reglable">
             <button v-if="!reglement" type="button" :disabled="occupe" @click="ouvrirReglement">Rattacher un paiement…</button>
             <form v-else class="formulaire" @submit.prevent="regler">
-              <label v-if="reglement.mouvements.length">Mouvement bancaire
+              <label v-if="reglement.transactions.length">Mouvement bancaire
                 <select v-model="reglement.choisi" required>
                   <option :value="null" disabled>Choisir un débit (ou un crédit qui la rembourse)</option>
-                  <option v-for="m in reglement.mouvements" :key="m.id" :value="m.id">
-                    {{ m.correspond ? '✓ même montant · ' : '' }}{{ dateFr(m.date_operation) }} · {{ m.libelle }} : {{ euros(m.montant) }}{{ Number(m.reste) < Math.abs(Number(m.montant)) ? ` (reste ${euros(m.reste)})` : '' }}
+                  <option v-for="m in reglement.transactions" :key="m.id" :value="m.id">
+                    {{ m.correspond ? '✓ même montant · ' : '' }}{{ dateFr(m.transaction_date) }} · {{ m.label }} : {{ euros(m.amount) }}{{ Number(m.remaining) < Math.abs(Number(m.amount)) ? ` (reste ${euros(m.remaining)})` : '' }}
                   </option>
                 </select>
               </label>
@@ -641,7 +641,7 @@ onBeforeUnmount(() => {
             <select v-model="remplacement.par" required>
               <option :value="null" disabled>Choisir une facture validée</option>
               <option v-for="f in remplacement.candidates" :key="f.id" :value="f.id">
-                {{ f.fournisseur }} n° {{ f.numero }} du {{ dateFr(f.date_facture) }} ({{ euros(f.montant_ttc) }})
+                {{ f.supplier }} n° {{ f.number }} du {{ dateFr(f.invoice_date) }} ({{ euros(f.total_incl_tax) }})
               </option>
             </select>
           </label>
@@ -652,17 +652,17 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="colonne-pdf">
-        <template v-if="facture.pdf">
+        <template v-if="invoice.pdf">
           <div class="outils">
             <button type="button" :class="{ principal: !voirCopie }" @click="voirCopie = false">Facture reçue</button>
-            <button v-if="facture.annexe !== 'confidentiel'" type="button" :class="{ principal: voirCopie }"
+            <button v-if="invoice.tenant_copy !== 'confidential'" type="button" :class="{ principal: voirCopie }"
               @click="voirCopie = true">
-              Version locataire <span :class="facture.annexe === 'verifiee' ? 'etat-ok' : 'etat-ko'">({{ ETATS_ANNEXE[facture.annexe] }})</span>
+              Version locataire <span :class="invoice.tenant_copy === 'checked' ? 'etat-ok' : 'etat-ko'">({{ ETATS_ANNEXE[invoice.tenant_copy] }})</span>
             </button>
             <span v-else class="discret" title="Ses factures ne sont jamais jointes aux justificatifs (page du fournisseur)">
               Fournisseur confidentiel : jamais jointe au justificatif
             </span>
-            <a class="bouton" :href="voirCopie && copieAJour ? api.annexePdfUrl(facture.id, annexe!.id) : api.pdfUrl(facture.id)"
+            <a class="bouton" :href="voirCopie && copieAJour ? api.annexePdfUrl(invoice.id, tenant_copy!.id) : api.pdfUrl(invoice.id)"
               target="_blank">Ouvrir dans un onglet</a>
             <label class="bouton">
               Remplacer le PDF…
@@ -670,16 +670,16 @@ onBeforeUnmount(() => {
             </label>
           </div>
           <!-- The version for the tenant (ADR 0024): what to do with it, then the version itself -->
-          <div v-if="voirCopie" class="bandeau-copie" :class="{ verifiee: facture.annexe === 'verifiee' }">
-            <template v-if="facture.annexe === 'a_faire'">
-              <p>{{ annexe ? 'La facture a changé : sa version locataire est à recréer.' : 'Pas encore de version locataire.' }}</p>
+          <div v-if="voirCopie" class="bandeau-copie" :class="{ checked: invoice.tenant_copy === 'checked' }">
+            <template v-if="invoice.tenant_copy === 'to_make'">
+              <p>{{ tenant_copy ? 'La facture a changé : sa version locataire est à recréer.' : 'Pas encore de version locataire.' }}</p>
               <div class="actions">
                 <button type="button" class="principal" :disabled="occupe" @click="preparer()">Créer la version locataire</button>
               </div>
             </template>
             <template v-else>
-              <p v-if="facture.annexe === 'verifiee'">
-                ✓ Contrôlée le {{ dateFr(annexe!.verifiee_le!.slice(0, 10)) }} : c'est elle qui est jointe au justificatif
+              <p v-if="invoice.tenant_copy === 'checked'">
+                ✓ Contrôlée le {{ dateFr(tenant_copy!.checked_at!.slice(0, 10)) }} : c'est elle qui est jointe au justificatif
                 envoyé au locataire.
               </p>
               <p v-else>
@@ -688,13 +688,13 @@ onBeforeUnmount(() => {
               </p>
               <p v-if="scannee">
                 Facture scannée : seules les zones tracées y sont masquées,
-                {{ facture.zones_masquees ? 'ajustées pour cette facture' : 'celles du fournisseur' }}.
+                {{ invoice.masked_zones ? 'ajustées pour cette facture' : 'celles du fournisseur' }}.
               </p>
-              <p v-else-if="copieAJour && facture.zones_masquees">
+              <p v-else-if="copieAJour && invoice.masked_zones">
                 Des zones tracées pour cette facture s'ajoutent aux termes et à l'extracteur.
               </p>
               <div v-if="!probleme" class="actions">
-                <button v-if="facture.annexe === 'a_verifier'" type="button" class="principal" :disabled="occupe" @click="verifier">
+                <button v-if="invoice.tenant_copy === 'to_check'" type="button" class="principal" :disabled="occupe" @click="verifier">
                   ✓ Rien de personnel : à joindre
                 </button>
                 <button v-if="scannee" type="button" :disabled="occupe" @click="ajusterZones">
@@ -706,8 +706,8 @@ onBeforeUnmount(() => {
               <form v-else class="probleme" @submit.prevent="masquerEtRecreer">
                 <label>Texte à masquer, recopié de la facture (un texte précis : n° client, IBAN, nom…)
                   <span class="rangee">
-                    <input v-model="probleme.texte" size="30" autofocus>
-                    <button type="submit" class="principal" :disabled="occupe || probleme.texte.trim().length < LONGUEUR_MINIMALE">
+                    <input v-model="probleme.text" size="30" autofocus>
+                    <button type="submit" class="principal" :disabled="occupe || probleme.text.trim().length < LONGUEUR_MINIMALE">
                       Masquer et recréer
                     </button>
                   </span>
@@ -735,10 +735,10 @@ onBeforeUnmount(() => {
               </form>
             </template>
           </div>
-          <iframe v-if="voirCopie && copieAJour" :key="`copie-${annexe!.id}`" class="apercu" :src="api.annexePdfUrl(facture.id, annexe!.id)"
+          <iframe v-if="voirCopie && copieAJour" :key="`copie-${tenant_copy!.id}`" class="apercu" :src="api.annexePdfUrl(invoice.id, tenant_copy!.id)"
             title="Version locataire" />
           <div v-else-if="voirCopie" class="apercu apercu-vide"><p class="discret">La version locataire s'affichera ici.</p></div>
-          <iframe v-else :key="versionPdf" class="apercu" :src="`${api.pdfUrl(facture.id)}?v=${versionPdf}`" title="Facture PDF" />
+          <iframe v-else :key="versionPdf" class="apercu" :src="`${api.pdfUrl(invoice.id)}?v=${versionPdf}`" title="Facture PDF" />
         </template>
         <div
           v-else
@@ -759,10 +759,10 @@ onBeforeUnmount(() => {
     </div>
   </template>
 
-  <p v-else-if="message" class="message erreur">{{ message.texte }}</p>
+  <p v-else-if="message" class="message erreur">{{ message.text }}</p>
 
   <dialog ref="fenetreZones" class="fenetre large" @close="zonesFacture = null">
-    <template v-if="zonesFacture && facture">
+    <template v-if="zonesFacture && invoice">
       <h2 tabindex="-1" autofocus>Zones masquées à la main</h2>
       <p class="discret">
         Tracer à la souris ce qui est à masquer, déplacer ou redimensionner une zone, la retirer avec × ou la touche
@@ -771,7 +771,7 @@ onBeforeUnmount(() => {
       </p>
       <div class="actions">
         <button type="button" class="principal" @click="enregistrerZones(zonesFacture.zones)">Enregistrer et recréer la version locataire</button>
-        <button v-if="facture.zones_masquees" type="button" @click="enregistrerZones(null)">Revenir aux zones du fournisseur</button>
+        <button v-if="invoice.masked_zones" type="button" @click="enregistrerZones(null)">Revenir aux zones du fournisseur</button>
         <button type="button" @click="fermerZones">Annuler</button>
       </div>
       <EditeurZones v-model="zonesFacture.zones" :contenu="zonesFacture.contenu" :automatiques="zonesFacture.automatiques" />

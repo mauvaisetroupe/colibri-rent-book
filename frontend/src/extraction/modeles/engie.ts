@@ -14,7 +14,7 @@ const AMOUNTS = rx`(?:^|\s)(${AMOUNT})\s+(\d+,\d)\s+(${AMOUNT})$`
 const PERIOD = /du (\d\d\/\d\d(?:\/\d\d)?) au (\d\d\/\d\d\/\d\d)/
 
 export default class EngieExtractor extends InvoiceExtractor {
-  readonly energy = 'gaz'
+  readonly energy = 'gas'
 
   private get firstPage() {
     return this.doc.pages[0]?.join('\n') ?? ''
@@ -76,16 +76,16 @@ export default class EngieExtractor extends InvoiceExtractor {
   /** Category and normalised label, from the start of the printed label (rentals are printed in capitals). */
   private categorize(label: string): { category: Category, label: string } {
     const upper = label.toUpperCase()
-    if (label.startsWith('Abonnement')) return { category: 'abonnement', label: 'Abonnement gaz' }
-    if (label.startsWith('Régul')) return { category: 'abonnement', label: 'Régularisation abonnement' }
+    if (label.startsWith('Abonnement')) return { category: 'subscription', label: 'Abonnement gaz' }
+    if (label.startsWith('Régul')) return { category: 'subscription', label: 'Régularisation abonnement' }
     if (label.startsWith('au prorata') || label.startsWith('Consommation')) {
-      return { category: 'consommation', label: 'Consommation gaz' }
+      return { category: 'consumption', label: 'Consommation gaz' }
     }
-    if (label.startsWith('Contribution')) return { category: 'taxe', label: 'CTA (Contribution Tarifaire d\'Acheminement)' }
-    if (label.startsWith('Taxe')) return { category: 'taxe', label: 'TICGN (Taxe Intérieure Conso Gaz Naturel)' }
-    if (label.startsWith('PENAL')) return { category: 'penalite', label }
-    if (upper.startsWith('LOCATION DE COMPTEUR')) return { category: 'prestation', label: 'Location compteur' }
-    if (upper.startsWith('LOCATION')) return { category: 'prestation', label: 'Location bloc détente S300' }
-    return { category: 'prestation', label }
+    if (label.startsWith('Contribution')) return { category: 'tax', label: 'CTA (Contribution Tarifaire d\'Acheminement)' }
+    if (label.startsWith('Taxe')) return { category: 'tax', label: 'TICGN (Taxe Intérieure Conso Gaz Naturel)' }
+    if (label.startsWith('PENAL')) return { category: 'penalty', label }
+    if (upper.startsWith('LOCATION DE COMPTEUR')) return { category: 'service', label: 'Location compteur' }
+    if (upper.startsWith('LOCATION')) return { category: 'service', label: 'Location bloc détente S300' }
+    return { category: 'service', label }
   }
 }

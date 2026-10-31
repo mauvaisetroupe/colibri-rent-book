@@ -7,139 +7,139 @@ import { loadDecompte, loadDetail, type Exercice } from './statements.js'
 // unrounded; this object is also what a regularisation freezes (ADR 0007).
 
 export const RUBRIQUES = [
-  { colonne: 'gaz_consommation', libelle: 'Gaz – consommation', energie: 'gaz', consommation: true },
-  { colonne: 'gaz_autres', libelle: 'Gaz – abonnement, taxes, locations', energie: 'gaz', consommation: false },
-  { colonne: 'electricite_consommation', libelle: 'Électricité des communs – consommation', energie: 'electricite', consommation: true },
-  { colonne: 'electricite_autres', libelle: 'Électricité des communs – abonnement, taxes', energie: 'electricite', consommation: false },
-  { colonne: 'eau', libelle: 'Eau', energie: 'eau', consommation: null },
-  { colonne: 'ordures_menageres', libelle: 'Taxe d\'enlèvement des ordures ménagères', energie: 'ordures_menageres', consommation: null },
+  { column: 'gas_consumption', label: 'Gaz – consommation', energy: 'gas', consumption: true },
+  { column: 'gas_other', label: 'Gaz – abonnement, taxes, locations', energy: 'gas', consumption: false },
+  { column: 'electricity_consumption', label: 'Électricité des communs – consommation', energy: 'electricity', consumption: true },
+  { column: 'electricity_other', label: 'Électricité des communs – abonnement, taxes', energy: 'electricity', consumption: false },
+  { column: 'water', label: 'Eau', energy: 'water', consumption: null },
+  { column: 'household_waste', label: 'Taxe d\'enlèvement des ordures ménagères', energy: 'household_waste', consumption: null },
 ] as const
 
 export type Justificatif = {
-  immeuble: { nom: string, adresse: string | null, total_tantiemes: number }
-  exercice: { debut: string, fin: string }
-  sejour: {
+  building: { name: string, address: string | null, total_charge_shares: number }
+  period: { start: string, end: string }
+  tenancy: {
     id: number
-    locataire: string
-    lot: string
-    designation: string | null
-    tantiemes: number
-    present_du: string | null
-    present_au: string | null
-    jours: number
-    jours_exercice: number
+    tenant: string
+    unit: string
+    unit_label: string | null
+    charge_shares: number
+    present_from: string | null
+    present_to: string | null
+    days: number
+    period_days: number
   }
-  rubriques: { libelle: string, depenses_immeuble: string, quote_part: string }[]
+  headings: { label: string, building_expenses: string, share: string }[]
   total: string
-  provisions: string
-  solde: string
-  factures: {
-    facture_id: number
-    fournisseur: string
-    numero: string
-    date_facture: string
-    energie: string
-    debut: string
-    fin: string
-    montant_facture: string
-    quote_part: string
+  advances: string
+  balance: string
+  invoices: {
+    invoice_id: number
+    supplier: string
+    number: string
+    invoice_date: string
+    energy: string
+    start: string
+    end: string
+    invoice_amount: string
+    share: string
   }[]
-  genere_le: string
+  generated_at: string
 }
 
 export class SejourHorsExercice extends Error {}
 
-export async function buildJustificatif(db: Pool, exercice: Exercice, sejourId: number): Promise<Justificatif> {
-  const { immeuble, debut, fin } = exercice
-  const { sejours } = await loadDecompte(db, exercice)
-  const row = sejours.find((s) => s.sejour_id === sejourId)
+export async function buildJustificatif(db: Pool, period: Exercice, sejourId: number): Promise<Justificatif> {
+  const { building, start, end } = period
+  const { tenancies } = await loadDecompte(db, period)
+  const row = tenancies.find((s) => s.tenancy_id === sejourId)
   if (!row) {
     throw new SejourHorsExercice('Ce séjour ne figure pas dans le décompte de cet exercice')
   }
 
   const { rows: [info] } = await db.query<{
-    nom: string, adresse: string | null, total_tantiemes: number, designation: string | null, jours_exercice: number,
+    name: string, address: string | null, total_charge_shares: number, label: string | null, period_days: number,
   }>(
-    `SELECT i.nom, i.adresse, (SELECT sum(tantiemes)::int FROM lot WHERE immeuble_id = i.id) AS total_tantiemes,
-            lt.designation, ($3::date - $2::date + 1) AS jours_exercice
-     FROM sejour s JOIN lot lt ON lt.id = s.lot_id JOIN immeuble i ON i.id = lt.immeuble_id
+    `SELECT i.name, i.address, (SELECT sum(charge_shares)::int FROM unit WHERE building_id = i.id) AS total_charge_shares,
+            lt.label, ($3::date - $2::date + 1) AS period_days
+     FROM tenancy s JOIN unit lt ON lt.id = s.unit_id JOIN building i ON i.id = lt.building_id
      WHERE s.id = $1 AND i.id = $4`,
-    [sejourId, debut, fin, immeuble],
+    [sejourId, start, end, building],
   )
   if (!info) {
     throw new SejourHorsExercice('Séjour inconnu pour cet immeuble')
   }
 
   // Building expenses of the exercise per heading: every share, tenants and owner (vacancy) together
-  const { rows: depenses } = await db.query<{ energie: string, consommation: boolean, montant: string }>(
-    `SELECT energie, categorie = 'consommation' AS consommation, sum(montant)::text AS montant
-     FROM repartition($1, $2, $3) GROUP BY 1, 2`,
-    [immeuble, debut, fin],
+  const { rows: depenses } = await db.query<{ energy: string, consumption: boolean, amount: string }>(
+    `SELECT energy, category = 'consumption' AS consumption, sum(amount)::text AS amount
+     FROM apportionment($1, $2, $3) GROUP BY 1, 2`,
+    [building, start, end],
   )
-  const depense = (energie: string, consommation: boolean | null) => depenses
-    .filter((d) => d.energie === energie && (consommation === null || d.consommation === consommation))
-    .reduce((sum, d) => sum.plus(d.montant), new Big(0))
+  const depense = (energy: string, consumption: boolean | null) => depenses
+    .filter((d) => d.energy === energy && (consumption === null || d.consumption === consumption))
+    .reduce((sum, d) => sum.plus(d.amount), new Big(0))
     .toString()
 
   // Invoices behind the tenant's share, with the span of the lines retained and the share of each invoice
-  const detail = await loadDetail(db, exercice, { sejour: sejourId })
-  const parFacture = new Map<number, Justificatif['factures'][number]>()
+  const detail = await loadDetail(db, period, { tenancy: sejourId })
+  const parFacture = new Map<number, Justificatif['invoices'][number]>()
   for (const line of detail) {
     // Days actually retained for the tenant: the line period within the presence (itself within the exercise)
     const d = {
       ...line,
-      debut: row.present_du && row.present_du > line.debut ? row.present_du : line.debut,
-      fin: row.present_au && row.present_au < line.fin ? row.present_au : line.fin,
+      start: row.present_from && row.present_from > line.start ? row.present_from : line.start,
+      end: row.present_to && row.present_to < line.end ? row.present_to : line.end,
     }
-    const f = parFacture.get(d.facture_id)
+    const f = parFacture.get(d.invoice_id)
     if (f) {
-      f.debut = d.debut < f.debut ? d.debut : f.debut
-      f.fin = d.fin > f.fin ? d.fin : f.fin
-      f.quote_part = new Big(f.quote_part).plus(d.montant).toString()
+      f.start = d.start < f.start ? d.start : f.start
+      f.end = d.end > f.end ? d.end : f.end
+      f.share = new Big(f.share).plus(d.amount).toString()
     } else {
-      parFacture.set(d.facture_id, {
-        facture_id: d.facture_id, fournisseur: d.fournisseur, numero: d.numero, date_facture: d.date_facture,
-        energie: d.energie, debut: d.debut, fin: d.fin, montant_facture: '', quote_part: new Big(d.montant).toString(),
+      parFacture.set(d.invoice_id, {
+        invoice_id: d.invoice_id, supplier: d.supplier, number: d.number, invoice_date: d.invoice_date,
+        energy: d.energy, start: d.start, end: d.end, invoice_amount: '', share: new Big(d.amount).toString(),
       })
     }
   }
   if (parFacture.size) {
-    const { rows } = await db.query<{ id: number, montant_ttc: string }>(
-      'SELECT id, montant_ttc::text FROM facture WHERE id = ANY($1)',
+    const { rows } = await db.query<{ id: number, total_incl_tax: string }>(
+      'SELECT id, total_incl_tax::text FROM invoice WHERE id = ANY($1)',
       [[...parFacture.keys()]],
     )
     for (const r of rows) {
-      parFacture.get(r.id)!.montant_facture = r.montant_ttc
+      parFacture.get(r.id)!.invoice_amount = r.total_incl_tax
     }
   }
-  const ordreEnergie = RUBRIQUES.map((r) => r.energie as string)
-  const factures = [...parFacture.values()].sort((a, b) =>
-    ordreEnergie.indexOf(a.energie) - ordreEnergie.indexOf(b.energie) || a.debut.localeCompare(b.debut))
+  const ordreEnergie = RUBRIQUES.map((r) => r.energy as string)
+  const invoices = [...parFacture.values()].sort((a, b) =>
+    ordreEnergie.indexOf(a.energy) - ordreEnergie.indexOf(b.energy) || a.start.localeCompare(b.start))
 
   return {
-    immeuble: { nom: info.nom, adresse: info.adresse, total_tantiemes: info.total_tantiemes },
-    exercice: { debut, fin },
-    sejour: {
+    building: { name: info.name, address: info.address, total_charge_shares: info.total_charge_shares },
+    period: { start, end },
+    tenancy: {
       id: sejourId,
-      locataire: row.locataire,
-      lot: row.lot,
-      designation: info.designation,
-      tantiemes: row.tantiemes,
-      present_du: row.present_du,
-      present_au: row.present_au,
-      jours: row.jours,
-      jours_exercice: info.jours_exercice,
+      tenant: row.tenant,
+      unit: row.unit,
+      unit_label: info.label,
+      charge_shares: row.charge_shares,
+      present_from: row.present_from,
+      present_to: row.present_to,
+      days: row.days,
+      period_days: info.period_days,
     },
-    rubriques: RUBRIQUES.map((r) => ({
-      libelle: r.libelle,
-      depenses_immeuble: depense(r.energie, r.consommation),
-      quote_part: row[r.colonne],
+    headings: RUBRIQUES.map((r) => ({
+      label: r.label,
+      building_expenses: depense(r.energy, r.consumption),
+      share: row[r.column],
     })),
     total: row.total,
-    provisions: row.provisions,
-    solde: row.solde,
-    factures,
-    genere_le: new Date().toISOString().slice(0, 10),
+    advances: row.advances,
+    balance: row.balance,
+    invoices,
+    generated_at: new Date().toISOString().slice(0, 10),
   }
 }
 

@@ -34,10 +34,10 @@ export async function seConnecter() {
 }
 
 /** Registers a passkey on this device: from a link (jeton), or for the account connected. */
-export async function enregistrer(jeton: string | null, appareil: string) {
+export async function enregistrer(jeton: string | null, device: string) {
   try {
     const { id, options } = await api.enregistrementOptions(jeton)
-    await api.enregistrement(id, await startRegistration({ optionsJSON: options }), appareil)
+    await api.enregistrement(id, await startRegistration({ optionsJSON: options }), device)
   } catch (e) {
     throw new Error(message(e))
   }

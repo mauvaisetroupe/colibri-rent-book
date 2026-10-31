@@ -30,17 +30,17 @@ const fournisseurId = ref<number | null>(null)
 
 const enregistres = ref<ExtracteurEnregistre[]>([])
 const base = ref<ExtracteurEnregistre | null>(null)
-const form = reactive({ fournisseur: '', energie: 'eau' as Energie, note: '', reglages: { ...REGLAGES_PAR_DEFAUT } })
-const message = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
+const form = reactive({ supplier: '', energy: 'water' as Energie, note: '', settings: { ...REGLAGES_PAR_DEFAUT } })
+const message = ref<{ text: string, type: 'info' | 'erreur' } | null>(null)
 // Shown once the saved version is opened (the route changes)
-let annonce: { texte: string, type: 'info' } | null = null
+let annonce: { text: string, type: 'info' } | null = null
 
 const zoneEditeur = ref<HTMLElement | null>(null)
 let editeur: Editeur | null = null
 
 const facturesExemple = ref<FactureAvecPdf[]>([])
 // The sample PDF: its pieces of text, and its address to open it in another tab
-const exemple = shallowRef<{ nom: string, pages: Morceau[][], url: string } | null>(null)
+const exemple = shallowRef<{ name: string, pages: Morceau[][], url: string } | null>(null)
 // Lines of the text, cut where the regular expressions of the code matched
 const lignesTexte = shallowRef<LigneSurlignee[]>([])
 const erreursTs = ref<string[]>([])
@@ -59,10 +59,10 @@ const fenetrePdf = ref<HTMLDialogElement | null>(null)
 const fenetreVerification = ref<HTMLDialogElement | null>(null)
 
 const prochaineVersion = computed(() =>
-  1 + Math.max(0, ...enregistres.value.filter((e) => e.fournisseur === form.fournisseur.trim()).map((e) => e.version)))
+  1 + Math.max(0, ...enregistres.value.filter((e) => e.supplier === form.supplier.trim()).map((e) => e.version)))
 
 const sommeLignes = computed(() =>
-  (extraction.value?.lignes.valeur ?? []).reduce((s, l) => s.plus(l.montant_ttc || 0), new Big(0)).round(2, Big.roundHalfUp))
+  (extraction.value?.lines.valeur ?? []).reduce((s, l) => s.plus(l.amount_incl_tax || 0), new Big(0)).round(2, Big.roundHalfUp))
 
 const totalOk = computed(() => {
   const total = extraction.value?.total.valeur
@@ -70,17 +70,17 @@ const totalOk = computed(() => {
 })
 
 const enregistrable = computed(() =>
-  !!form.fournisseur.trim() && !!code.value && erreursTs.value.length === 0 && !erreurCode.value && !occupe.value)
+  !!form.supplier.trim() && !!code.value && erreursTs.value.length === 0 && !erreurCode.value && !occupe.value)
 
 onMounted(async () => {
   editeur = creerEditeur(zoneEditeur.value!, modele)
   editeur.surChangement(programmer)
   await ouvrir()
   try {
-    termes.value = await api.termesMasques()
+    terms.value = await api.termesMasques()
     programmer()
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 })
 
@@ -88,19 +88,19 @@ watch(() => props.id, ouvrir)
 
 async function ouvrir() {
   try {
-    enregistres.value = await api.extracteurs()
+    enregistres.value = await api.extractors()
     const version = props.id === null ? null : enregistres.value.find((e) => e.id === props.id)
     if (version) {
       await choisir(version)
     } else {
       nouveau()
       if (props.id !== null) {
-        message.value = { texte: 'Extracteur introuvable', type: 'erreur' }
+        message.value = { text: 'Extracteur introuvable', type: 'erreur' }
       }
     }
-    fournisseurId.value = (await api.fournisseurs()).find((f) => f.nom === form.fournisseur)?.id ?? null
+    fournisseurId.value = (await api.suppliers()).find((f) => f.name === form.supplier)?.id ?? null
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
   if (annonce) {
     message.value = annonce
@@ -143,7 +143,7 @@ function basculerPleinEcran() {
 
 async function choisir(e: ExtracteurEnregistre) {
   base.value = e
-  Object.assign(form, { fournisseur: e.fournisseur, energie: e.energie, note: '', reglages: { ...e.reglages } })
+  Object.assign(form, { supplier: e.supplier, energy: e.energy, note: '', settings: { ...e.settings } })
   editeur?.remplacer(e.source)
   comparaisons.value = null
   message.value = null
@@ -153,24 +153,24 @@ async function choisir(e: ExtracteurEnregistre) {
 function nouveau() {
   base.value = null
   // « Écrire un extracteur » from the page of a supplier without one: its name is given
-  const fournisseur = typeof route.query.fournisseur === 'string' ? route.query.fournisseur : ''
-  Object.assign(form, { fournisseur, energie: 'eau', note: '', reglages: { ...REGLAGES_PAR_DEFAUT } })
+  const supplier = typeof route.query.supplier === 'string' ? route.query.supplier : ''
+  Object.assign(form, { supplier, energy: 'water', note: '', settings: { ...REGLAGES_PAR_DEFAUT } })
   editeur?.remplacer(modele)
   facturesExemple.value = []
   exemple.value = null
   comparaisons.value = null
   message.value = null
-  if (fournisseur) {
+  if (supplier) {
     chargerFacturesExemple()
   }
 }
 
 async function chargerFacturesExemple() {
-  facturesExemple.value = form.fournisseur ? await api.facturesDuFournisseur(form.fournisseur) : []
-  // « ?facture=12 »: opened from that invoice, which becomes the working PDF
-  const demandee = facturesExemple.value.find((f) => String(f.id) === route.query.facture)
+  facturesExemple.value = form.supplier ? await api.facturesDuFournisseur(form.supplier) : []
+  // « ?invoice=12 »: opened from that invoice, which becomes the working PDF
+  const demandee = facturesExemple.value.find((f) => String(f.id) === route.query.invoice)
   const premiere = demandee ?? facturesExemple.value[0]
-  if (premiere && (demandee || !exemple.value?.nom.startsWith(`${form.fournisseur} `))) {
+  if (premiere && (demandee || !exemple.value?.name.startsWith(`${form.supplier} `))) {
     await exempleFacture(premiere)
   } else {
     programmer()
@@ -181,9 +181,9 @@ async function exempleFacture(f: FactureAvecPdf) {
   exempleId.value = f.id
   try {
     const pdf = await (await fetch(api.pdfUrl(f.id))).blob()
-    remplacerExemple({ nom: `${form.fournisseur} n° ${f.numero}`, pages: await morceauxDuPdf(pdf), url: api.pdfUrl(f.id) })
+    remplacerExemple({ name: `${form.supplier} n° ${f.number}`, pages: await morceauxDuPdf(pdf), url: api.pdfUrl(f.id) })
   } catch (e) {
-    message.value = { texte: `PDF de la facture ${f.numero} illisible : ${(e as Error).message}`, type: 'erreur' }
+    message.value = { text: `PDF de la facture ${f.number} illisible : ${(e as Error).message}`, type: 'erreur' }
   }
   programmer()
 }
@@ -199,7 +199,7 @@ function remplacerExemple(nouveau: NonNullable<typeof exemple.value>) {
 // ---------------------------------------------------------------- tab « Masquage » (ADR 0024)
 
 // Terms masked on every invoice; the redactions of the code being edited; the text of the sample PDF as masked
-const termes = ref<string[]>([])
+const terms = ref<string[]>([])
 const regles = shallowRef<Redaction[]>([])
 const erreurMasquage = ref<string | null>(null)
 const lignesMasques = shallowRef<SegmentMasque[][]>([])
@@ -208,36 +208,36 @@ const aRedactions = computed(() => /^\s*redactions\s*\(/m.test(code.value) || re
 // Text selected in the text of the PDF, to add to the masked terms
 const selection = ref('')
 
-function masquer(extracteur: ReturnType<typeof charger>, document: ReturnType<typeof documentDe>) {
+function masquer(extractor: ReturnType<typeof charger>, document: ReturnType<typeof documentDe>) {
   try {
-    regles.value = reglesDuDocument(extracteur, document)
+    regles.value = reglesDuDocument(extractor, document)
   } catch (e) {
     erreurMasquage.value = `redactions : ${(e as Error).message}`
   }
-  lignesMasques.value = lignesMasquees(document.lines, termes.value, regles.value)
+  lignesMasques.value = lignesMasquees(document.lines, terms.value, regles.value)
 }
 
 function noterSelection() {
-  const texte = window.getSelection()?.toString().trim() ?? ''
-  selection.value = texte.includes('\n') ? '' : texte
+  const text = window.getSelection()?.toString().trim() ?? ''
+  selection.value = text.includes('\n') ? '' : text
 }
 
 async function modifierTermes(nouveaux: string[], succes: string) {
   try {
-    termes.value = await api.modifierTermesMasques(nouveaux)
-    message.value = { texte: succes, type: 'info' }
+    terms.value = await api.modifierTermesMasques(nouveaux)
+    message.value = { text: succes, type: 'info' }
     selection.value = ''
     oublierCopie()
     programmer()
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 
-const ajouterTerme = () => modifierTermes([...termes.value, selection.value],
+const ajouterTerme = () => modifierTermes([...terms.value, selection.value],
   `« ${selection.value} » sera masqué sur toutes les factures (les copies déjà faites sont à refaire)`)
-const retirerTerme = (terme: string) => modifierTermes(termes.value.filter((t) => t !== terme),
-  `« ${terme} » n'est plus masqué (les copies déjà faites sont à refaire)`)
+const retirerTerme = (term: string) => modifierTermes(terms.value.filter((t) => t !== term),
+  `« ${term} » n'est plus masqué (les copies déjà faites sont à refaire)`)
 
 const REDACTIONS = `
   /** What to mask on the copy joined to the supporting documents, on top of the masked terms (ADR 0024). */
@@ -256,14 +256,14 @@ function ajouterRedactions() {
   }
   let source = editeur.source()
   if (/^\s*redactions\s*\(/m.test(source)) {
-    message.value = { texte: 'La méthode redactions() est déjà dans le code', type: 'info' }
+    message.value = { text: 'La méthode redactions() est déjà dans le code', type: 'info' }
     return
   }
-  const fin = source.lastIndexOf('}')
-  if (fin < 0) {
+  const end = source.lastIndexOf('}')
+  if (end < 0) {
     return
   }
-  source = `${source.slice(0, fin).trimEnd()}\n${REDACTIONS}${source.slice(fin)}`
+  source = `${source.slice(0, end).trimEnd()}\n${REDACTIONS}${source.slice(end)}`
   source = source.replace(/import \{([^}]*)\} from 'extractor'/, (tout, noms: string) =>
     (/\bRedaction\b/.test(noms) ? tout : `import {${noms.trimEnd()}, type Redaction } from 'extractor'`))
   editeur.remplacer(source)
@@ -315,13 +315,13 @@ async function apercuCopie() {
   try {
     const contenu = new Uint8Array(await (await fetch(exemple.value.url)).arrayBuffer())
     // A scanned page is masked by the zones drawn on the page of the supplier (ADR 0025)
-    const modele = (await api.fournisseurs()).find((f) => f.nom === form.fournisseur.trim())?.zones_masquees ?? []
+    const modele = (await api.suppliers()).find((f) => f.name === form.supplier.trim())?.masked_zones ?? []
     const { pdf, zones } = await copieEnImages(contenu, await api.termesMasques(),
-      { classe: charger(code.value), reglages: form.reglages }, { zones: modele, origine: 'modele' })
+      { classe: charger(code.value), settings: form.settings }, { zones: modele, origin: 'template' })
     oublierCopie()
     copie.value = { url: URL.createObjectURL(new Blob([pdf as Uint8Array<ArrayBuffer>], { type: 'application/pdf' })), zones: zones.length }
   } catch (e) {
-    message.value = { texte: `Copie jointe : ${(e as Error).message}`, type: 'erreur' }
+    message.value = { text: `Copie jointe : ${(e as Error).message}`, type: 'erreur' }
   } finally {
     occupe.value = false
   }
@@ -332,9 +332,9 @@ async function exempleFichier(event: Event) {
   const fichier = input.files?.[0]
   if (fichier) {
     try {
-      remplacerExemple({ nom: fichier.name, pages: await morceauxDuPdf(fichier), url: URL.createObjectURL(fichier) })
+      remplacerExemple({ name: fichier.name, pages: await morceauxDuPdf(fichier), url: URL.createObjectURL(fichier) })
     } catch {
-      message.value = { texte: `${fichier.name} : PDF illisible`, type: 'erreur' }
+      message.value = { text: `${fichier.name} : PDF illisible`, type: 'erreur' }
     }
     programmer()
   }
@@ -354,43 +354,43 @@ function programmer() {
   minuterie = setTimeout(analyser, 300)
 }
 
-watch(() => ({ ...form.reglages }), programmer)
+watch(() => ({ ...form.settings }), programmer)
 
 async function analyser() {
   if (!editeur) {
     return
   }
-  const numero = ++sequence
+  const number = ++sequence
   const { code: js, erreurs } = await editeur.compiler()
-  if (numero !== sequence) {
+  if (number !== sequence) {
     return
   }
   code.value = js
   erreursTs.value = erreurs
-  const document = exemple.value ? documentDe(exemple.value.pages, form.reglages) : null
-  lignesTexte.value = (document?.lines ?? []).map((texte) =>
-    ({ segments: [{ texte, champ: null }], trouvee: false, dansZone: false, erreur: null }))
+  const document = exemple.value ? documentDe(exemple.value.pages, form.settings) : null
+  lignesTexte.value = (document?.lines ?? []).map((text) =>
+    ({ segments: [{ text, champ: null }], trouvee: false, dansZone: false, erreur: null }))
   erreurCode.value = null
   reconnu.value = null
   extraction.value = null
-  lignesMasques.value = (document?.lines ?? []).map((texte) => [{ texte, origine: null }])
+  lignesMasques.value = (document?.lines ?? []).map((text) => [{ text, origin: null }])
   regles.value = []
   erreurMasquage.value = null
-  let extracteur
+  let extractor
   try {
-    extracteur = charger(js)
-    form.energie = energieDe(extracteur)
+    extractor = charger(js)
+    form.energy = energieDe(extractor)
   } catch (e) {
     erreurCode.value = (e as Error).message
     return
   }
   if (document) {
-    reconnu.value = reconnait(extracteur, document)
+    reconnu.value = reconnait(extractor, document)
     const correspondances: Correspondance[] = []
-    extraction.value = extraire(extracteur, document, correspondances)
+    extraction.value = extraire(extractor, document, correspondances)
     const { lignesEnErreur: enErreur, zone, trouvees } = extraction.value
     lignesTexte.value = surligner(document, correspondances, { enErreur, zone, trouvees })
-    masquer(extracteur, document)
+    masquer(extractor, document)
   }
 }
 
@@ -399,15 +399,15 @@ async function analyser() {
 async function tester() {
   occupe.value = true
   try {
-    const extracteur = charger(code.value)
+    const extractor = charger(code.value)
     const resultats = new Map<number, Comparaison>()
     for (const f of facturesExemple.value) {
-      resultats.set(f.id, await comparer(extracteur, form.reglages, f))
+      resultats.set(f.id, await comparer(extractor, form.settings, f))
       comparaisons.value = new Map(resultats)
     }
     comparaisonsPerimees.value = false
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   } finally {
     occupe.value = false
   }
@@ -435,14 +435,14 @@ async function enregistrer() {
   }
   occupe.value = true
   try {
-    const cree = await api.nouvelleVersion({
-      fournisseur: form.fournisseur.trim(), energie: form.energie, reglages: { ...form.reglages },
-      source: editeur.source(), code: code.value, moteur: MOTEUR, note: form.note.trim() || null,
+    const created = await api.nouvelleVersion({
+      supplier: form.supplier.trim(), energy: form.energy, settings: { ...form.settings },
+      source: editeur.source(), code: code.value, engine: MOTEUR, note: form.note.trim() || null,
     })
-    annonce = { texte: `${cree.fournisseur} : version ${cree.version} enregistrée`, type: 'info' }
-    await router.push({ name: 'extracteur', params: { id: cree.id } })
+    annonce = { text: `${created.supplier} : version ${created.version} enregistrée`, type: 'info' }
+    await router.push({ name: 'extractor', params: { id: created.id } })
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   } finally {
     occupe.value = false
   }
@@ -450,25 +450,25 @@ async function enregistrer() {
 </script>
 
 <template>
-  <RouterLink v-if="fournisseurId" :to="{ name: 'fournisseur', params: { id: fournisseurId } }">← {{ form.fournisseur }}</RouterLink>
-  <RouterLink v-else :to="{ name: 'fournisseurs' }">← Fournisseurs</RouterLink>
+  <RouterLink v-if="fournisseurId" :to="{ name: 'supplier', params: { id: fournisseurId } }">← {{ form.supplier }}</RouterLink>
+  <RouterLink v-else :to="{ name: 'suppliers' }">← Fournisseurs</RouterLink>
   <section class="entete-page">
     <h1>
-      {{ base ? `${base.fournisseur}, à partir de la version ${base.version}` : 'Nouveau fournisseur' }}
+      {{ base ? `${base.supplier}, à partir de la version ${base.version}` : 'Nouveau fournisseur' }}
     </h1>
     <p v-if="base" class="discret">
-      Version {{ base.version }} du {{ dateFr(base.cree_le.slice(0, 10)) }}{{ base.note ? ` : ${base.note}` : '' }}
-      · {{ base.nb_factures }} facture(s) lue(s). Elle ne change pas : enregistrer crée la version {{ prochaineVersion }}.
+      Version {{ base.version }} du {{ dateFr(base.created_at.slice(0, 10)) }}{{ base.note ? ` : ${base.note}` : '' }}
+      · {{ base.invoice_count }} facture(s) lue(s). Elle ne change pas : enregistrer crée la version {{ prochaineVersion }}.
     </p>
   </section>
 
-  <p v-if="message" class="message" :class="message.type">{{ message.texte }}</p>
+  <p v-if="message" class="message" :class="message.type">{{ message.text }}</p>
 
   <div class="champs">
-    <label>Fournisseur <input v-model="form.fournisseur" :readonly="!!base" size="14"></label>
+    <label>Fournisseur <input v-model="form.supplier" :readonly="!!base" size="14"></label>
     <label>Énergie
-      <select v-model="form.energie" disabled>
-        <option v-for="(nom, c) in ENERGIES" :key="c" :value="c">{{ nom }}</option>
+      <select v-model="form.energy" disabled>
+        <option v-for="(name, c) in ENERGIES" :key="c" :value="c">{{ name }}</option>
       </select>
     </label>
     <label class="note">Note de version <input v-model="form.note" size="40" placeholder="ce qui change"></label>
@@ -478,7 +478,7 @@ async function enregistrer() {
     <button type="button" :class="{ actif: onglet === 'extraction' }" @click="onglet = 'extraction'">Extraction</button>
     <button type="button" :class="{ actif: onglet === 'masquage' }" @click="onglet = 'masquage'">Masquage</button>
     <span class="pdf-travail">
-      PDF de travail : <strong>{{ exemple?.nom ?? 'aucun' }}</strong>
+      PDF de travail : <strong>{{ exemple?.name ?? 'aucun' }}</strong>
       <button type="button" :class="{ principal: !exemple }" @click="fenetrePdf?.showModal()">Changer…</button>
     </span>
   </nav>
@@ -486,7 +486,7 @@ async function enregistrer() {
   <section class="phase" :class="{ 'plein-ecran': pleinEcran }">
     <div class="titre-phase">
       <p v-if="onglet === 'masquage'" class="legende-couleurs">
-        <mark class="masque-termes">termes masqués</mark><mark class="masque-extracteur">redactions()</mark>
+        <mark class="masque-terms">termes masqués</mark><mark class="masque-extractor">redactions()</mark>
         <span v-if="!selection" class="discret">Sélectionner un texte du PDF pour le masquer sur toutes les factures.</span>
         <button v-else type="button" class="principal" @click="ajouterTerme">
           Masquer « {{ selection.length > 40 ? `${selection.slice(0, 40)}…` : selection }} » sur toutes les factures
@@ -510,14 +510,14 @@ async function enregistrer() {
       </div>
       <ol v-if="onglet === 'masquage' && lignesMasques.length" class="texte-pdf" @mouseup="noterSelection">
         <li v-for="(segments, i) in lignesMasques" :key="i"><code><template v-for="(seg, j) in segments" :key="j"><mark
-          v-if="seg.origine" :class="`masque-${seg.origine}`">{{ seg.texte }}</mark><template v-else>{{ seg.texte }}</template></template></code></li>
+          v-if="seg.origin" :class="`masque-${seg.origin}`">{{ seg.text }}</mark><template v-else>{{ seg.text }}</template></template></code></li>
       </ol>
       <ol v-else-if="onglet === 'extraction' && lignesTexte.length" class="texte-pdf">
         <li v-for="(ligne, i) in lignesTexte" :key="i"
           :class="{ 'en-erreur': ligne.erreur, trouvee: ligne.trouvee, 'dans-zone': ligne.dansZone }"
           :title="ligne.erreur ?? undefined"><span v-if="ligne.erreur" class="croix">✖</span><code><template
-          v-for="(seg, j) in ligne.segments" :key="j"><mark v-if="seg.champ" :class="seg.champ">{{ seg.texte }}</mark><template
-            v-else>{{ seg.texte }}</template></template></code></li>
+          v-for="(seg, j) in ligne.segments" :key="j"><mark v-if="seg.champ" :class="seg.champ">{{ seg.text }}</mark><template
+            v-else>{{ seg.text }}</template></template></code></li>
       </ol>
       <p v-else class="discret texte-pdf vide">
         Choisir le PDF de travail (« Changer… » en haut) pour voir son texte, ligne par ligne, tel que le code le reçoit.
@@ -528,18 +528,18 @@ async function enregistrer() {
   <div class="actions">
     <span v-if="onglet === 'extraction' && extraction" class="resume">
       <span :class="reconnu ? 'ok' : 'ko'">{{ reconnu ? 'reconnu' : 'non reconnu' }}</span>
-      <span v-for="c in (['numero', 'date', 'total'] as const)" :key="c" :class="extraction[c].erreur ? 'ko' : 'ok'">
+      <span v-for="c in (['number', 'date', 'total'] as const)" :key="c" :class="extraction[c].erreur ? 'ko' : 'ok'">
         {{ c }} : {{ extraction[c].erreur ? '✖' : (extraction[c].valeur ?? 'à saisir') }}
       </span>
-      <span :class="extraction.lignes.erreur || totalOk === false ? 'ko' : 'ok'">
-        {{ extraction.lignes.valeur
-          ? `${extraction.lignes.valeur.length} lignes` + (totalOk === null ? '' : totalOk ? ' = total' : ' ≠ total')
+      <span :class="extraction.lines.erreur || totalOk === false ? 'ko' : 'ok'">
+        {{ extraction.lines.valeur
+          ? `${extraction.lines.valeur.length} lignes` + (totalOk === null ? '' : totalOk ? ' = total' : ' ≠ total')
             + (extraction.lignesEnErreur.length ? `, ${extraction.lignesEnErreur.length} en erreur` : '')
           : 'lignes ✖' }}
       </span>
     </span>
     <span v-else-if="onglet === 'masquage'" class="resume">
-      <span>{{ termes.length }} terme(s) masqué(s)</span>
+      <span>{{ terms.length }} terme(s) masqué(s)</span>
       <span>redactions() : {{ aRedactions ? `${regles.length - zonesFixes} texte(s) ou motif(s), ${zonesFixes} zone(s) fixe(s)` : 'absente' }}</span>
     </span>
     <button type="button" :disabled="!exemple || !!erreurCode" @click="ouvrirVerification">
@@ -561,7 +561,7 @@ async function enregistrer() {
     <div class="outils">
       <select v-if="facturesExemple.length" :value="exempleId ?? undefined" @change="choisirExemple">
         <option v-for="f in facturesExemple" :key="f.id" :value="f.id">
-          {{ marque(f) }}{{ f.numero }} ({{ dateFr(f.date_facture) }}, {{ f.immeuble }})
+          {{ marque(f) }}{{ f.number }} ({{ dateFr(f.invoice_date) }}, {{ f.building }})
         </option>
       </select>
       <label class="bouton">Autre PDF… <input type="file" accept="application/pdf" hidden @change="exempleFichier"></label>
@@ -569,13 +569,13 @@ async function enregistrer() {
     </div>
     <div class="champs reglages">
       <label>Même ligne si les hauteurs diffèrent d'au plus
-        <span><input v-model.number="form.reglages.toleranceHauteur" type="number" step="0.1" min="0" class="nombre"> pt</span>
+        <span><input v-model.number="form.settings.lineTolerance" type="number" step="0.1" min="0" class="nombre"> pt</span>
       </label>
       <label>Morceaux collés si l'écart est sous
-        <span><input v-model.number="form.reglages.collage" type="number" step="0.1" min="0" class="nombre"> pt</span>
+        <span><input v-model.number="form.settings.joinGap" type="number" step="0.1" min="0" class="nombre"> pt</span>
       </label>
       <label>Changement de colonne (3 espaces) au-delà de
-        <span><input v-model.number="form.reglages.colonne" type="number" step="1" min="0" class="nombre"> pt</span>
+        <span><input v-model.number="form.settings.columnGap" type="number" step="1" min="0" class="nombre"> pt</span>
       </label>
     </div>
     <div class="actions">
@@ -600,8 +600,8 @@ async function enregistrer() {
         <ul v-if="comparaisons" class="verifiees">
           <li v-for="f in facturesExemple" :key="f.id" :class="resultatDe(f)">
             <span>{{ resultatDe(f) === 'ko' ? '✗' : resultatDe(f) === 'ok' ? '✓' : '…' }}</span>
-            <a href="#" @click.prevent="travaillerSur(f)">{{ f.numero }}</a>
-            <span class="discret">{{ dateFr(f.date_facture) }}, {{ f.immeuble }}{{ f.statut === 'validee' ? '' : ', brouillon' }}</span>
+            <a href="#" @click.prevent="travaillerSur(f)">{{ f.number }}</a>
+            <span class="discret">{{ dateFr(f.invoice_date) }}, {{ f.building }}{{ f.status === 'validated' ? '' : ', brouillon' }}</span>
             <span v-if="comparaisons.get(f.id)?.differences.length">{{ comparaisons.get(f.id)!.differences.join(' ; ') }}</span>
             <span v-else-if="comparaisons.get(f.id)?.remarques.length" class="discret">{{ comparaisons.get(f.id)!.remarques.join(' ; ') }}</span>
           </li>
@@ -609,29 +609,29 @@ async function enregistrer() {
         <p class="discret">Cliquer un numéro pour travailler sur cette facture.</p>
       </template>
 
-      <h3>Sur {{ exemple?.nom }}</h3>
+      <h3>Sur {{ exemple?.name }}</h3>
       <p v-if="!extraction" class="discret">Le code ne se charge pas.</p>
       <template v-else>
         <p :class="reconnu ? 'ok' : 'ko'">reconnait : {{ reconnu ? 'oui' : 'non' }}</p>
         <ul class="champs-lus">
-          <li v-for="c in (['numero', 'date', 'total'] as const)" :key="c" :class="extraction[c].erreur ? 'ko' : 'ok'">
+          <li v-for="c in (['number', 'date', 'total'] as const)" :key="c" :class="extraction[c].erreur ? 'ko' : 'ok'">
             {{ c }} : {{ extraction[c].erreur ?? (extraction[c].valeur ?? 'absent (à saisir)') }}
           </li>
         </ul>
-        <p v-if="extraction.lignes.erreur" class="ko">lignes : {{ extraction.lignes.erreur }}</p>
+        <p v-if="extraction.lines.erreur" class="ko">lignes : {{ extraction.lines.erreur }}</p>
         <ul v-if="extraction.lignesEnErreur.length" class="erreurs-code">
           <li v-for="l in extraction.lignesEnErreur" :key="l.position">
-            ligne {{ l.position + 1 }} « {{ l.texte.slice(0, 60) }} » : {{ l.erreur }}
+            ligne {{ l.position + 1 }} « {{ l.text.slice(0, 60) }} » : {{ l.erreur }}
           </li>
         </ul>
-        <table v-if="extraction.lignes.valeur" class="liste">
+        <table v-if="extraction.lines.valeur" class="liste">
           <thead>
             <tr><th>Catégorie</th><th>Libellé</th><th>Début</th><th>Fin</th><th class="nombre">Montant</th><th>Affectation</th><th>Note</th></tr>
           </thead>
           <tbody>
-            <tr v-for="(l, i) in extraction.lignes.valeur" :key="i" class="sans-clic">
-              <td>{{ l.categorie }}</td><td>{{ l.libelle }}</td><td>{{ dateFr(l.debut) }}</td><td>{{ dateFr(l.fin) }}</td>
-              <td class="nombre">{{ euros(l.montant_ttc) }}</td><td>{{ AFFECTATIONS[l.affectation] }}</td><td class="discret">{{ l.note }}</td>
+            <tr v-for="(l, i) in extraction.lines.valeur" :key="i" class="sans-clic">
+              <td>{{ l.category }}</td><td>{{ l.label }}</td><td>{{ dateFr(l.start) }}</td><td>{{ dateFr(l.end) }}</td>
+              <td class="nombre">{{ euros(l.amount_incl_tax) }}</td><td>{{ AFFECTATIONS[l.allocation] }}</td><td class="discret">{{ l.note }}</td>
             </tr>
           </tbody>
           <tfoot>
@@ -648,7 +648,7 @@ async function enregistrer() {
     </template>
 
     <template v-else>
-      <h2 tabindex="-1" autofocus>Masquage : copie jointe aux justificatifs de {{ exemple?.nom }}</h2>
+      <h2 tabindex="-1" autofocus>Masquage : copie jointe aux justificatifs de {{ exemple?.name }}</h2>
       <p class="discret">
         Chaque page en image noir et blanc, où sont peints en noir les termes masqués (toutes les factures, tous
         fournisseurs), ce que rend <code>redactions()</code> (ce fournisseur : un texte qui change à chaque facture) et les
@@ -657,9 +657,9 @@ async function enregistrer() {
       </p>
       <div class="termes">
         <strong>Termes masqués :</strong>
-        <span v-for="t in termes" :key="t" class="terme">{{ t }}
+        <span v-for="t in terms" :key="t" class="terme">{{ t }}
           <button type="button" class="lien" :title="`Ne plus masquer « ${t} »`" @click="retirerTerme(t)">×</button></span>
-        <span v-if="!termes.length" class="discret">aucun</span>
+        <span v-if="!terms.length" class="discret">aucun</span>
       </div>
       <p>
         <span v-if="occupe" class="discret">Copie en cours…</span>
@@ -826,12 +826,12 @@ mark.lecture {
 }
 
 /* Tab « Masquage »: what the copy hides, still readable */
-mark.masque-termes {
+mark.masque-terms {
   background: #555;
   color: #fff;
 }
 
-mark.masque-extracteur {
+mark.masque-extractor {
   background: #000;
   color: #fff;
 }

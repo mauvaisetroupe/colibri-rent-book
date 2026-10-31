@@ -20,11 +20,11 @@ export type AuthOptions = {
   origin: string
 }
 
-export type Utilisateur = { id: number, email: string, nom: string }
+export type Utilisateur = { id: number, email: string, name: string }
 
 declare module 'fastify' {
   interface FastifyRequest {
-    utilisateur?: Utilisateur
+    app_user?: Utilisateur
   }
 }
 
@@ -33,29 +33,29 @@ const DUREE_SESSION_JOURS = 30
 const DUREE_LIEN_MINUTES = 15
 
 export const secret = () => randomBytes(32).toString('base64url')
-export const empreinte = (valeur: string) => createHash('sha256').update(valeur).digest('hex')
+export const token_hash = (valeur: string) => createHash('sha256').update(valeur).digest('hex')
 
 /** A single-use link to register a passkey for this account, valid 15 minutes. */
 export async function creerLien(db: Pool, utilisateurId: number, origin: string) {
   const jeton = secret()
-  const { rows: [l] } = await db.query<{ expire_le: string }>(
-    `INSERT INTO lien_enregistrement (empreinte, utilisateur_id, expire_le) VALUES ($1, $2, now() + $3 * interval '1 minute')
-     RETURNING expire_le::text`, [empreinte(jeton), utilisateurId, DUREE_LIEN_MINUTES])
-  return { url: `${origin}/enregistrer?jeton=${jeton}`, expire_le: l!.expire_le }
+  const { rows: [l] } = await db.query<{ expires_at: string }>(
+    `INSERT INTO registration_link (token_hash, app_user_id, expires_at) VALUES ($1, $2, now() + $3 * interval '1 minute')
+     RETURNING expires_at::text`, [token_hash(jeton), utilisateurId, DUREE_LIEN_MINUTES])
+  return { url: `${origin}/enregistrer?jeton=${jeton}`, expires_at: l!.expires_at }
 }
 
 /** An API token for scripts: shown once, only its digest is kept. */
-export async function creerJeton(db: Pool, utilisateurId: number, nom: string) {
+export async function creerJeton(db: Pool, utilisateurId: number, name: string) {
   const jeton = `colibri_${secret()}`
   const { rows: [j] } = await db.query<{ id: number }>(
-    'INSERT INTO jeton_api (nom, empreinte, utilisateur_id) VALUES ($1, $2, $3) RETURNING id', [nom, empreinte(jeton), utilisateurId])
+    'INSERT INTO api_token (name, token_hash, app_user_id) VALUES ($1, $2, $3) RETURNING id', [name, token_hash(jeton), utilisateurId])
   return { id: j!.id, jeton }
 }
 
-function lireCookie(request: FastifyRequest, nom: string) {
+function lireCookie(request: FastifyRequest, name: string) {
   for (const part of (request.headers.cookie ?? '').split(';')) {
     const [cle, ...valeur] = part.trim().split('=')
-    if (cle === nom) {
+    if (cle === name) {
       return decodeURIComponent(valeur.join('='))
     }
   }
@@ -68,13 +68,13 @@ const PUBLIQUES = ['/api/health', '/api/auth/session', '/api/auth/connexion', '/
 /** Every /api route requires a session or an API token (the frontend's files are open: the login page is one of them). */
 export function proteger(app: FastifyInstance, db: Pool, { origin }: AuthOptions) {
   app.addHook('onRequest', async (request, reply) => {
-    const chemin = request.url.split('?')[0]!
-    if (!chemin.startsWith('/api/')) {
+    const path = request.url.split('?')[0]!
+    if (!path.startsWith('/api/')) {
       return
     }
-    const utilisateur = await identifier(db, request)
-    if (utilisateur) {
-      request.utilisateur = utilisateur
+    const app_user = await identifier(db, request)
+    if (app_user) {
+      request.app_user = app_user
       // A change made with the cookie comes from the application itself (SameSite=Strict, and its origin checked)
       const viaCookie = !request.headers.authorization
       if (viaCookie && !['GET', 'HEAD'].includes(request.method) && request.headers.origin && request.headers.origin !== origin) {
@@ -82,7 +82,7 @@ export function proteger(app: FastifyInstance, db: Pool, { origin }: AuthOptions
       }
       return
     }
-    if (!PUBLIQUES.some((p) => chemin === p || chemin.startsWith(`${p}/`))) {
+    if (!PUBLIQUES.some((p) => path === p || path.startsWith(`${p}/`))) {
       return reply.code(401).send({ message: 'Connexion requise' })
     }
   })
@@ -92,8 +92,8 @@ async function identifier(db: Pool, request: FastifyRequest): Promise<Utilisateu
   const bearer = /^Bearer\s+(\S+)$/i.exec(request.headers.authorization ?? '')?.[1]
   if (bearer) {
     const { rows: [u] } = await db.query<Utilisateur>(
-      `UPDATE jeton_api j SET utilise_le = now() FROM utilisateur u
-       WHERE j.empreinte = $1 AND j.revoque_le IS NULL AND u.id = j.utilisateur_id RETURNING u.id, u.email, u.nom`, [empreinte(bearer)])
+      `UPDATE api_token j SET used_at = now() FROM app_user u
+       WHERE j.token_hash = $1 AND j.revoked_at IS NULL AND u.id = j.app_user_id RETURNING u.id, u.email, u.name`, [token_hash(bearer)])
     return u ?? null
   }
   const cookie = lireCookie(request, COOKIE)
@@ -102,9 +102,9 @@ async function identifier(db: Pool, request: FastifyRequest): Promise<Utilisateu
   }
   // 30 days from the last use
   const { rows: [u] } = await db.query<Utilisateur>(
-    `UPDATE session s SET expire_le = now() + $2 * interval '1 day' FROM utilisateur u
-     WHERE s.empreinte = $1 AND s.expire_le > now() AND u.id = s.utilisateur_id RETURNING u.id, u.email, u.nom`,
-    [empreinte(cookie), DUREE_SESSION_JOURS])
+    `UPDATE session s SET expires_at = now() + $2 * interval '1 day' FROM app_user u
+     WHERE s.token_hash = $1 AND s.expires_at > now() AND u.id = s.app_user_id RETURNING u.id, u.email, u.name`,
+    [token_hash(cookie), DUREE_SESSION_JOURS])
   return u ?? null
 }
 
@@ -140,16 +140,16 @@ export const authRoutes: FastifyPluginAsync<{ db: Pool } & AuthOptions> = async 
   async function ouvrirSession(reply: FastifyReply, utilisateurId: number) {
     const valeur = secret()
     await db.query(
-      `INSERT INTO session (empreinte, utilisateur_id, expire_le) VALUES ($1, $2, now() + $3 * interval '1 day')`,
-      [empreinte(valeur), utilisateurId, DUREE_SESSION_JOURS])
+      `INSERT INTO session (token_hash, app_user_id, expires_at) VALUES ($1, $2, now() + $3 * interval '1 day')`,
+      [token_hash(valeur), utilisateurId, DUREE_SESSION_JOURS])
     reply.header('set-cookie', `${COOKIE}=${valeur}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${DUREE_SESSION_JOURS * 86400}${securise ? '; Secure' : ''}`)
   }
 
   const connecte = (request: FastifyRequest) => {
-    if (!request.utilisateur) {
+    if (!request.app_user) {
       throw Object.assign(new Error('Connexion requise'), { statusCode: 401 })
     }
-    return request.utilisateur
+    return request.app_user
   }
 
   /** The account a link registers a passkey for (valid, not used yet). */
@@ -157,13 +157,13 @@ export const authRoutes: FastifyPluginAsync<{ db: Pool } & AuthOptions> = async 
     if (typeof jeton !== 'string' || !jeton) {
       return null
     }
-    const { rows: [l] } = await db.query<{ utilisateur_id: number }>(
-      'SELECT utilisateur_id FROM lien_enregistrement WHERE empreinte = $1 AND utilise_le IS NULL AND expire_le > now()',
-      [empreinte(jeton)])
+    const { rows: [l] } = await db.query<{ app_user_id: number }>(
+      'SELECT app_user_id FROM registration_link WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()',
+      [token_hash(jeton)])
     if (!l) {
       throw new InputError('Lien invalide, déjà utilisé ou expiré : en demander un nouveau')
     }
-    return l.utilisateur_id
+    return l.app_user_id
   }
 
   const erreur = (reply: FastifyReply, error: unknown) =>
@@ -173,7 +173,7 @@ export const authRoutes: FastifyPluginAsync<{ db: Pool } & AuthOptions> = async 
 
   // Who is connected (401: nobody)
   app.get('/auth/session', async (request, reply) =>
-    (request.utilisateur ? { utilisateur: request.utilisateur } : reply.code(401).send({ message: 'Connexion requise' })))
+    (request.app_user ? { app_user: request.app_user } : reply.code(401).send({ message: 'Connexion requise' })))
 
   // ---------------------------------------------------------------- connecting
 
@@ -188,20 +188,20 @@ export const authRoutes: FastifyPluginAsync<{ db: Pool } & AuthOptions> = async 
       const raw = body(request)
       const defi = reprendre(raw.id)
       const reponse = raw.reponse as Parameters<typeof verifyAuthenticationResponse>[0]['response']
-      const { rows: [p] } = await db.query<{ id: string, utilisateur_id: number, cle_publique: Buffer, compteur: string, transports: string[] | null }>(
-        'SELECT id, utilisateur_id, cle_publique, compteur::text, transports FROM passkey WHERE id = $1', [reponse?.id])
+      const { rows: [p] } = await db.query<{ id: string, app_user_id: number, public_key: Buffer, sign_count: string, transports: string[] | null }>(
+        'SELECT id, app_user_id, public_key, sign_count::text, transports FROM passkey WHERE id = $1', [reponse?.id])
       if (!p) {
         throw new InputError('Passkey inconnue : elle a peut-être été supprimée')
       }
       const { verified, authenticationInfo } = await verifyAuthenticationResponse({
         response: reponse, expectedChallenge: defi.challenge, expectedOrigin: origin, expectedRPID: rpID,
-        credential: { id: p.id, publicKey: new Uint8Array(p.cle_publique), counter: Number(p.compteur), transports: (p.transports ?? undefined) as never },
+        credential: { id: p.id, publicKey: new Uint8Array(p.public_key), counter: Number(p.sign_count), transports: (p.transports ?? undefined) as never },
       })
       if (!verified) {
         throw new InputError('Passkey refusée')
       }
-      await db.query('UPDATE passkey SET compteur = $2, utilisee_le = now() WHERE id = $1', [p.id, authenticationInfo.newCounter])
-      await ouvrirSession(reply, p.utilisateur_id)
+      await db.query('UPDATE passkey SET sign_count = $2, used_at = now() WHERE id = $1', [p.id, authenticationInfo.newCounter])
+      await ouvrirSession(reply, p.app_user_id)
       return { ok: true }
     } catch (error) {
       return erreur(reply, error)
@@ -211,7 +211,7 @@ export const authRoutes: FastifyPluginAsync<{ db: Pool } & AuthOptions> = async 
   app.post('/auth/deconnexion', async (request, reply) => {
     const cookie = lireCookie(request, COOKIE)
     if (cookie) {
-      await db.query('DELETE FROM session WHERE empreinte = $1', [empreinte(cookie)])
+      await db.query('DELETE FROM session WHERE token_hash = $1', [token_hash(cookie)])
     }
     return reply.header('set-cookie', `${COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${securise ? '; Secure' : ''}`).code(204).send()
   })
@@ -224,17 +224,17 @@ export const authRoutes: FastifyPluginAsync<{ db: Pool } & AuthOptions> = async 
       const raw = body(request)
       const lien = typeof raw.jeton === 'string' && raw.jeton ? raw.jeton : null
       const utilisateurId = lien ? await compteDuLien(lien) : connecte(request).id
-      const { rows: [u] } = await db.query<Utilisateur>('SELECT id, email, nom FROM utilisateur WHERE id = $1', [utilisateurId])
+      const { rows: [u] } = await db.query<Utilisateur>('SELECT id, email, name FROM app_user WHERE id = $1', [utilisateurId])
       const { rows: existantes } = await db.query<{ id: string, transports: string[] | null }>(
-        'SELECT id, transports FROM passkey WHERE utilisateur_id = $1', [utilisateurId])
+        'SELECT id, transports FROM passkey WHERE app_user_id = $1', [utilisateurId])
       const options = await generateRegistrationOptions({
-        rpName: 'Colibri', rpID, userName: u!.email, userDisplayName: u!.nom,
+        rpName: 'Colibri', rpID, userName: u!.email, userDisplayName: u!.name,
         userID: new TextEncoder().encode(`colibri-${u!.id}`),
         attestationType: 'none',
         excludeCredentials: existantes.map((e) => ({ id: e.id, transports: e.transports ?? undefined })),
         authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
       })
-      return { id: garder({ challenge: options.challenge, utilisateurId: u!.id, lien }), options, utilisateur: u }
+      return { id: garder({ challenge: options.challenge, utilisateurId: u!.id, lien }), options, app_user: u }
     } catch (error) {
       return erreur(reply, error)
     }
@@ -244,7 +244,7 @@ export const authRoutes: FastifyPluginAsync<{ db: Pool } & AuthOptions> = async 
     try {
       const raw = body(request)
       const defi = reprendre(raw.id)
-      const appareil = requiredText(raw.appareil, 'Nom de l\'appareil')
+      const device = requiredText(raw.device, 'Nom de l\'appareil')
       const { verified, registrationInfo } = await verifyRegistrationResponse({
         response: raw.reponse as Parameters<typeof verifyRegistrationResponse>[0]['response'],
         expectedChallenge: defi.challenge, expectedOrigin: origin, expectedRPID: rpID,
@@ -254,11 +254,11 @@ export const authRoutes: FastifyPluginAsync<{ db: Pool } & AuthOptions> = async 
       }
       const c = registrationInfo.credential
       await db.query(
-        `INSERT INTO passkey (id, utilisateur_id, cle_publique, compteur, transports, appareil) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [c.id, defi.utilisateurId, Buffer.from(c.publicKey), c.counter, c.transports ?? null, appareil])
+        `INSERT INTO passkey (id, app_user_id, public_key, sign_count, transports, device) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [c.id, defi.utilisateurId, Buffer.from(c.publicKey), c.counter, c.transports ?? null, device])
       if (defi.lien) {
         // The link is used: it opens a session on this device
-        await db.query('UPDATE lien_enregistrement SET utilise_le = now() WHERE empreinte = $1', [empreinte(defi.lien)])
+        await db.query('UPDATE registration_link SET used_at = now() WHERE token_hash = $1', [token_hash(defi.lien)])
         await ouvrirSession(reply, defi.utilisateurId!)
       }
       return { ok: true }
@@ -272,7 +272,7 @@ export const authRoutes: FastifyPluginAsync<{ db: Pool } & AuthOptions> = async 
   app.get('/auth/passkeys', async (request, reply) => {
     try {
       const { rows } = await db.query(
-        `SELECT id, appareil, cree_le::text, utilisee_le::text FROM passkey WHERE utilisateur_id = $1 ORDER BY cree_le`,
+        `SELECT id, device, created_at::text, used_at::text FROM passkey WHERE app_user_id = $1 ORDER BY created_at`,
         [connecte(request).id])
       return rows
     } catch (error) {
@@ -284,11 +284,11 @@ export const authRoutes: FastifyPluginAsync<{ db: Pool } & AuthOptions> = async 
   app.delete('/auth/passkeys/:id', async (request, reply) => {
     try {
       const u = connecte(request)
-      const { rows: [n] } = await db.query<{ n: number }>('SELECT count(*)::int AS n FROM passkey WHERE utilisateur_id = $1', [u.id])
+      const { rows: [n] } = await db.query<{ n: number }>('SELECT count(*)::int AS n FROM passkey WHERE app_user_id = $1', [u.id])
       if (n!.n <= 1) {
         throw new InputError('C\'est votre dernière passkey : en ajouter une autre avant de la supprimer')
       }
-      const { rowCount } = await db.query('DELETE FROM passkey WHERE id = $1 AND utilisateur_id = $2',
+      const { rowCount } = await db.query('DELETE FROM passkey WHERE id = $1 AND app_user_id = $2',
         [(request.params as { id: string }).id, u.id])
       return rowCount ? reply.code(204).send() : reply.code(404).send({ message: 'Passkey introuvable' })
     } catch (error) {
@@ -308,7 +308,7 @@ export const authRoutes: FastifyPluginAsync<{ db: Pool } & AuthOptions> = async 
   app.get('/auth/jetons', async (request, reply) => {
     try {
       const { rows } = await db.query(
-        `SELECT id, nom, cree_le::text, utilise_le::text, revoque_le::text FROM jeton_api WHERE utilisateur_id = $1 ORDER BY cree_le DESC`,
+        `SELECT id, name, created_at::text, used_at::text, revoked_at::text FROM api_token WHERE app_user_id = $1 ORDER BY created_at DESC`,
         [connecte(request).id])
       return rows
     } catch (error) {
@@ -318,7 +318,7 @@ export const authRoutes: FastifyPluginAsync<{ db: Pool } & AuthOptions> = async 
 
   app.post('/auth/jetons', async (request, reply) => {
     try {
-      return reply.code(201).send(await creerJeton(db, connecte(request).id, requiredText(body(request).nom, 'Nom du jeton')))
+      return reply.code(201).send(await creerJeton(db, connecte(request).id, requiredText(body(request).name, 'Nom du jeton')))
     } catch (error) {
       return erreur(reply, error)
     }
@@ -326,7 +326,7 @@ export const authRoutes: FastifyPluginAsync<{ db: Pool } & AuthOptions> = async 
 
   app.delete('/auth/jetons/:id', async (request, reply) => {
     try {
-      const { rowCount } = await db.query('UPDATE jeton_api SET revoque_le = now() WHERE id = $1 AND utilisateur_id = $2 AND revoque_le IS NULL',
+      const { rowCount } = await db.query('UPDATE api_token SET revoked_at = now() WHERE id = $1 AND app_user_id = $2 AND revoked_at IS NULL',
         [idParam(request), connecte(request).id])
       return rowCount ? reply.code(204).send() : reply.code(404).send({ message: 'Jeton introuvable' })
     } catch (error) {

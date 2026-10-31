@@ -7,21 +7,21 @@ import { dateFr } from '../format'
 // Exercise picker, beside the page title: one click per calendar year, or « Autre période » for any two dates (both
 // included) in a small panel.
 
-const { debut, fin, choisir, annee } = useExercice()
+const { start, end, choisir, year } = useExercice()
 
-const courante = new Date().getFullYear()
-const annees = computed(() => [courante - 3, courante - 2, courante - 1, courante])
-const estAnnee = (a: number) => debut.value === `${a}-01-01` && fin.value === `${a}-12-31`
+const current = new Date().getFullYear()
+const annees = computed(() => [current - 3, current - 2, current - 1, current])
+const estAnnee = (a: number) => start.value === `${a}-01-01` && end.value === `${a}-12-31`
 const autrePeriode = computed(() => !annees.value.some(estAnnee))
 
 const ouvert = ref(false)
-const saisieDebut = ref(debut.value)
-const saisieFin = ref(fin.value)
+const saisieDebut = ref(start.value)
+const saisieFin = ref(end.value)
 const racine = ref<HTMLElement | null>(null)
 
 function basculer() {
-  saisieDebut.value = debut.value
-  saisieFin.value = fin.value
+  saisieDebut.value = start.value
+  saisieFin.value = end.value
   ouvert.value = !ouvert.value
 }
 
@@ -60,9 +60,9 @@ onBeforeUnmount(() => ecouter(false))
 
 <template>
   <div ref="racine" class="choix-exercice">
-    <button v-for="a in annees" :key="a" type="button" :class="{ actif: estAnnee(a) }" @click="annee(a)">{{ a }}</button>
+    <button v-for="a in annees" :key="a" type="button" :class="{ actif: estAnnee(a) }" @click="year(a)">{{ a }}</button>
     <button type="button" :class="{ actif: autrePeriode }" :aria-expanded="ouvert" @click="basculer">
-      {{ autrePeriode ? `${dateFr(debut)} → ${dateFr(fin)}` : 'Autre période…' }}
+      {{ autrePeriode ? `${dateFr(start)} → ${dateFr(end)}` : 'Autre période…' }}
     </button>
 
     <form v-if="ouvert" class="panneau" @submit.prevent="appliquer">

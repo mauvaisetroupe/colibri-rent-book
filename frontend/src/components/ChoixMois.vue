@@ -16,12 +16,12 @@ const ceMois = new Date().toISOString().slice(0, 7)
 // Empty value (nothing chosen yet): the current month is shown, or « — » when the month is optional
 const vide = computed(() => !props.modelValue && props.facultatif)
 const valeur = computed(() => props.modelValue || ceMois)
-const annee = computed(() => Number(valeur.value.slice(0, 4)))
-const mois = computed(() => Number(valeur.value.slice(5, 7)))
+const year = computed(() => Number(valeur.value.slice(0, 4)))
+const month = computed(() => Number(valeur.value.slice(5, 7)))
 
 const ouvert = ref(false)
 // Year shown in the calendar, browsed without changing the value
-const anneeAffichee = ref(annee.value)
+const anneeAffichee = ref(year.value)
 const racine = ref<HTMLElement | null>(null)
 
 const cle = (a: number, m: number) => `${a}-${String(m).padStart(2, '0')}`
@@ -37,12 +37,12 @@ function effacer() {
 }
 
 function decaler(n: number) {
-  const index = annee.value * 12 + mois.value - 1 + n
+  const index = year.value * 12 + month.value - 1 + n
   choisir(Math.floor(index / 12), (index % 12) + 1)
 }
 
 function basculer() {
-  anneeAffichee.value = annee.value
+  anneeAffichee.value = year.value
   ouvert.value = !ouvert.value
 }
 
@@ -76,7 +76,7 @@ onBeforeUnmount(() => {
   <span ref="racine" class="choix-mois">
     <button v-if="!vide" type="button" title="Mois précédent" aria-label="Mois précédent" @click="decaler(-1)">‹</button>
     <button type="button" class="valeur" :aria-expanded="ouvert" aria-haspopup="dialog" @click="basculer">
-      {{ vide ? '—' : `${MOIS[mois - 1]} ${annee}` }}
+      {{ vide ? '—' : `${MOIS[month - 1]} ${year}` }}
       <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
         <path fill="currentColor" d="M4.5 0a.5.5 0 0 1 .5.5V1h6V.5a.5.5 0 0 1 1 0V1h1.5A1.5 1.5 0 0 1 15 2.5v11a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 13.5v-11A1.5 1.5 0 0 1 2.5 1H4V.5a.5.5 0 0 1 .5-.5ZM2 5v8.5a.5.5 0 0 0 .5.5h11a.5.5 0 0 0 .5-.5V5H2Z" />
       </svg>
@@ -91,13 +91,13 @@ onBeforeUnmount(() => {
       </div>
       <div class="grille-mois">
         <button
-          v-for="(nom, i) in MOIS_COURTS"
+          v-for="(name, i) in MOIS_COURTS"
           :key="i"
           type="button"
           :class="{ choisi: !vide && cle(anneeAffichee, i + 1) === valeur, courant: cle(anneeAffichee, i + 1) === ceMois }"
           :aria-label="`${MOIS[i]} ${anneeAffichee}`"
           @click="choisir(anneeAffichee, i + 1)"
-        >{{ nom }}</button>
+        >{{ name }}</button>
       </div>
       <button v-if="facultatif" type="button" class="aucun" @click="effacer">Aucun mois</button>
     </div>

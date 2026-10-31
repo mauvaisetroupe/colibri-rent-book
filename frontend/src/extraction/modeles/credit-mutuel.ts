@@ -43,20 +43,20 @@ export default class CreditMutuelExtractor extends BankStatementExtractor {
   }
 
   readMovement(match: RegExpMatchArray, { row }: MovementContext) {
-    const montant = row.pieces.at(-1)!
+    const amount = row.pieces.at(-1)!
     return {
       date: this.frenchDate(match[1]),
       valueDate: this.frenchDate(match[2]),
       label: match[3]!,
-      amount: this.amount(montant.text),
-      side: this.column(montant, COLONNES),
+      amount: this.amount(amount.text),
+      side: this.column(amount, COLONNES),
     }
   }
 
   // Ni une opération ni la colonne du libellé : haut ou bas de page
   ignoreRow(row: Row) {
-    const colonne = this.colonneLibelle(row.page)
-    return !this.findMovement(row) && !(colonne !== null && Math.abs(row.pieces[0]!.x - colonne) <= 4)
+    const column = this.colonneLibelle(row.page)
+    return !this.findMovement(row) && !(column !== null && Math.abs(row.pieces[0]!.x - column) <= 4)
   }
 
   // « Total des mouvements   4.961,84   590,00 », chaque montant sous sa colonne
@@ -67,8 +67,8 @@ export default class CreditMutuelExtractor extends BankStatementExtractor {
 
   // Abscisse des libellés d'une page : 13 points à gauche du titre « Opération »
   private colonneLibelle(page: number): number | null {
-    const titre = this.doc.rows.filter((r) => r.page === page).flatMap((r) => r.pieces).find((p) => p.text === 'Opération')
-    return titre ? titre.x - 13 : null
+    const title = this.doc.rows.filter((r) => r.page === page).flatMap((r) => r.pieces).find((p) => p.text === 'Opération')
+    return title ? title.x - 13 : null
   }
 
   // « SOLDE DEBITEUR » : solde négatif

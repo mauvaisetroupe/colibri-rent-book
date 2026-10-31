@@ -19,15 +19,15 @@ export function readLines(value: unknown): InvoiceLine[] {
     const line = raw as Record<string, unknown>
     return {
       // Unknown categories and allocations are reported by checkInvoice() (categorie_invalide, affectation_invalide)
-      categorie: text(line.categorie) as InvoiceLine['categorie'],
-      libelle: text(line.libelle),
-      debut: text(line.debut),
-      fin: text(line.fin),
+      category: text(line.category) as InvoiceLine['category'],
+      label: text(line.label),
+      start: text(line.start),
+      end: text(line.end),
       kwh: optional(line.kwh),
-      montant_ht: optional(line.montant_ht),
-      taux_tva: optional(line.taux_tva),
-      montant_ttc: text(line.montant_ttc),
-      affectation: text(line.affectation) as InvoiceLine['affectation'],
+      amount_excl_tax: optional(line.amount_excl_tax),
+      vat_rate: optional(line.vat_rate),
+      amount_incl_tax: text(line.amount_incl_tax),
+      allocation: text(line.allocation) as InvoiceLine['allocation'],
       note: optional(line.note),
     }
   })

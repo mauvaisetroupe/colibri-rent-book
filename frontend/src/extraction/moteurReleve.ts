@@ -15,11 +15,11 @@ export type ClasseExtracteurReleve = new (doc: StatementDocument) => BankStateme
 
 /** A movement in the format of the API: amount signed (credit positive), dates ISO. */
 export type MouvementReleve = {
-  date_operation: string
-  date_valeur: string | null
-  libelle: string
+  transaction_date: string
+  value_date: string | null
+  label: string
   detail: string | null
-  montant: string
+  amount: string
 }
 
 export type ControleReleve = {
@@ -34,26 +34,26 @@ export type ControleReleve = {
 
 export type ExtractionReleve = {
   document: StatementDocument
-  compte: Champ<string>
+  account: Champ<string>
   date: Champ<string>
   soldePrecedent: Champ<string>
   nouveauSolde: Champ<string>
   totaux: Champ<Totals>
-  mouvements: Champ<MouvementReleve[]>
+  transactions: Champ<MouvementReleve[]>
   mouvementsEnErreur: LigneEnErreur[]
   // Positions (doc.rows) of the zone, of the rows that start a movement, of the detail rows
   zone: number[]
   trouvees: number[]
   details: number[]
-  controle: ControleReleve
+  checks: ControleReleve
 }
 
 /** The class of a statement extractor from its JavaScript (CommonJS, default export, only import 'bank-extractor'). */
 export function chargerReleve(code: string): ClasseExtracteurReleve {
   const module: { exports: Record<string, unknown> } = { exports: {} }
-  const require = (nom: string) => {
-    if (nom !== 'bank-extractor') {
-      throw new Error(`Import non disponible dans un extracteur de relevé : ${nom} (seulement 'bank-extractor')`)
+  const require = (name: string) => {
+    if (name !== 'bank-extractor') {
+      throw new Error(`Import non disponible dans un extracteur de relevé : ${name} (seulement 'bank-extractor')`)
     }
     return bankExtractor
   }
@@ -75,7 +75,7 @@ export function estReleve(code: string) {
   }
 }
 
-export const documentReleve = (pages: Morceau[][], reglages: Reglages): StatementDocument => regrouper(pages, reglages)
+export const documentReleve = (pages: Morceau[][], settings: Reglages): StatementDocument => regrouper(pages, settings)
 
 export function reconnaitReleve(classe: ClasseExtracteurReleve, document: StatementDocument): boolean {
   try {
@@ -112,19 +112,19 @@ export function extraireReleve(classe: ClasseExtracteurReleve, document: Stateme
   } catch (e) {
     const erreur = { valeur: null, erreur: `constructeur : ${(e as Error).message}` }
     return {
-      document, compte: erreur, date: erreur, soldePrecedent: erreur, nouveauSolde: erreur, totaux: erreur, mouvements: erreur,
+      document, account: erreur, date: erreur, soldePrecedent: erreur, nouveauSolde: erreur, totaux: erreur, transactions: erreur,
       mouvementsEnErreur, zone, trouvees, details,
-      controle: { credits: '0', debits: '0', calcule: null, equilibre: null, totaux: null },
+      checks: { credits: '0', debits: '0', calcule: null, equilibre: null, totaux: null },
     }
   }
-  const compte = champ(() => instance.account())
+  const account = champ(() => instance.account())
   const date = champ(() => instance.statementDate())
   const soldePrecedent = champ(() => decimal(instance.openingBalance(), 'openingBalance'))
   const nouveauSolde = champ(() => decimal(instance.closingBalance(), 'closingBalance'))
   const totaux = champ(() => instance.printedTotals())
 
-  const mouvements = champ(() => {
-    const lus: (MouvementReleve & { lignes: string[] })[] = []
+  const transactions = champ(() => {
+    const lus: (MouvementReleve & { lines: string[] })[] = []
     const rangees: Row[] = instance.movementsZone()
     let courant: (typeof lus)[number] | null = null
     rangees.forEach((row, index) => {
@@ -138,7 +138,7 @@ export function extraireReleve(classe: ClasseExtracteurReleve, document: Stateme
         if (!trouvee) {
           // The detail of the movement above (« LOYER 02/25 », the payer…)
           if (courant) {
-            courant.lignes.push(row.text.trim())
+            courant.lines.push(row.text.trim())
             details.push(row.index)
           }
           return
@@ -149,71 +149,71 @@ export function extraireReleve(classe: ClasseExtracteurReleve, document: Stateme
           ? Object.assign([row.text], { index: 0, input: row.text }) as unknown as RegExpMatchArray
           : trouvee
         const m = instance.readMovement(correspondance, contexte)
-        const montant = new Big(decimal(m.amount, 'amount')).abs()
+        const amount = new Big(decimal(m.amount, 'amount')).abs()
         if (m.side !== 'debit' && m.side !== 'credit') {
           throw new Error(`side : « ${String(m.side)} » (debit ou credit attendu)`)
         }
         courant = {
-          date_operation: m.date,
-          date_valeur: m.valueDate ?? null,
-          libelle: m.label.trim(),
+          transaction_date: m.date,
+          value_date: m.valueDate ?? null,
+          label: m.label.trim(),
           detail: null,
-          montant: (m.side === 'debit' ? montant.neg() : montant).toString(),
-          lignes: [],
+          amount: (m.side === 'debit' ? amount.neg() : amount).toString(),
+          lines: [],
         }
         lus.push(courant)
       } catch (e) {
         courant = null
-        mouvementsEnErreur.push({ position: row.index, texte: row.text, erreur: (e as Error).message })
+        mouvementsEnErreur.push({ position: row.index, text: row.text, erreur: (e as Error).message })
       }
     })
     if (mouvementsEnErreur.length) {
       throw new Error(`${mouvementsEnErreur.length} mouvement(s) trouvé(s) mais non lu(s)`)
     }
-    return lus.map(({ lignes, ...m }) => ({ ...m, detail: lignes.join('\n') || null }))
+    return lus.map(({ lines, ...m }) => ({ ...m, detail: lines.join('\n') || null }))
   })
 
-  const liste = mouvements.valeur ?? []
-  const credits = liste.filter((m) => new Big(m.montant).gt(0)).reduce((s, m) => s.plus(m.montant), new Big(0))
-  const debits = liste.filter((m) => new Big(m.montant).lt(0)).reduce((s, m) => s.plus(m.montant), new Big(0)).abs()
+  const liste = transactions.valeur ?? []
+  const credits = liste.filter((m) => new Big(m.amount).gt(0)).reduce((s, m) => s.plus(m.amount), new Big(0))
+  const debits = liste.filter((m) => new Big(m.amount).lt(0)).reduce((s, m) => s.plus(m.amount), new Big(0)).abs()
   const calcule = soldePrecedent.valeur === null ? null : new Big(soldePrecedent.valeur).plus(credits).minus(debits)
   const imprimes = totaux.valeur
-  const controle: ControleReleve = {
+  const checks: ControleReleve = {
     credits: credits.toString(),
     debits: debits.toString(),
     calcule: calcule?.toString() ?? null,
-    equilibre: calcule === null || nouveauSolde.valeur === null || mouvements.erreur ? null : calcule.eq(nouveauSolde.valeur),
-    totaux: !imprimes || mouvements.erreur ? null
+    equilibre: calcule === null || nouveauSolde.valeur === null || transactions.erreur ? null : calcule.eq(nouveauSolde.valeur),
+    totaux: !imprimes || transactions.erreur ? null
       : (imprimes.debit === null || debits.eq(imprimes.debit)) && (imprimes.credit === null || credits.eq(imprimes.credit)),
   }
   return {
-    document, compte, date, soldePrecedent, nouveauSolde, totaux, mouvements, mouvementsEnErreur, zone, trouvees, details,
-    controle,
+    document, account, date, soldePrecedent, nouveauSolde, totaux, transactions, mouvementsEnErreur, zone, trouvees, details,
+    checks,
   }
 }
 
 /** What is sent on import; null with the reasons when the statement is not read entirely or does not add up. */
 export function releveAImporter(extraction: ExtractionReleve, extracteurId: number) {
-  const champs = ['compte', 'date', 'soldePrecedent', 'nouveauSolde', 'totaux', 'mouvements'] as const
+  const champs = ['account', 'date', 'soldePrecedent', 'nouveauSolde', 'totaux', 'transactions'] as const
   const problemes = champs.filter((c) => extraction[c].erreur).map((c) => `${c} : ${extraction[c].erreur}`)
-  if (extraction.controle.equilibre === false) {
-    problemes.push(`solde précédent + crédits − débits = ${extraction.controle.calcule}, nouveau solde ${extraction.nouveauSolde.valeur}`)
+  if (extraction.checks.equilibre === false) {
+    problemes.push(`solde précédent + crédits − débits = ${extraction.checks.calcule}, nouveau solde ${extraction.nouveauSolde.valeur}`)
   }
-  if (extraction.controle.totaux === false) {
+  if (extraction.checks.totaux === false) {
     problemes.push('les mouvements lus ne retombent pas sur les totaux imprimés')
   }
-  if (problemes.length || !extraction.compte.valeur || !extraction.date.valeur) {
+  if (problemes.length || !extraction.account.valeur || !extraction.date.valeur) {
     return { releve: null, probleme: problemes.join(' ; ') || 'compte ou date introuvable' }
   }
   return {
     releve: {
-      extracteur_id: extracteurId,
-      compte: extraction.compte.valeur,
-      date_releve: extraction.date.valeur,
-      solde_precedent: extraction.soldePrecedent.valeur!,
-      nouveau_solde: extraction.nouveauSolde.valeur!,
+      extractor_id: extracteurId,
+      account: extraction.account.valeur,
+      statement_date: extraction.date.valeur,
+      previous_balance: extraction.soldePrecedent.valeur!,
+      new_balance: extraction.nouveauSolde.valeur!,
       totaux: extraction.totaux.valeur,
-      mouvements: extraction.mouvements.valeur ?? [],
+      transactions: extraction.transactions.valeur ?? [],
     },
     probleme: null,
   }

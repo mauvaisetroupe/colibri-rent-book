@@ -7,29 +7,29 @@ import type { Decompte, LigneDecompte, Regularisation } from './api'
 // low) or is owed (provisions too high), even a zero balance is to be sent. A stay with neither charges nor provisions
 // (a house whose charges the owner does not manage) has nothing to regularise.
 
-export type Manquante = { debut: string, fin: string, sejour: LigneDecompte }
+export type Manquante = { start: string, end: string, tenancy: LigneDecompte }
 
-export function regularisationsManquantes(decompte: Decompte, regularisations: Regularisation[], aujourdhui: string,
+export function regularisationsManquantes(charge_statement: Decompte, charge_adjustments: Regularisation[], aujourdhui: string,
   debutGestion: string | null = null): Manquante[] {
   // Not before the start of the management of the building (ADR 0023), nor for an exercise not finished
-  if (decompte.fin >= aujourdhui || (debutGestion !== null && decompte.fin < debutGestion)) {
+  if (charge_statement.end >= aujourdhui || (debutGestion !== null && charge_statement.end < debutGestion)) {
     return []
   }
-  return decompte.sejours
-    .filter((s) => s.jours > 0 && s.present_du && s.present_au
-      && !(new Big(s.total).eq(0) && new Big(s.provisions).eq(0))
-      && !regularisations.some((r) => r.sejour_id === s.sejour_id && !r.remplacee_par
-        && r.debut <= s.present_du! && r.fin >= s.present_au!))
-    .map((sejour) => ({ debut: decompte.debut, fin: decompte.fin, sejour }))
+  return charge_statement.tenancies
+    .filter((s) => s.days > 0 && s.present_from && s.present_to
+      && !(new Big(s.total).eq(0) && new Big(s.advances).eq(0))
+      && !charge_adjustments.some((r) => r.tenancy_id === s.tenancy_id && !r.replaced_by
+        && r.start <= s.present_from! && r.end >= s.present_to!))
+    .map((tenancy) => ({ start: charge_statement.start, end: charge_statement.end, tenancy }))
 }
 
 /**
  * The calendar years to look at: from the start of the management of the building (ADR 0023), else from the first one
  * a regularisation was made for, to the last finished one.
  */
-export function anneesARegulariser(regularisations: Regularisation[], aujourdhui: string, debutGestion: string | null = null): number[] {
+export function anneesARegulariser(charge_adjustments: Regularisation[], aujourdhui: string, debutGestion: string | null = null): number[] {
   const premiere = debutGestion !== null ? Number(debutGestion.slice(0, 4))
-    : regularisations.map((r) => Number(r.debut.slice(0, 4))).sort()[0]
-  const derniere = Number(aujourdhui.slice(0, 4)) - 1
-  return premiere === undefined ? [] : Array.from({ length: Math.max(0, derniere - premiere + 1) }, (_, i) => premiere + i)
+    : charge_adjustments.map((r) => Number(r.start.slice(0, 4))).sort()[0]
+  const latest = Number(aujourdhui.slice(0, 4)) - 1
+  return premiere === undefined ? [] : Array.from({ length: Math.max(0, latest - premiere + 1) }, (_, i) => premiere + i)
 }

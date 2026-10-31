@@ -10,7 +10,7 @@ export type Affectation = Allocation
 
 /** A piece of text drawn on a PDF page (pdf.js), in points from the top-left corner; y is the baseline. */
 export type Morceau = {
-  texte: string
+  text: string
   x: number
   y: number
   largeur: number
@@ -20,21 +20,21 @@ export type Morceau = {
 /** How the pieces of a page become lines of text (regroupement.ts). Always stored with the extractor. */
 export type Reglages = {
   // Pieces whose baselines differ by at most this many points are on the same line
-  toleranceHauteur: number
+  lineTolerance: number
   // A gap below this many points: the pieces are glued (a word split in two pieces)
-  collage: number
+  joinGap: number
   // A gap above this many points: a change of column, written as three spaces
-  colonne: number
+  columnGap: number
   // Bank statements (ADR 0018): pieces left of this abscissa are ignored (a code printed in the margin)
-  marge?: number
+  margin?: number
 }
 
 // Version of the contract (pdf.js, grouping, module 'extractor'), stored with each extractor: to be raised when a
 // change of the engine can change what an existing extractor reads. 2: extractors are classes (2026-10-17).
 export const MOTEUR = 2
 
-export const REGLAGES_PAR_DEFAUT: Reglages = { toleranceHauteur: 2, collage: 0.8, colonne: 15 }
-export const REGLAGES_RELEVE_PAR_DEFAUT: Reglages = { ...REGLAGES_PAR_DEFAUT, marge: 40 }
+export const REGLAGES_PAR_DEFAUT: Reglages = { lineTolerance: 2, joinGap: 0.8, columnGap: 15 }
+export const REGLAGES_RELEVE_PAR_DEFAUT: Reglages = { ...REGLAGES_PAR_DEFAUT, margin: 40 }
 
 export type Document = ExtractionDocument
 export type LigneLue = ExtractedLine

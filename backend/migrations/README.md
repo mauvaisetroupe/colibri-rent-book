@@ -45,3 +45,4 @@ après une mise à jour qui les change ; le fichier est rejouable.
 | `022_immeuble_debut_gestion.sql` | 0023 | Date de début de la gestion d'un immeuble dans l'application |
 | `023_facture_annexe.sql` | 0024 | Factures jointes en images, caviardées (`facture_annexe`, `facture.annexe_id`), annexes jointes à l'envoi, termes masqués |
 | `024_zones_scans.sql` | 0025 | Zones masquées sur les scans, tracées à la main : modèle du fournisseur, ajustées par facture ; pages scannées d'une annexe |
+| `025_english_names.sql` | — | Noms anglais de toute la base ([glossaire](../../docs/glossary.md)) : tables, colonnes, types et valeurs, contraintes, index, vues, fonctions, déclencheurs ; JSON stockés (réglages des extracteurs, versions locataire, instantanés des régularisations) ; tables jamais utilisées supprimées (compteurs, relevés de compteur, événements) |

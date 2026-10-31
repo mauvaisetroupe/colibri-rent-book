@@ -21,13 +21,13 @@ import { contains, distinctOptions, equals, optionsOf, stateKey, withDefaults, t
 // year, a filter under each column on the fields of the API, kept for the session.
 
 const { immeubleId: building, pret: ready } = useImmeuble()
-const message = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
+const message = ref<{ text: string, type: 'info' | 'erreur' } | null>(null)
 const busy = ref(false)
 const today = new Date().toISOString().slice(0, 10)
 
 const payments = ref<Paiement[]>([])
 const stays = ref<Sejour[]>([])
-const regularisations = ref<Regularisation[]>([])
+const charge_adjustments = ref<Regularisation[]>([])
 const instalments = ref<Echeance[]>([])
 
 async function load() {
@@ -35,12 +35,12 @@ async function load() {
     return
   }
   try {
-    ;[payments.value, stays.value, regularisations.value, instalments.value] = await Promise.all([
-      api.paiements(building.value, null), api.sejours(building.value), api.regularisations(building.value),
-      api.echeances(building.value),
+    ;[payments.value, stays.value, charge_adjustments.value, instalments.value] = await Promise.all([
+      api.payments(building.value, null), api.tenancies(building.value), api.charge_adjustments(building.value),
+      api.rent_schedules(building.value),
     ])
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 
@@ -52,10 +52,10 @@ watch(building, load)
 
 // ---------------------------------------------------------------- list
 
-const total = (p: Paiement) => new Big(p.loyer).plus(p.provision).plus(p.regularisation).toFixed(2)
+const total = (p: Paiement) => new Big(p.rent).plus(p.charge_advance).plus(p.charge_adjustment).toFixed(2)
 const exercise = (id: number | null) => {
-  const r = regularisations.value.find((x) => x.id === id)
-  return r ? exerciceCourt(r.debut, r.fin) : ''
+  const r = charge_adjustments.value.find((x) => x.id === id)
+  return r ? exerciceCourt(r.start, r.end) : ''
 }
 
 // Fields computed here, shown and filtered under their column. Whether the tenant still lives there: its stay has no
@@ -63,7 +63,7 @@ const exercise = (id: number | null) => {
 const STAY_STATUSES = { current: 'en cours', ended: 'terminé' }
 type StayStatus = keyof typeof STAY_STATUSES
 const stayStatus = (p: Paiement): StayStatus => {
-  const out = stays.value.find((s) => s.id === p.sejour_id)?.sortie
+  const out = stays.value.find((s) => s.id === p.tenancy_id)?.move_out
   return !out || out >= today ? 'current' : 'ended'
 }
 
@@ -71,18 +71,18 @@ const stayStatus = (p: Paiement): StayStatus => {
 const BANK_STATUSES = { reconciled: 'rapproché', not_reconciled: 'non rapproché' }
 type BankStatus = keyof typeof BANK_STATUSES
 const bankStatus = (p: Paiement): BankStatus | null =>
-  (estRetenue(p) ? null : p.mouvement_id ? 'reconciled' : 'not_reconciled')
+  (estRetenue(p) ? null : p.bank_transaction_id ? 'reconciled' : 'not_reconciled')
 
 // Latest first
 const rows = computed(() => [...payments.value]
-  .sort((x, y) => y.date_paiement.localeCompare(x.date_paiement) || y.id - x.id)
+  .sort((x, y) => y.payment_date.localeCompare(x.payment_date) || y.id - x.id)
   .map((p) => ({ ...p, amount: total(p), stay_status: stayStatus(p), bank_status: bankStatus(p) })))
 type Row = (typeof rows.value)[number]
 
 // No filter by default, the list in pages; dates as the API gives them (2026-03-17)
 const defaultFilters = (): Filters => ({
-  date_paiement: contains(), locataire: equals(), stay_status: equals(), mois: contains(), amount: contains(),
-  bank_status: equals(), loyer: contains(), provision: contains(), regularisation: contains(), mode: equals(),
+  payment_date: contains(), tenant: equals(), stay_status: equals(), month: contains(), amount: contains(),
+  bank_status: equals(), rent: contains(), charge_advance: contains(), charge_adjustment: contains(), method: equals(),
   note: contains(),
 })
 const filters = ref<Filters>(defaultFilters())
@@ -92,15 +92,15 @@ const shown = computed(() => table.value?.processedData ?? [])
 // Totals of the payments shown, every page
 const totals = computed(() => {
   const sum = (field: (p: Paiement) => string) => shown.value.reduce((t, p) => t.plus(field(p)), new Big(0)).toFixed(2)
-  return { amount: sum(total), rent: sum((p) => p.loyer), provision: sum((p) => p.provision),
-    regularisation: sum((p) => p.regularisation) }
+  return { amount: sum(total), rent: sum((p) => p.rent), charge_advance: sum((p) => p.charge_advance),
+    charge_adjustment: sum((p) => p.charge_adjustment) }
 })
 
 // ---------------------------------------------------------------- entry and editing
 
-const blank = (date = today, mode: Brouillon['mode'] = 'virement'): Brouillon => ({
-  id: null, date, sejour_id: null, mois: date.slice(0, 7), montant: '', loyer: '', provision: '',
-  versements: [], mode, note: '',
+const blank = (date = today, method: Brouillon['method'] = 'transfer'): Brouillon => ({
+  id: null, date, tenancy_id: null, month: date.slice(0, 7), amount: '', rent: '', charge_advance: '',
+  versements: [], method, note: '',
 })
 
 // Payment open in the modal form (new or edited), and the error the API gave for it
@@ -119,15 +119,15 @@ const router = useRouter()
 
 function edit(p: Paiement) {
   if (estRetenue(p)) {
-    router.push({ path: '/sejours', query: { depot: 'voir', sejour: p.sejour_id } })
+    router.push({ path: '/sejours', query: { depot: 'voir', tenancy: p.tenancy_id } })
     return
   }
   open({
-    id: p.id, date: p.date_paiement, sejour_id: p.sejour_id, mois: p.mois?.slice(0, 7) ?? '',
-    montant: nombreFr(total(p)), loyer: nombreFr(p.loyer), provision: nombreFr(p.provision),
-    versements: p.regularisation_id ? [{ regularisation_id: p.regularisation_id, montant: nombreFr(p.regularisation) }] : [],
-    mode: p.mode ?? '', note: p.note ?? '',
-  }, p.mouvement_id)
+    id: p.id, date: p.payment_date, tenancy_id: p.tenancy_id, month: p.month?.slice(0, 7) ?? '',
+    amount: nombreFr(total(p)), rent: nombreFr(p.rent), charge_advance: nombreFr(p.charge_advance),
+    versements: p.charge_adjustment_id ? [{ charge_adjustment_id: p.charge_adjustment_id, amount: nombreFr(p.charge_adjustment) }] : [],
+    method: p.method ?? '', note: p.note ?? '',
+  }, p.bank_transaction_id)
 }
 
 async function save(next: boolean) {
@@ -136,9 +136,9 @@ async function save(next: boolean) {
   try {
     await enregistrerBrouillon(b, paymentMovement.value)
     // « Ajouter et en saisir un autre » keeps the date and the mode: several payments of one bank statement
-    form.value = next ? blank(b.date, b.mode) : null
+    form.value = next ? blank(b.date, b.method) : null
     formError.value = null
-    message.value = { texte: 'Paiement enregistré', type: 'info' }
+    message.value = { text: 'Paiement enregistré', type: 'info' }
     await load()
   } catch (e) {
     formError.value = (e as Error).message
@@ -154,10 +154,10 @@ async function remove(id: number) {
   try {
     await api.supprimerPaiement(id)
     form.value = null
-    message.value = { texte: 'Paiement supprimé', type: 'info' }
+    message.value = { text: 'Paiement supprimé', type: 'info' }
     await load()
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 </script>
@@ -173,7 +173,7 @@ async function remove(id: number) {
     <RouterLink to="/controles">Contrôles</RouterLink>. Pour les années sans paiements saisis, voir les
     <RouterLink to="/provisions">totaux annuels (historique)</RouterLink>.
   </p>
-  <p v-if="message" class="message" :class="message.type">{{ message.texte }}</p>
+  <p v-if="message" class="message" :class="message.type">{{ message.text }}</p>
 
   <section class="filtres">
     <span class="discret">{{ shown.length }} paiement(s) affiché(s) sur {{ rows.length }}</span>
@@ -188,13 +188,13 @@ async function remove(id: number) {
     @state-restore="filters = withDefaults(defaultFilters(), $event.filters)"
   >
     <template #empty>Aucun paiement.</template>
-    <Column field="date_paiement" header="Date" sortable :show-filter-menu="false" footer="Total" style="width: 7.5rem">
+    <Column field="payment_date" header="Date" sortable :show-filter-menu="false" footer="Total" style="width: 7.5rem">
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
-    <Column field="locataire" header="Locataire" sortable :show-filter-menu="false">
-      <template #body="{ data }">{{ data.lot }} – {{ data.locataire }}</template>
+    <Column field="tenant" header="Locataire" sortable :show-filter-menu="false">
+      <template #body="{ data }">{{ data.unit }} – {{ data.tenant }}</template>
       <template #filter="{ filterModel, filterCallback }">
-        <ColumnFilter :model="filterModel" :apply="filterCallback" :options="distinctOptions(rows.map((p) => p.locataire))" />
+        <ColumnFilter :model="filterModel" :apply="filterCallback" :options="distinctOptions(rows.map((p) => p.tenant))" />
       </template>
     </Column>
     <Column field="stay_status" header="Séjour" :show-filter-menu="false" style="width: 7.5rem">
@@ -206,7 +206,7 @@ async function remove(id: number) {
       </template>
     </Column>
     <!-- The month of rent covered, its first day -->
-    <Column field="mois" header="Mois couvert" sortable :show-filter-menu="false" style="width: 7.5rem">
+    <Column field="month" header="Mois couvert" sortable :show-filter-menu="false" style="width: 7.5rem">
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
     <Column field="amount" header="Montant reçu" body-class="nombre" header-class="nombre" footer-class="nombre" :show-filter-menu="false" style="width: 7.5rem">
@@ -217,7 +217,7 @@ async function remove(id: number) {
     <Column field="bank_status" header="Banque" :show-filter-menu="false" style="width: 8rem">
       <template #body="{ data }">
         <span @click.stop>
-          <RouterLink v-if="data.bank_status === 'reconciled'" :to="{ name: 'banque', query: { mouvement: data.mouvement_id } }" class="ok"
+          <RouterLink v-if="data.bank_status === 'reconciled'" :to="{ name: 'bank', query: { bank_transaction: data.bank_transaction_id } }" class="ok"
             title="Vu sur un relevé de la banque : ouvrir le mouvement">✓</RouterLink>
           <span v-else-if="data.bank_status === 'not_reconciled'" class="ko" title="Pas encore vu sur un relevé de la banque">✗</span>
           <span v-else class="oi oi-lock discret" title="Retenue sur le dépôt de garantie : à modifier depuis le dépôt du séjour (Locataires)" />
@@ -227,27 +227,27 @@ async function remove(id: number) {
         <ColumnFilter :model="filterModel" :apply="filterCallback" :options="optionsOf(BANK_STATUSES)" />
       </template>
     </Column>
-    <Column field="loyer" header="Loyer" body-class="nombre" header-class="nombre" footer-class="nombre" :show-filter-menu="false" style="width: 7rem">
-      <template #body="{ data }">{{ data.mois ? data.loyer : '' }}</template>
+    <Column field="rent" header="Loyer" body-class="nombre" header-class="nombre" footer-class="nombre" :show-filter-menu="false" style="width: 7rem">
+      <template #body="{ data }">{{ data.month ? data.rent : '' }}</template>
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
       <template #footer>{{ totals.rent }}</template>
     </Column>
-    <Column field="provision" header="Provision" body-class="nombre" header-class="nombre" footer-class="nombre" :show-filter-menu="false" style="width: 7rem">
-      <template #body="{ data }">{{ data.mois ? data.provision : '' }}</template>
+    <Column field="charge_advance" header="Provision" body-class="nombre" header-class="nombre" footer-class="nombre" :show-filter-menu="false" style="width: 7rem">
+      <template #body="{ data }">{{ data.month ? data.charge_advance : '' }}</template>
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
-      <template #footer>{{ totals.provision }}</template>
+      <template #footer>{{ totals.charge_advance }}</template>
     </Column>
-    <Column field="regularisation" header="Régularisation" :show-filter-menu="false" style="width: 9rem">
+    <Column field="charge_adjustment" header="Régularisation" :show-filter-menu="false" style="width: 9rem">
       <template #body="{ data }">
-        <template v-if="data.regularisation_id">
-          {{ data.regularisation }} <span class="discret">({{ exercise(data.regularisation_id) }})</span>
+        <template v-if="data.charge_adjustment_id">
+          {{ data.charge_adjustment }} <span class="discret">({{ exercise(data.charge_adjustment_id) }})</span>
         </template>
       </template>
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
-      <template #footer>{{ totals.regularisation }}</template>
+      <template #footer>{{ totals.charge_adjustment }}</template>
     </Column>
-    <Column field="mode" header="Mode" :show-filter-menu="false" style="width: 9rem">
-      <template #body="{ data }">{{ data.mode ? NOMS_MODES[data.mode as keyof typeof NOMS_MODES] : '' }}</template>
+    <Column field="method" header="Mode" :show-filter-menu="false" style="width: 9rem">
+      <template #body="{ data }">{{ data.method ? NOMS_MODES[data.method as keyof typeof NOMS_MODES] : '' }}</template>
       <template #filter="{ filterModel, filterCallback }">
         <ColumnFilter :model="filterModel" :apply="filterCallback" :options="optionsOf(NOMS_MODES)" />
       </template>
@@ -262,11 +262,11 @@ async function remove(id: number) {
     v-if="form && building !== null"
     :key="form.id ?? 'nouveau'"
     v-model="form"
-    :immeuble="building"
-    :sejours="stays"
-    :regularisations="regularisations"
-    :echeances="instalments"
-    :paiements="payments"
+    :building="building"
+    :tenancies="stays"
+    :charge_adjustments="charge_adjustments"
+    :rent_schedules="instalments"
+    :payments="payments"
     :occupe="busy"
     :erreur="formError"
     @enregistrer="save"

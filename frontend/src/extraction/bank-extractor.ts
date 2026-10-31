@@ -142,11 +142,11 @@ export abstract class BankStatementExtractor {
   /** « 16 octobre 2026 », « 1er mars 2026 » → « 2026-10-16 », « 2026-03-01 ». */
   protected longFrenchDate(text: string | undefined): string {
     const m = (text ?? '').trim().toLowerCase().match(/^(\d{1,2})(?:er)? (\p{L}+) (\d{4})$/u)
-    const mois = m ? MOIS.indexOf(m[2]!) + 1 : 0
-    if (!m || !mois) {
+    const month = m ? MOIS.indexOf(m[2]!) + 1 : 0
+    if (!m || !month) {
       throw new Error(`longFrenchDate : « ${text ?? ''} » n'est pas une date « 16 octobre 2026 »`)
     }
-    return `${m[3]}-${String(mois).padStart(2, '0')}-${m[1]!.padStart(2, '0')}`
+    return `${m[3]}-${String(month).padStart(2, '0')}-${m[1]!.padStart(2, '0')}`
   }
 
   /** The rows whose text matches `regex`. */

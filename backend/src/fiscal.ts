@@ -10,170 +10,170 @@ import { debutGestion, loadCouverture, loadDecompte } from './statements.js'
 // Amounts are unrounded numeric text, rounded for display only.
 
 export type Depart = {
-  sejour_id: number
-  locataire: string
-  lot: string
-  entree: string
-  sortie: string
+  tenancy_id: number
+  tenant: string
+  unit: string
+  move_in: string
+  move_out: string
   // Start of the computation: the entry, or the start of the management of the building when later (ADR 0023: the
   // years before, managed by an agency, are not counted)
-  debut_calcul: string
+  calculation_start: string
   charges: string
-  provisions: string
+  advances: string
   versements: string
   // charges − provisions − regularisation payments received by the 31/12 of the year of departure; the deposit kept
   // (retention, depot_retenu) is not one of them: it is a receipt of its own (SPEC § 9)
-  non_rembourse: string
+  not_refunded: string
   // Deductible part (positive amount not repaid)
   deductible: string
-  depot_retenu: string
+  deposit_retained: string
   // Periods of the stay not covered by validated invoices: the charges are then understated
   incomplet: string[]
 }
 
 export type SyntheseFiscale = {
-  immeuble: number
-  annee: number
-  vacance: { energie: string, montant: string }[]
-  total_vacance: string
+  building: number
+  year: number
+  vacance: { energy: string, amount: string }[]
+  total_vacancy: string
   departs: Depart[]
-  total_non_rembourse: string
-  total_depots_retenus: string
+  total_not_refunded: string
+  total_deposits_retained: string
   // Line 225 of the 2044 (charges récupérables non récupérées)
   total_deductible: string
-  non_recuperables: { facture_id: number, fournisseur: string, numero: string, date_facture: string, libelle: string, montant: string }[]
-  abandons_en_cours: { regularisation_id: number, locataire: string, lot: string, debut: string, fin: string, reste: string }[]
+  non_recoverable: { invoice_id: number, supplier: string, number: string, invoice_date: string, label: string, amount: string }[]
+  pending_write_offs: { charge_adjustment_id: number, tenant: string, unit: string, start: string, end: string, remaining: string }[]
   // Payments of works made during the year (ADR 0015, 0019): the bank movements that paid them, the deductible ones for
   // the 2044, line 224; an invoice paid in several times appears once per payment, in the year of each
-  travaux: Travaux[]
-  total_travaux_deductibles: string
+  works_invoice: Travaux[]
+  total_deductible_works: string
   // Works invoiced by the end of the year and not paid in full: the rest is not in the year until paid
-  travaux_non_payes: Travaux[]
+  unpaid_works: Travaux[]
 }
 
 export type Travaux = {
-  id: number, fournisseur: string, description: string, nature: string, lot: string | null, date_facture: string,
+  id: number, supplier: string, description: string, nature: string, unit: string | null, invoice_date: string,
   // The payment (null for an invoice not paid in full: montant is then what remains), and the invoice's amount
-  date_paiement: string | null, montant: string, montant_ttc: string, deductible: boolean
+  payment_date: string | null, amount: string, total_incl_tax: string, deductible: boolean
 }
 
 const sum = (values: string[]) => values.reduce((s, v) => s.plus(v), new Big(0))
 
-export async function syntheseFiscale(db: Pool, immeuble: number, annee: number): Promise<SyntheseFiscale> {
-  const debut = `${annee}-01-01`
-  const fin = `${annee}-12-31`
+export async function syntheseFiscale(db: Pool, building: number, year: number): Promise<SyntheseFiscale> {
+  const start = `${year}-01-01`
+  const end = `${year}-12-31`
 
   // Vacancy: owner share of the recoverable charges of the year (SPEC R4)
-  const { synthese } = await loadDecompte(db, { immeuble, debut, fin })
-  const vacance = synthese.map((s) => ({ energie: s.energie, montant: s.proprietaire }))
+  const { summary } = await loadDecompte(db, { building, start, end })
+  const vacance = summary.map((s) => ({ energy: s.energy, amount: s.owner }))
 
   // Tenants who left during the year: their whole stay
   const { rows: sorties } = await db.query<{
-    sejour_id: number, locataire: string, lot: string, entree: string, sortie: string, depot_retenu: string | null,
+    tenancy_id: number, tenant: string, unit: string, move_in: string, move_out: string, deposit_retained: string | null,
   }>(
-    `SELECT s.id AS sejour_id, lo.nom AS locataire, lt.code AS lot, ${inclusiveBounds('s.periode', 'entree', 'sortie')},
+    `SELECT s.id AS tenancy_id, lo.name AS tenant, lt.code AS unit, ${inclusiveBounds('s.period', 'move_in', 'move_out')},
             -- Deposit kept for charges (ADR 0021): the retention toward regularisations
-            (SELECT sum(p.regularisation)::text FROM paiement p WHERE p.sejour_id = s.id AND p.mode = 'depot') AS depot_retenu
-     FROM sejour s JOIN lot lt ON lt.id = s.lot_id JOIN locataire lo ON lo.id = s.locataire_id
-     WHERE lt.immeuble_id = $1 AND NOT upper_inf(s.periode)
-       AND (upper(s.periode) - 1) BETWEEN $2::date AND $3::date
-     ORDER BY upper(s.periode)`,
-    [immeuble, debut, fin],
+            (SELECT sum(p.charge_adjustment)::text FROM payment p WHERE p.tenancy_id = s.id AND p.method = 'deposit') AS deposit_retained
+     FROM tenancy s JOIN unit lt ON lt.id = s.unit_id JOIN tenant lo ON lo.id = s.tenant_id
+     WHERE lt.building_id = $1 AND NOT upper_inf(s.period)
+       AND (upper(s.period) - 1) BETWEEN $2::date AND $3::date
+     ORDER BY upper(s.period)`,
+    [building, start, end],
   )
 
-  const gestion = await debutGestion(db, immeuble)
+  const gestion = await debutGestion(db, building)
   const departs: Depart[] = []
   for (const s of sorties) {
-    const debutCalcul = gestion && gestion > s.entree ? gestion : s.entree
-    const sejour = { immeuble, debut: debutCalcul, fin: s.sortie }
-    const [{ sejours }, couverture] = await Promise.all([loadDecompte(db, sejour), loadCouverture(db, sejour)])
-    const row = sejours.find((r) => r.sejour_id === s.sejour_id)
-    const { rows: [paye] } = await db.query<{ montant: string }>(
-      `SELECT coalesce(sum(p.regularisation), 0)::text AS montant FROM paiement p
-       JOIN regularisation r ON r.id = p.regularisation_id
-       WHERE p.sejour_id = $1 AND p.date_paiement <= $2::date AND p.mode IS DISTINCT FROM 'depot'
-         AND upper(r.exercice) > $3::date`,
-      [s.sejour_id, fin, debutCalcul],
+    const debutCalcul = gestion && gestion > s.move_in ? gestion : s.move_in
+    const tenancy = { building, start: debutCalcul, end: s.move_out }
+    const [{ tenancies }, couverture] = await Promise.all([loadDecompte(db, tenancy), loadCouverture(db, tenancy)])
+    const row = tenancies.find((r) => r.tenancy_id === s.tenancy_id)
+    const { rows: [paid] } = await db.query<{ amount: string }>(
+      `SELECT coalesce(sum(p.charge_adjustment), 0)::text AS amount FROM payment p
+       JOIN charge_adjustment r ON r.id = p.charge_adjustment_id
+       WHERE p.tenancy_id = $1 AND p.payment_date <= $2::date AND p.method IS DISTINCT FROM 'deposit'
+         AND upper(r.period) > $3::date`,
+      [s.tenancy_id, end, debutCalcul],
     )
     const charges = row?.total ?? '0'
-    const provisions = row?.provisions ?? '0'
-    const versements = paye?.montant ?? '0'
-    const nonRembourse = new Big(charges).minus(provisions).minus(versements)
+    const advances = row?.advances ?? '0'
+    const versements = paid?.amount ?? '0'
+    const nonRembourse = new Big(charges).minus(advances).minus(versements)
     departs.push({
       ...s,
-      debut_calcul: debutCalcul,
+      calculation_start: debutCalcul,
       charges,
-      provisions,
+      advances,
       versements,
-      non_rembourse: nonRembourse.toString(),
+      not_refunded: nonRembourse.toString(),
       deductible: (nonRembourse.gt(0) ? nonRembourse : new Big(0)).toString(),
-      depot_retenu: s.depot_retenu ?? '0',
+      deposit_retained: s.deposit_retained ?? '0',
       incomplet: couverture.energies.flatMap((e) =>
-        e.trous.map((t) => `${e.energie} du ${frenchDate(t.debut)} au ${frenchDate(t.fin)}`)),
+        e.trous.map((t) => `${e.energy} du ${frenchDate(t.start)} au ${frenchDate(t.end)}`)),
     })
   }
 
   // For information: lines borne by the owner (late payment penalties…), by invoice date; not the lines about
   // another property (ADR 0013)
   const { rows: nonRecuperables } = await db.query(
-    `SELECT f.id AS facture_id, fo.nom AS fournisseur, f.numero, f.date_facture::text, l.libelle, l.montant_ttc::text AS montant
-     FROM ligne_facture l JOIN facture f ON f.id = l.facture_id JOIN fournisseur fo ON fo.id = f.fournisseur_id
-     WHERE f.immeuble_id = $1 AND f.statut = 'validee' AND l.affectation = 'proprietaire'
-       AND f.date_facture BETWEEN $2::date AND $3::date
-     ORDER BY f.date_facture`,
-    [immeuble, debut, fin],
+    `SELECT f.id AS invoice_id, fo.name AS supplier, f.number, f.invoice_date::text, l.label, l.amount_incl_tax::text AS amount
+     FROM invoice_line l JOIN invoice f ON f.id = l.invoice_id JOIN supplier fo ON fo.id = f.supplier_id
+     WHERE f.building_id = $1 AND f.status = 'validated' AND l.allocation = 'owner'
+       AND f.invoice_date BETWEEN $2::date AND $3::date
+     ORDER BY f.invoice_date`,
+    [building, start, end],
   )
 
   // Charges given up to a tenant who is still there: not deductible before the departure (SPEC § 9)
   const { rows: abandons } = await db.query(
-    `SELECT r.id AS regularisation_id, lo.nom AS locataire, lt.code AS lot, ${inclusiveBounds('r.exercice')},
-            (r.solde - regularisation_verse(r.id))::text AS reste
-     FROM regularisation r JOIN sejour s ON s.id = r.sejour_id JOIN lot lt ON lt.id = s.lot_id
-     JOIN locataire lo ON lo.id = s.locataire_id
-     WHERE lt.immeuble_id = $1 AND r.decision = 'abandonnee'
-       AND (upper_inf(s.periode) OR upper(s.periode) - 1 > $2::date)`,
-    [immeuble, fin],
+    `SELECT r.id AS charge_adjustment_id, lo.name AS tenant, lt.code AS unit, ${inclusiveBounds('r.period')},
+            (r.balance - charge_adjustment_paid(r.id))::text AS remaining
+     FROM charge_adjustment r JOIN tenancy s ON s.id = r.tenancy_id JOIN unit lt ON lt.id = s.unit_id
+     JOIN tenant lo ON lo.id = s.tenant_id
+     WHERE lt.building_id = $1 AND r.decision = 'written_off'
+       AND (upper_inf(s.period) OR upper(s.period) - 1 > $2::date)`,
+    [building, end],
   )
 
-  const { rows: travaux } = await db.query<Travaux>(
-    `SELECT t.id, t.fournisseur, t.description, t.nature, lt.code AS lot, t.date_facture::text,
-            m.date_operation::text AS date_paiement, rt.montant::text, t.montant_ttc::text,
+  const { rows: works_invoice } = await db.query<Travaux>(
+    `SELECT t.id, t.supplier, t.description, t.nature, lt.code AS unit, t.invoice_date::text,
+            m.transaction_date::text AS payment_date, rt.amount::text, t.total_incl_tax::text,
             t.nature <> 'construction' AS deductible
-     FROM reglement_travaux rt JOIN travaux t ON t.id = rt.travaux_id JOIN mouvement m ON m.id = rt.mouvement_id
-     LEFT JOIN lot lt ON lt.id = t.lot_id
-     WHERE t.immeuble_id = $1 AND m.date_operation BETWEEN $2::date AND $3::date
-     ORDER BY m.date_operation, t.id, rt.id`,
-    [immeuble, debut, fin],
+     FROM works_invoice_payment rt JOIN works_invoice t ON t.id = rt.works_invoice_id JOIN bank_transaction m ON m.id = rt.bank_transaction_id
+     LEFT JOIN unit lt ON lt.id = t.unit_id
+     WHERE t.building_id = $1 AND m.transaction_date BETWEEN $2::date AND $3::date
+     ORDER BY m.transaction_date, t.id, rt.id`,
+    [building, start, end],
   )
   // Not paid in full at the end of the year: what remains then
   const { rows: nonPayes } = await db.query<Travaux>(
     `SELECT * FROM (
-       SELECT t.id, t.fournisseur, t.description, t.nature, lt.code AS lot, t.date_facture::text, NULL AS date_paiement,
-              (t.montant_ttc - (SELECT coalesce(sum(rt.montant), 0) FROM reglement_travaux rt
-                                JOIN mouvement m ON m.id = rt.mouvement_id
-                                WHERE rt.travaux_id = t.id AND m.date_operation <= $2::date))::text AS montant,
-              t.montant_ttc::text, t.nature <> 'construction' AS deductible
-       FROM travaux t LEFT JOIN lot lt ON lt.id = t.lot_id
-       WHERE t.immeuble_id = $1 AND t.date_facture <= $2::date) x
-     WHERE montant::numeric > 0 ORDER BY date_facture, id`,
-    [immeuble, fin],
+       SELECT t.id, t.supplier, t.description, t.nature, lt.code AS unit, t.invoice_date::text, NULL AS payment_date,
+              (t.total_incl_tax - (SELECT coalesce(sum(rt.amount), 0) FROM works_invoice_payment rt
+                                JOIN bank_transaction m ON m.id = rt.bank_transaction_id
+                                WHERE rt.works_invoice_id = t.id AND m.transaction_date <= $2::date))::text AS amount,
+              t.total_incl_tax::text, t.nature <> 'construction' AS deductible
+       FROM works_invoice t LEFT JOIN unit lt ON lt.id = t.unit_id
+       WHERE t.building_id = $1 AND t.invoice_date <= $2::date) x
+     WHERE amount::numeric > 0 ORDER BY invoice_date, id`,
+    [building, end],
   )
 
-  const totalVacance = sum(vacance.map((v) => v.montant))
+  const totalVacance = sum(vacance.map((v) => v.amount))
   const totalDeductibleDeparts = sum(departs.map((d) => d.deductible))
   return {
-    immeuble,
-    annee,
+    building,
+    year,
     vacance,
-    total_vacance: totalVacance.toString(),
+    total_vacancy: totalVacance.toString(),
     departs,
-    total_non_rembourse: totalDeductibleDeparts.toString(),
-    total_depots_retenus: sum(departs.map((d) => d.depot_retenu)).toString(),
+    total_not_refunded: totalDeductibleDeparts.toString(),
+    total_deposits_retained: sum(departs.map((d) => d.deposit_retained)).toString(),
     total_deductible: totalVacance.plus(totalDeductibleDeparts).toString(),
-    non_recuperables: nonRecuperables,
-    abandons_en_cours: abandons,
-    travaux,
-    total_travaux_deductibles: sum(travaux.filter((t) => t.deductible).map((t) => t.montant)).toString(),
-    travaux_non_payes: nonPayes,
+    non_recoverable: nonRecuperables,
+    pending_write_offs: abandons,
+    works_invoice,
+    total_deductible_works: sum(works_invoice.filter((t) => t.deductible).map((t) => t.amount)).toString(),
+    unpaid_works: nonPayes,
   }
 }

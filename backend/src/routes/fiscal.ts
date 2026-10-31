@@ -9,11 +9,11 @@ const fiscalRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
   app.get('/fiscal', async (request, reply) => {
     try {
       const q = query(request)
-      const annee = Number(q.annee)
-      if (!Number.isInteger(annee) || annee < 2000 || annee > 2100) {
+      const year = Number(q.year)
+      if (!Number.isInteger(year) || year < 2000 || year > 2100) {
         throw new InputError('Année invalide')
       }
-      return await syntheseFiscale(db, requiredId(q.immeuble, 'Immeuble'), annee)
+      return await syntheseFiscale(db, requiredId(q.building, 'Immeuble'), year)
     } catch (error) {
       return sendError(reply, error)
     }

@@ -12,502 +12,472 @@
 
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
-CREATE TYPE energie AS ENUM ('gaz', 'electricite', 'eau', 'ordures_menageres', 'autre');
-CREATE TYPE categorie_ligne AS ENUM ('consommation', 'abonnement', 'taxe', 'prestation', 'penalite', 'autre');
+CREATE TYPE energy AS ENUM ('gas', 'electricity', 'water', 'household_waste', 'other');
+CREATE TYPE line_category AS ENUM ('consumption', 'subscription', 'tax', 'service', 'penalty', 'other');
 -- remplacee : une facture validée n'est jamais modifiée, elle est remplacée (ADR 0017)
-CREATE TYPE statut_facture AS ENUM ('a_verifier', 'validee', 'remplacee');
+CREATE TYPE invoice_status AS ENUM ('draft', 'validated', 'replaced');
 -- ADR 0013 : récupérable (réparti), à la charge du propriétaire (pénalités, taxe foncière hors TEOM : synthèse fiscale),
 -- hors immeuble (concerne un autre bien : ni réparti, ni dans la synthèse fiscale de l'immeuble)
-CREATE TYPE affectation_ligne AS ENUM ('recuperable', 'proprietaire', 'hors_immeuble');
+CREATE TYPE line_allocation AS ENUM ('recoverable', 'owner', 'outside_building');
 -- Decision of the owner on a sent regularisation (ADR 0010); its state (draft, waiting, settled) is computed
-CREATE TYPE decision_regul AS ENUM ('abandonnee', 'irrecouvrable');
+CREATE TYPE adjustment_decision AS ENUM ('written_off', 'unrecoverable');
 
 -- ---------------------------------------------------------------- référentiel
-CREATE TABLE immeuble (
+CREATE TABLE building (
   id          serial PRIMARY KEY,
   code        text NOT NULL UNIQUE,              -- court et unique : 'IMM1', 'MAISON'…
-  nom         text NOT NULL,
-  adresse     text,
+  name         text NOT NULL,
+  address     text,
   -- ADR 0023 : début de la gestion dans l'application (avant : une agence, ou rien) ; facultatif
-  debut_gestion date
+  managed_from date
 );
 
-CREATE TABLE lot (
+CREATE TABLE unit (
   id          serial PRIMARY KEY,
-  immeuble_id int  NOT NULL REFERENCES immeuble(id),
+  building_id int  NOT NULL REFERENCES building(id),
   code        text NOT NULL,                     -- 'Lot 1'
-  designation text,
-  surface_m2  numeric(7,2),
-  tantiemes   int  NOT NULL CHECK (tantiemes > 0),
-  UNIQUE (immeuble_id, code)
+  label text,
+  area_m2  numeric(7,2),
+  charge_shares   int  NOT NULL CHECK (charge_shares > 0),
+  UNIQUE (building_id, code)
 );
 
-CREATE TABLE locataire (
+CREATE TABLE tenant (
   id          serial PRIMARY KEY,
-  nom         text NOT NULL UNIQUE,
+  name         text NOT NULL UNIQUE,
   email       text,
-  telephone   text,
+  phone   text,
   note        text
 );
 
 -- Un séjour = un locataire dans un lot sur une période (entrée → sortie incluses).
-CREATE TABLE sejour (
+CREATE TABLE tenancy (
   id           serial PRIMARY KEY,
-  lot_id       int  NOT NULL REFERENCES lot(id),
-  locataire_id int  NOT NULL REFERENCES locataire(id),
-  periode      daterange NOT NULL CHECK (NOT isempty(periode) AND lower(periode) IS NOT NULL),
+  unit_id       int  NOT NULL REFERENCES unit(id),
+  tenant_id int  NOT NULL REFERENCES tenant(id),
+  period      daterange NOT NULL CHECK (NOT isempty(period) AND lower(period) IS NOT NULL),
   note         text,
   -- dépôt de garantie prévu au bail (ADR 0008) ; versé, rendu : versement_depot ; conservé : paiements « depot » (ADR 0021)
-  depot_garantie        numeric(12,2),
+  security_deposit        numeric(12,2),
   -- deux séjours ne peuvent pas se chevaucher sur le même lot
-  EXCLUDE USING gist (lot_id WITH =, periode WITH &&)
+  EXCLUDE USING gist (unit_id WITH =, period WITH &&)
 );
 
 -- ---------------------------------------------------------------- factures
-CREATE TABLE fournisseur (
+CREATE TABLE supplier (
   id   serial PRIMARY KEY,
-  nom  text NOT NULL UNIQUE,                     -- 'EDF', 'ENGIE', 'SEAFF', 'DGFiP (taxe foncière)'
+  name  text NOT NULL UNIQUE,                     -- 'EDF', 'ENGIE', 'SEAFF', 'DGFiP (taxe foncière)'
   -- ADR 0014 : factures jamais jointes au justificatif (données fiscales, autres biens), « consultable sur demande »
-  confidentiel boolean NOT NULL DEFAULT false,
+  confidential boolean NOT NULL DEFAULT false,
   -- ADR 0025 : zones masquées sur ses scans, tracées à la main : [{ page, x0, y0, x1, y1 }] (fractions de la page)
-  zones_masquees jsonb NOT NULL DEFAULT '[]'
+  masked_zones jsonb NOT NULL DEFAULT '[]'
 );
 
 -- ADR 0013 : extracteurs de factures, code TypeScript écrit dans l'application et exécuté dans le navigateur ;
 -- jamais modifiés ni supprimés : corriger un extracteur, c'est créer la version suivante. ADR 0018 : extracteurs de
 -- relevés bancaires (type releve, sans énergie), même principe.
-CREATE TYPE type_extracteur AS ENUM ('facture', 'releve');
-CREATE TABLE extracteur (
+CREATE TYPE extractor_type AS ENUM ('invoice', 'bank_statement');
+CREATE TABLE extractor (
   id             serial PRIMARY KEY,
-  fournisseur_id int  NOT NULL REFERENCES fournisseur(id),
+  supplier_id int  NOT NULL REFERENCES supplier(id),
   version        int  NOT NULL CHECK (version > 0),
-  type           type_extracteur NOT NULL DEFAULT 'facture',
-  energie        energie,
-  reglages       jsonb NOT NULL,                  -- regroupement des morceaux en lignes, toujours écrit
+  type           extractor_type NOT NULL DEFAULT 'invoice',
+  energy        energy,
+  settings       jsonb NOT NULL,                  -- regroupement des morceaux en lignes, toujours écrit
   source         text NOT NULL,                   -- TypeScript, tel qu'édité
   code           text NOT NULL,                   -- JavaScript produit, celui qui s'exécute
-  moteur         int  NOT NULL,                   -- version du contrat (pdf.js, aides)
+  engine         int  NOT NULL,                   -- version du contrat (pdf.js, aides)
   note           text,
-  cree_le        timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (fournisseur_id, version),
-  CONSTRAINT extracteur_energie CHECK ((type = 'facture') = (energie IS NOT NULL))
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (supplier_id, version),
+  CONSTRAINT extractor_energy CHECK ((type = 'invoice') = (energy IS NOT NULL))
 );
 
-CREATE FUNCTION extracteur_fige() RETURNS trigger
+CREATE FUNCTION extractor_frozen() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
   RAISE EXCEPTION 'Un extracteur n''est jamais modifié ni supprimé : créer une nouvelle version (ADR 0013)';
 END $$;
-
-CREATE TRIGGER extracteur_fige BEFORE UPDATE OR DELETE ON extracteur
-  FOR EACH ROW EXECUTE FUNCTION extracteur_fige();
+CREATE TRIGGER extractor_frozen BEFORE UPDATE OR DELETE ON extractor
+  FOR EACH ROW EXECUTE FUNCTION extractor_frozen();
 
 -- ---------------------------------------------------------------- relevés bancaires (ADR 0018)
 -- Un relevé de la banque (fournisseur), lu par un extracteur ; ses mouvements : crédit positif, débit négatif, chacun
 -- avec une catégorie.
-CREATE TABLE releve_bancaire (
+CREATE TABLE bank_statement (
   id               serial PRIMARY KEY,
-  fournisseur_id   int  NOT NULL REFERENCES fournisseur(id),
-  compte           text NOT NULL,
-  date_releve      date NOT NULL,
-  solde_precedent  numeric(14,2) NOT NULL,
-  nouveau_solde    numeric(14,2) NOT NULL,
-  fichier_pdf      text,                            -- chemin dans le stockage : releves/<empreinte>.pdf
-  extracteur_id    int REFERENCES extracteur(id),
-  importe_le       timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (compte, date_releve)
+  supplier_id   int  NOT NULL REFERENCES supplier(id),
+  account           text NOT NULL,
+  statement_date      date NOT NULL,
+  previous_balance  numeric(14,2) NOT NULL,
+  new_balance    numeric(14,2) NOT NULL,
+  pdf_file      text,                            -- chemin dans le stockage : releves/<empreinte>.pdf
+  extractor_id    int REFERENCES extractor(id),
+  imported_at       timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (account, statement_date)
 );
 
-CREATE TABLE mouvement (
+CREATE TABLE bank_transaction (
   id              serial PRIMARY KEY,
-  releve_id       int  NOT NULL REFERENCES releve_bancaire(id) ON DELETE CASCADE,
-  ordre           int  NOT NULL,
-  date_operation  date NOT NULL,
-  date_valeur     date,
-  libelle         text NOT NULL,
+  bank_statement_id       int  NOT NULL REFERENCES bank_statement(id) ON DELETE CASCADE,
+  position           int  NOT NULL,
+  transaction_date  date NOT NULL,
+  value_date     date,
+  label         text NOT NULL,
   detail          text,
-  montant         numeric(12,2) NOT NULL CHECK (montant <> 0),
+  amount         numeric(12,2) NOT NULL CHECK (amount <> 0),
   -- Ce qu'est le mouvement : paiement d'un locataire, travaux et dépôt de garantie ont un détail
   -- (paiement.mouvement_id, reglement_travaux.mouvement_id, versement_depot.mouvement_id ; reglement_facture, facultatif) qui doit couvrir le montant ;
   -- « agence » : loyers reversés par une agence de gestion, sans détail (ADR 0018, 0019)
-  categorie       text CONSTRAINT mouvement_categorie_check CHECK (categorie IN ('locataire', 'travaux',
-    'depot_garantie', 'agence', 'emprunt', 'assurance', 'energie', 'eau', 'impots', 'frais_bancaires', 'copropriete',
-    'honoraires', 'associes', 'virement_interne', 'autre')),
+  category       text CONSTRAINT bank_transaction_category_check CHECK (category IN ('tenant', 'works',
+    'security_deposit', 'agency', 'loan', 'insurance', 'energy', 'water', 'taxes', 'bank_fees', 'co_ownership',
+    'fees', 'partners', 'internal_transfer', 'other')),
   note            text,
-  CONSTRAINT mouvement_autre_note CHECK (categorie IS DISTINCT FROM 'autre' OR note IS NOT NULL)
+  CONSTRAINT bank_transaction_other_has_note CHECK (category IS DISTINCT FROM 'other' OR note IS NOT NULL)
 );
-CREATE INDEX ON mouvement (date_operation);
+CREATE INDEX ON bank_transaction (transaction_date);
 
-CREATE TABLE facture (
+CREATE TABLE invoice (
   id             serial PRIMARY KEY,
-  immeuble_id    int  NOT NULL REFERENCES immeuble(id),
-  fournisseur_id int  NOT NULL REFERENCES fournisseur(id),
-  energie        energie NOT NULL,
-  numero         text NOT NULL,
-  date_facture   date,
-  montant_ttc    numeric(12,2),                   -- total imprimé (contrôle) ; vide sur un brouillon s'il est à saisir
-  fichier_pdf    text,                            -- PDF archivé : factures/<empreinte>.pdf
-  statut         statut_facture NOT NULL DEFAULT 'a_verifier',
+  building_id    int  NOT NULL REFERENCES building(id),
+  supplier_id int  NOT NULL REFERENCES supplier(id),
+  energy        energy NOT NULL,
+  number         text NOT NULL,
+  invoice_date   date,
+  total_incl_tax    numeric(12,2),                   -- total imprimé (contrôle) ; vide sur un brouillon s'il est à saisir
+  pdf_file    text,                            -- PDF archivé : factures/<empreinte>.pdf
+  status         invoice_status NOT NULL DEFAULT 'draft',
   note           text,
-  extracteur_id  int REFERENCES extracteur(id),   -- version qui a lu la facture (vide : saisie à la main)
+  extractor_id  int REFERENCES extractor(id),   -- version qui a lu la facture (vide : saisie à la main)
   -- ADR 0017 : facture remplacée (par qui, quand, pourquoi) ; brouillon d'une correction : la facture qu'il remplacera
-  remplacee_par      int REFERENCES facture(id),
-  remplacee_le       timestamptz,
-  motif_remplacement text,
-  remplace_id        int REFERENCES facture(id),
-  CONSTRAINT facture_validee_totale CHECK (statut <> 'validee' OR montant_ttc IS NOT NULL),
-  CONSTRAINT facture_remplacee CHECK (
-    (statut = 'remplacee') = (remplacee_par IS NOT NULL AND remplacee_le IS NOT NULL AND motif_remplacement IS NOT NULL)),
-  CONSTRAINT facture_pas_elle_meme CHECK (remplacee_par <> id AND remplace_id <> id)
+  replaced_by      int REFERENCES invoice(id),
+  replaced_at       timestamptz,
+  replacement_reason text,
+  replaces_id        int REFERENCES invoice(id),
+  CONSTRAINT invoice_validated_has_total CHECK (status <> 'validated' OR total_incl_tax IS NOT NULL),
+  CONSTRAINT invoice_replaced CHECK (
+    (status = 'replaced') = (replaced_by IS NOT NULL AND replaced_at IS NOT NULL AND replacement_reason IS NOT NULL)),
+  CONSTRAINT invoice_not_itself CHECK (replaced_by <> id AND replaces_id <> id)
 );
 -- Numéro unique chez un fournisseur parmi les factures validées : le brouillon d'une correction garde le numéro
-CREATE UNIQUE INDEX facture_numero_validee ON facture (fournisseur_id, numero) WHERE statut = 'validee';
+CREATE UNIQUE INDEX invoice_number_validated ON invoice (supplier_id, number) WHERE status = 'validated';
 
 -- ADR 0024 : factures jointes en images, caviardées ; termes masqués sur toutes les factures
-CREATE TABLE terme_masque (
-  terme text PRIMARY KEY CHECK (length(trim(terme)) > 0)
+CREATE TABLE masked_term (
+  term text PRIMARY KEY CHECK (length(trim(term)) > 0)
 );
 
-CREATE TABLE facture_annexe (
+CREATE TABLE invoice_tenant_copy (
   id             serial PRIMARY KEY,
-  facture_id     int  NOT NULL REFERENCES facture(id) ON DELETE CASCADE,
-  fichier_pdf    text NOT NULL,                   -- version en images : annexes/<empreinte>.pdf
+  invoice_id     int  NOT NULL REFERENCES invoice(id) ON DELETE CASCADE,
+  pdf_file    text NOT NULL,                   -- version en images : annexes/<empreinte>.pdf
   source_pdf     text NOT NULL,                   -- PDF de la facture dont elle est faite (à refaire s'il change)
   zones          jsonb NOT NULL,                  -- rectangles peints : page, x0, y0, x1, y1 (fractions), origine
-  extracteur_id  int REFERENCES extracteur(id),   -- version qui a donné les règles (vide : termes seuls)
-  termes         text[] NOT NULL,                 -- termes masqués du moment
-  reglages       jsonb NOT NULL,                  -- dpi, seuil
-  cree_le        timestamptz NOT NULL DEFAULT now(),
-  verifiee_le    timestamptz,
-  pages_scannees int[] NOT NULL DEFAULT '{}'      -- ADR 0025 : pages qui étaient des scans (masquées par zones seules)
+  extractor_id  int REFERENCES extractor(id),   -- version qui a donné les règles (vide : termes seuls)
+  terms         text[] NOT NULL,                 -- termes masqués du moment
+  settings       jsonb NOT NULL,                  -- dpi, seuil
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  checked_at    timestamptz,
+  scanned_pages int[] NOT NULL DEFAULT '{}'      -- ADR 0025 : pages qui étaient des scans (masquées par zones seules)
 );
-CREATE INDEX ON facture_annexe (facture_id);
+CREATE INDEX ON invoice_tenant_copy (invoice_id);
 
-CREATE FUNCTION facture_annexe_figee() RETURNS trigger
+CREATE FUNCTION tenant_copy_frozen() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-  IF OLD.verifiee_le IS NULL AND NEW.verifiee_le IS NOT NULL
-     AND (to_jsonb(NEW) - 'verifiee_le') = (to_jsonb(OLD) - 'verifiee_le') THEN
+  IF OLD.checked_at IS NULL AND NEW.checked_at IS NOT NULL
+     AND (to_jsonb(NEW) - 'checked_at') = (to_jsonb(OLD) - 'checked_at') THEN
     RETURN NEW;
   END IF;
   RAISE EXCEPTION 'Une annexe n''est jamais modifiée : la refaire (ADR 0024)';
 END $$;
+CREATE TRIGGER tenant_copy_frozen BEFORE UPDATE ON invoice_tenant_copy
+  FOR EACH ROW EXECUTE FUNCTION tenant_copy_frozen();
 
-CREATE TRIGGER facture_annexe_figee BEFORE UPDATE ON facture_annexe
-  FOR EACH ROW EXECUTE FUNCTION facture_annexe_figee();
-
-ALTER TABLE facture ADD COLUMN annexe_id int REFERENCES facture_annexe(id);
+ALTER TABLE invoice ADD COLUMN tenant_copy_id int REFERENCES invoice_tenant_copy(id);
 -- ADR 0025 : zones de ses scans ajustées à la main ; NULL : celles de son fournisseur
-ALTER TABLE facture ADD COLUMN zones_masquees jsonb;
+ALTER TABLE invoice ADD COLUMN masked_zones jsonb;
 
-CREATE TABLE ligne_facture (
+CREATE TABLE invoice_line (
   id           serial PRIMARY KEY,
-  facture_id   int  NOT NULL REFERENCES facture(id) ON DELETE CASCADE,
-  ordre        int  NOT NULL DEFAULT 0,
-  categorie    categorie_ligne NOT NULL,
-  libelle      text NOT NULL,
-  periode      daterange NOT NULL CHECK (NOT isempty(periode) AND NOT lower_inf(periode) AND NOT upper_inf(periode)),
+  invoice_id   int  NOT NULL REFERENCES invoice(id) ON DELETE CASCADE,
+  position        int  NOT NULL DEFAULT 0,
+  category    line_category NOT NULL,
+  label      text NOT NULL,
+  period      daterange NOT NULL CHECK (NOT isempty(period) AND NOT lower_inf(period) AND NOT upper_inf(period)),
   kwh          numeric(12,3),
-  montant_ht   numeric(12,3),
-  taux_tva     numeric(5,4),                      -- 0.2000, 0.0550
-  montant_ttc  numeric(12,3) NOT NULL,            -- montant réparti (3 décimales : certaines lignes ENGIE en ont 3)
-  affectation  affectation_ligne NOT NULL DEFAULT 'recuperable',
+  amount_excl_tax   numeric(12,3),
+  vat_rate     numeric(5,4),                      -- 0.2000, 0.0550
+  amount_incl_tax  numeric(12,3) NOT NULL,            -- montant réparti (3 décimales : certaines lignes ENGIE en ont 3)
+  allocation  line_allocation NOT NULL DEFAULT 'recoverable',
   note         text
 );
-CREATE INDEX ON ligne_facture USING gist (periode);
+CREATE INDEX ON invoice_line USING gist (period);
 
 -- Contrôle : somme des lignes vs total imprimé (tolérance 0,05 € pour les arrondis de TVA du fournisseur)
-CREATE VIEW v_controle_facture AS
-SELECT f.id, f.numero, f.energie, f.montant_ttc,
-       coalesce(sum(l.montant_ttc), 0)                       AS total_lignes,
-       f.montant_ttc - coalesce(sum(l.montant_ttc), 0)       AS ecart,
-       abs(f.montant_ttc - coalesce(sum(l.montant_ttc), 0)) <= 0.05 AS ok
-FROM facture f LEFT JOIN ligne_facture l ON l.facture_id = f.id
-GROUP BY f.id;
+CREATE VIEW v_invoice_check AS
+SELECT i.id, i.number, i.energy, i.total_incl_tax,
+       coalesce(sum(l.amount_incl_tax), 0)                            AS lines_total,
+       i.total_incl_tax - coalesce(sum(l.amount_incl_tax), 0)         AS gap,
+       abs(i.total_incl_tax - coalesce(sum(l.amount_incl_tax), 0)) <= 0.05 AS ok
+FROM invoice i LEFT JOIN invoice_line l ON l.invoice_id = i.id
+GROUP BY i.id;
 
 -- ---------------------------------------------------------------- argent des locataires
 -- Provisions versées, par séjour et par année civile (comme le classeur).
 -- Phase 4 : remplacer/compléter par une table des paiements reçus (loyer + charges, date, mode).
-CREATE TABLE provision_annuelle (
+CREATE TABLE annual_charge_advance (
   id         serial PRIMARY KEY,
-  sejour_id  int NOT NULL REFERENCES sejour(id),
-  annee      int NOT NULL,
-  montant    numeric(12,2) NOT NULL,
+  tenancy_id  int NOT NULL REFERENCES tenancy(id),
+  year      int NOT NULL,
+  amount    numeric(12,2) NOT NULL,
   note       text,
-  UNIQUE (sejour_id, annee)
+  UNIQUE (tenancy_id, year)
 );
 
 -- Régularisations envoyées et leur suivi (sert aussi au calcul des pertes fiscales).
-CREATE TABLE regularisation (
+CREATE TABLE charge_adjustment (
   id             serial PRIMARY KEY,
-  sejour_id      int  NOT NULL REFERENCES sejour(id),
-  exercice       daterange NOT NULL,
-  montant_du     numeric(12,2) NOT NULL,          -- quote-part de charges
-  provisions     numeric(12,2) NOT NULL,
-  solde          numeric(12,2) GENERATED ALWAYS AS (montant_du - provisions) STORED,
-  date_envoi     date,                               -- NULL : brouillon (état calculé, ADR 0010)
-  decision       decision_regul,                     -- charge abandonnée ou irrécouvrable, choisie par le propriétaire
-  remplace_id    int REFERENCES regularisation(id),  -- rectificatif d'une régularisation précédente
+  tenancy_id      int  NOT NULL REFERENCES tenancy(id),
+  period       daterange NOT NULL,
+  amount_due     numeric(12,2) NOT NULL,          -- quote-part de charges
+  advances     numeric(12,2) NOT NULL,
+  balance          numeric(12,2) GENERATED ALWAYS AS (amount_due - advances) STORED,
+  sent_on     date,                               -- NULL : brouillon (état calculé, ADR 0010)
+  decision       adjustment_decision,                     -- charge abandonnée ou irrécouvrable, choisie par le propriétaire
+  replaces_id    int REFERENCES charge_adjustment(id),  -- rectificatif d'une régularisation précédente
   note           text,
-  instantane     jsonb,                              -- ce qui a été envoyé, figé (NULL : saisie manuelle), ADR 0007
-  annexes_envoyees jsonb,                            -- annexe jointe par facture à l'envoi (ADR 0024)
-  cree_le        timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT regularisation_decision_envoyee CHECK (decision IS NULL OR date_envoi IS NOT NULL)
+  snapshot     jsonb,                              -- ce qui a été envoyé, figé (NULL : saisie manuelle), ADR 0007
+  sent_tenant_copies jsonb,                            -- annexe jointe par facture à l'envoi (ADR 0024)
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT charge_adjustment_decision_sent CHECK (decision IS NULL OR sent_on IS NOT NULL)
 );
 
 -- Payments received from tenants (ADR 0008): rent and provision of a month, and/or an amount toward a
 -- regularisation (negative: refund paid by the owner). One row per payment received (a bank transfer, a cheque).
-CREATE TABLE paiement (
+CREATE TABLE payment (
   id                 serial PRIMARY KEY,
-  sejour_id          int  NOT NULL REFERENCES sejour(id),
-  date_paiement      date NOT NULL,
-  mois               date CHECK (mois IS NULL OR extract(day FROM mois) = 1),  -- month of rent covered (1st day)
-  loyer              numeric(12,2) NOT NULL DEFAULT 0,
-  provision          numeric(12,2) NOT NULL DEFAULT 0,                         -- provision sur charges
-  regularisation_id  int REFERENCES regularisation(id),
-  regularisation     numeric(12,2) NOT NULL DEFAULT 0,
+  tenancy_id          int  NOT NULL REFERENCES tenancy(id),
+  payment_date      date NOT NULL,
+  month               date CHECK (month IS NULL OR extract(day FROM month) = 1),  -- month of rent covered (1st day)
+  rent              numeric(12,2) NOT NULL DEFAULT 0,
+  charge_advance          numeric(12,2) NOT NULL DEFAULT 0,                         -- provision sur charges
+  charge_adjustment_id  int REFERENCES charge_adjustment(id),
+  charge_adjustment     numeric(12,2) NOT NULL DEFAULT 0,
   -- « depot » : retenue sur le dépôt de garantie (ADR 0021), jamais rattachée à un mouvement bancaire
-  mode               text CONSTRAINT paiement_mode_check
-                       CHECK (mode IN ('virement', 'prelevement', 'cheque', 'especes', 'autre', 'depot')),
+  method               text CONSTRAINT payment_method_check
+                       CHECK (method IN ('transfer', 'direct_debit', 'cheque', 'cash', 'other', 'deposit')),
   note               text,
-  mouvement_id       int REFERENCES mouvement(id) ON DELETE SET NULL,   -- mouvement du relevé bancaire (ADR 0018)
-  CHECK (mois IS NOT NULL OR (loyer = 0 AND provision = 0)),
-  CHECK (regularisation_id IS NOT NULL OR regularisation = 0),
-  CONSTRAINT paiement_depot_sans_mouvement CHECK (mode IS DISTINCT FROM 'depot' OR mouvement_id IS NULL)
+  bank_transaction_id       int REFERENCES bank_transaction(id) ON DELETE SET NULL,   -- mouvement du relevé bancaire (ADR 0018)
+  CHECK (month IS NOT NULL OR (rent = 0 AND charge_advance = 0)),
+  CHECK (charge_adjustment_id IS NOT NULL OR charge_adjustment = 0),
+  CONSTRAINT payment_deposit_without_transaction CHECK (method IS DISTINCT FROM 'deposit' OR bank_transaction_id IS NULL)
 );
-CREATE INDEX ON paiement (sejour_id, mois);
-CREATE INDEX ON paiement (regularisation_id);
-CREATE INDEX ON paiement (mouvement_id);
+CREATE INDEX ON payment (tenancy_id, month);
+CREATE INDEX ON payment (charge_adjustment_id);
+CREATE INDEX ON payment (bank_transaction_id);
 
 -- Deposits (ADR 0019): what a tenant paid (positive) and what was refunded to them (negative), each seen on a bank
 -- statement when linked; what the owner holds is their sum. sejour.depot_garantie stays the amount of the lease.
-CREATE TABLE versement_depot (
+CREATE TABLE deposit_payment (
   id              serial PRIMARY KEY,
-  sejour_id       int  NOT NULL REFERENCES sejour(id),
-  date_versement  date NOT NULL,
-  montant         numeric(12,2) NOT NULL CHECK (montant <> 0),
-  mouvement_id    int REFERENCES mouvement(id) ON DELETE SET NULL,
+  tenancy_id       int  NOT NULL REFERENCES tenancy(id),
+  payment_date  date NOT NULL,
+  amount         numeric(12,2) NOT NULL CHECK (amount <> 0),
+  bank_transaction_id    int REFERENCES bank_transaction(id) ON DELETE SET NULL,
   note            text
 );
-CREATE INDEX ON versement_depot (sejour_id);
-CREATE INDEX ON versement_depot (mouvement_id);
+CREATE INDEX ON deposit_payment (tenancy_id);
+CREATE INDEX ON deposit_payment (bank_transaction_id);
 
 -- Rent and provision called each month from a given month on, until the next row of the stay (ADR 0009: revision of
 -- the rent, new provision after a regularisation). A month of presence that is not complete is called pro rata of its
 -- days.
-CREATE TABLE echeance (
+CREATE TABLE rent_schedule (
   id          serial PRIMARY KEY,
-  sejour_id   int  NOT NULL REFERENCES sejour(id) ON DELETE CASCADE,
-  a_partir_du date NOT NULL CHECK (extract(day FROM a_partir_du) = 1),  -- first month concerned (1st day)
-  loyer       numeric(12,2) NOT NULL CHECK (loyer >= 0),
-  provision   numeric(12,2) NOT NULL CHECK (provision >= 0),           -- provision sur charges
+  tenancy_id   int  NOT NULL REFERENCES tenancy(id) ON DELETE CASCADE,
+  from_month date NOT NULL CHECK (extract(day FROM from_month) = 1),  -- first month concerned (1st day)
+  rent       numeric(12,2) NOT NULL CHECK (rent >= 0),
+  charge_advance   numeric(12,2) NOT NULL CHECK (charge_advance >= 0),           -- provision sur charges
   note        text,
-  UNIQUE (sejour_id, a_partir_du)
+  UNIQUE (tenancy_id, from_month)
 );
 
 -- Provisions per stay and calendar year (SPEC R9): the sum of the monthly payments when the year has any,
 -- otherwise the yearly total entered by hand (history before monthly payments).
-CREATE VIEW v_provision AS
-WITH payees AS (
-  SELECT sejour_id, extract(year FROM mois)::int AS annee, sum(provision) AS montant
-  FROM paiement WHERE mois IS NOT NULL GROUP BY 1, 2
+CREATE VIEW v_charge_advance AS
+WITH paid AS (
+  SELECT tenancy_id, extract(year FROM month)::int AS year, sum(charge_advance) AS amount
+  FROM payment WHERE month IS NOT NULL GROUP BY 1, 2
 )
-SELECT p.sejour_id, p.annee, p.montant, 'paiements'::text AS source FROM payees p
+SELECT p.tenancy_id, p.year, p.amount, 'payments'::text AS source FROM paid p
 UNION ALL
-SELECT a.sejour_id, a.annee, a.montant, 'saisie' FROM provision_annuelle a
-WHERE NOT EXISTS (SELECT 1 FROM payees p WHERE p.sejour_id = a.sejour_id AND p.annee = a.annee);
+SELECT a.tenancy_id, a.year, a.amount, 'entered' FROM annual_charge_advance a
+WHERE NOT EXISTS (SELECT 1 FROM paid p WHERE p.tenancy_id = a.tenancy_id AND p.year = a.year);
 
 -- Amount paid toward a regularisation, including the payments made on the ones it replaces (corrective chain)
-CREATE FUNCTION regularisation_verse(p_id int) RETURNS numeric
+CREATE FUNCTION charge_adjustment_paid(p_id int) RETURNS numeric
 LANGUAGE sql STABLE AS $$
-WITH RECURSIVE chaine AS (
-  SELECT id, remplace_id FROM regularisation WHERE id = p_id
+WITH RECURSIVE chain AS (
+  SELECT id, replaces_id FROM charge_adjustment WHERE id = p_id
   UNION ALL
-  SELECT r.id, r.remplace_id FROM regularisation r JOIN chaine c ON r.id = c.remplace_id
+  SELECT c.id, c.replaces_id FROM charge_adjustment c JOIN chain ch ON c.id = ch.replaces_id
 )
-SELECT coalesce(sum(p.regularisation), 0) FROM paiement p WHERE p.regularisation_id IN (SELECT id FROM chaine)
+SELECT coalesce(sum(p.charge_adjustment), 0) FROM payment p WHERE p.charge_adjustment_id IN (SELECT id FROM chain)
 $$;
 
 -- State of a regularisation (ADR 0010): brouillon (not sent), soldee (paid within 1 euro, corrective chain included:
 -- the legacy workbook rounds), en_attente (sent, still to be paid or refunded)
-CREATE FUNCTION regularisation_etat(p_id int) RETURNS text
+CREATE FUNCTION charge_adjustment_state(p_id int) RETURNS text
 LANGUAGE sql STABLE AS $$
-SELECT CASE WHEN r.date_envoi IS NULL THEN 'brouillon'
-            WHEN abs(r.solde - regularisation_verse(r.id)) < 1 THEN 'soldee'
-            ELSE 'en_attente' END
-FROM regularisation r WHERE r.id = p_id
+SELECT CASE WHEN c.sent_on IS NULL THEN 'draft'
+            WHEN abs(c.balance - charge_adjustment_paid(c.id)) < 1 THEN 'settled'
+            ELSE 'pending' END
+FROM charge_adjustment c WHERE c.id = p_id
 $$;
 
 -- Date of the last payment of a settled regularisation (corrective chain included), else null
-CREATE FUNCTION regularisation_date_solde(p_id int) RETURNS date
+CREATE FUNCTION charge_adjustment_settled_on(p_id int) RETURNS date
 LANGUAGE sql STABLE AS $$
-WITH RECURSIVE chaine AS (
-  SELECT id, remplace_id FROM regularisation WHERE id = p_id
+WITH RECURSIVE chain AS (
+  SELECT id, replaces_id FROM charge_adjustment WHERE id = p_id
   UNION ALL
-  SELECT r.id, r.remplace_id FROM regularisation r JOIN chaine c ON r.id = c.remplace_id
+  SELECT c.id, c.replaces_id FROM charge_adjustment c JOIN chain ch ON c.id = ch.replaces_id
 )
-SELECT CASE WHEN regularisation_etat(p_id) = 'soldee'
-            THEN (SELECT max(p.date_paiement) FROM paiement p WHERE p.regularisation_id IN (SELECT id FROM chaine)) END
+SELECT CASE WHEN charge_adjustment_state(p_id) = 'settled'
+            THEN (SELECT max(p.payment_date) FROM payment p WHERE p.charge_adjustment_id IN (SELECT id FROM chain)) END
 $$;
 
 -- ---------------------------------------------------------------- compteurs d'eau (phase ultérieure)
 -- ADR 0015 : travaux payés par le propriétaire, pour la déclaration seulement (jamais répartis) ; déductibles
 -- (2044, ligne 224) selon leur nature : entretien et amélioration oui, construction et agrandissement non.
-CREATE TYPE nature_travaux AS ENUM ('entretien', 'amelioration', 'construction');
+CREATE TYPE works_nature AS ENUM ('maintenance', 'improvement', 'construction');
 
-CREATE TABLE travaux (
+CREATE TABLE works_invoice (
   id             serial PRIMARY KEY,
-  immeuble_id    int  NOT NULL REFERENCES immeuble(id),
-  lot_id         int  REFERENCES lot(id),                -- vide : travaux de l'immeuble ou des parties communes
-  fournisseur    text NOT NULL,
+  building_id    int  NOT NULL REFERENCES building(id),
+  unit_id         int  REFERENCES unit(id),                -- vide : travaux de l'immeuble ou des parties communes
+  supplier    text NOT NULL,
   description    text NOT NULL,
-  nature         nature_travaux NOT NULL,
-  date_facture   date NOT NULL,
-  montant_ttc    numeric(12,2) NOT NULL,
-  fichier_pdf    text,                                   -- PDF archivé : travaux/<empreinte>.pdf
+  nature         works_nature NOT NULL,
+  invoice_date   date NOT NULL,
+  total_incl_tax    numeric(12,2) NOT NULL,
+  pdf_file    text,                                   -- PDF archivé : travaux/<empreinte>.pdf
   note           text
 );
-CREATE INDEX ON travaux (immeuble_id, date_facture);
+CREATE INDEX ON works_invoice (building_id, invoice_date);
 
 -- ADR 0019 : une facture de travaux est payée par des mouvements bancaires seulement (payé = vu à la banque), un ou
 -- plusieurs (acompte, solde), chacun pour un montant ; l'année fiscale de chacun est celle de son mouvement
-CREATE TABLE reglement_travaux (
+CREATE TABLE works_invoice_payment (
   id             serial PRIMARY KEY,
-  travaux_id     int NOT NULL REFERENCES travaux(id) ON DELETE CASCADE,
-  mouvement_id   int NOT NULL REFERENCES mouvement(id) ON DELETE CASCADE,
-  montant        numeric(12,2) NOT NULL CHECK (montant > 0),
-  UNIQUE (travaux_id, mouvement_id)
+  works_invoice_id     int NOT NULL REFERENCES works_invoice(id) ON DELETE CASCADE,
+  bank_transaction_id   int NOT NULL REFERENCES bank_transaction(id) ON DELETE CASCADE,
+  amount        numeric(12,2) NOT NULL CHECK (amount > 0),
+  UNIQUE (works_invoice_id, bank_transaction_id)
 );
-CREATE INDEX ON reglement_travaux (mouvement_id);
+CREATE INDEX ON works_invoice_payment (bank_transaction_id);
 
 -- ADR 0022 : les factures des charges (gaz, électricité, eau, taxe foncière) réglées par des mouvements bancaires, comme
 -- les travaux : un ou plusieurs règlements ; leur total ne dépasse ni la facture ni le mouvement ; un crédit qui
 -- rembourse la facture (mensualités supérieures à la facture annuelle) est un règlement négatif
-CREATE TABLE reglement_facture (
+CREATE TABLE invoice_payment (
   id             serial PRIMARY KEY,
-  facture_id     int NOT NULL REFERENCES facture(id) ON DELETE CASCADE,
-  mouvement_id   int NOT NULL REFERENCES mouvement(id) ON DELETE CASCADE,
-  montant        numeric(12,2) NOT NULL CONSTRAINT reglement_facture_montant_check CHECK (montant <> 0),
-  UNIQUE (facture_id, mouvement_id)
+  invoice_id     int NOT NULL REFERENCES invoice(id) ON DELETE CASCADE,
+  bank_transaction_id   int NOT NULL REFERENCES bank_transaction(id) ON DELETE CASCADE,
+  amount        numeric(12,2) NOT NULL CONSTRAINT invoice_payment_amount_check CHECK (amount <> 0),
+  UNIQUE (invoice_id, bank_transaction_id)
 );
-CREATE INDEX ON reglement_facture (mouvement_id);
+CREATE INDEX ON invoice_payment (bank_transaction_id);
 
 -- ADR 0016 : la société (SCI), ses associés et leurs parts, ses assemblées générales et leurs procès-verbaux ;
 -- une assemblée close est numérotée dans le registre et figée.
-CREATE TABLE societe (
+CREATE TABLE company (
   id            int PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-  denomination  text NOT NULL,
-  forme         text NOT NULL DEFAULT 'SCI',
+  name  text NOT NULL,
+  legal_form         text NOT NULL DEFAULT 'SCI',
   capital       numeric(14,2),
-  siege         text,
+  registered_office         text,
   rcs           text
 );
 
-CREATE TABLE associe (
+CREATE TABLE partner (
   id       serial PRIMARY KEY,
-  nom      text NOT NULL,
-  parts    int  NOT NULL CHECK (parts > 0),
-  gerant   boolean NOT NULL DEFAULT false,
-  adresse  text,
+  name      text NOT NULL,
+  shares    int  NOT NULL CHECK (shares > 0),
+  manager   boolean NOT NULL DEFAULT false,
+  address  text,
   note     text
 );
 
-CREATE TYPE type_assemblee AS ENUM ('ordinaire', 'extraordinaire');
-CREATE TYPE statut_assemblee AS ENUM ('brouillon', 'close');
-CREATE TYPE presence_associe AS ENUM ('present', 'represente', 'absent');
+CREATE TYPE meeting_type AS ENUM ('ordinary', 'extraordinary');
+CREATE TYPE meeting_status AS ENUM ('draft', 'closed');
+CREATE TYPE attendance_status AS ENUM ('present', 'represented', 'absent');
 
-CREATE TABLE assemblee (
+CREATE TABLE general_meeting (
   id             serial PRIMARY KEY,
-  numero         int UNIQUE,
-  type           type_assemblee NOT NULL,
+  number         int UNIQUE,
+  type           meeting_type NOT NULL,
   date           date NOT NULL,
-  heure          text,
-  lieu           text,
-  ordre_du_jour  text NOT NULL DEFAULT '',
-  president      text,
-  observations   text,
-  statut         statut_assemblee NOT NULL DEFAULT 'brouillon',
-  close_le       timestamptz,
-  instantane     jsonb,
-  pv_signe       text,
-  CONSTRAINT assemblee_close CHECK (statut = 'brouillon' OR (numero IS NOT NULL AND instantane IS NOT NULL))
+  time          text,
+  place           text,
+  agenda  text NOT NULL DEFAULT '',
+  chair      text,
+  remarks   text,
+  status         meeting_status NOT NULL DEFAULT 'draft',
+  closed_at       timestamptz,
+  snapshot     jsonb,
+  signed_minutes       text,
+  CONSTRAINT general_meeting_closed CHECK (status = 'draft' OR (number IS NOT NULL AND snapshot IS NOT NULL))
 );
 
-CREATE TABLE presence (
-  assemblee_id    int NOT NULL REFERENCES assemblee(id) ON DELETE CASCADE,
-  associe_id      int NOT NULL REFERENCES associe(id),
-  presence        presence_associe NOT NULL DEFAULT 'present',
-  represente_par  text,
-  PRIMARY KEY (assemblee_id, associe_id)
+CREATE TABLE attendance (
+  general_meeting_id    int NOT NULL REFERENCES general_meeting(id) ON DELETE CASCADE,
+  partner_id      int NOT NULL REFERENCES partner(id),
+  status          attendance_status NOT NULL DEFAULT 'present',
+  represented_by  text,
+  PRIMARY KEY (general_meeting_id, partner_id)
 );
 
 CREATE TABLE resolution (
   id            serial PRIMARY KEY,
-  assemblee_id  int NOT NULL REFERENCES assemblee(id) ON DELETE CASCADE,
-  ordre         int NOT NULL,
-  titre         text NOT NULL,
-  texte         text NOT NULL DEFAULT '',
-  pour          int  NOT NULL DEFAULT 0 CHECK (pour >= 0),
-  contre        int  NOT NULL DEFAULT 0 CHECK (contre >= 0),
-  abstention    int  NOT NULL DEFAULT 0 CHECK (abstention >= 0)
+  general_meeting_id  int NOT NULL REFERENCES general_meeting(id) ON DELETE CASCADE,
+  position         int NOT NULL,
+  title         text NOT NULL,
+  text         text NOT NULL DEFAULT '',
+  votes_for          int  NOT NULL DEFAULT 0 CHECK (votes_for >= 0),
+  votes_against        int  NOT NULL DEFAULT 0 CHECK (votes_against >= 0),
+  abstentions    int  NOT NULL DEFAULT 0 CHECK (abstentions >= 0)
 );
 
 -- A closed meeting: only its signed minutes may still be attached or replaced
-CREATE FUNCTION assemblee_close_figee() RETURNS trigger
+CREATE FUNCTION general_meeting_closed_frozen() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION 'Assemblée close : elle n''est jamais supprimée (registre, ADR 0016)';
   END IF;
-  IF (to_jsonb(NEW) - 'pv_signe') <> (to_jsonb(OLD) - 'pv_signe') THEN
+  IF (to_jsonb(NEW) - 'signed_minutes') <> (to_jsonb(OLD) - 'signed_minutes') THEN
     RAISE EXCEPTION 'Assemblée close : elle n''est plus modifiée (registre, ADR 0016)';
   END IF;
   RETURN NEW;
 END $$;
+CREATE TRIGGER general_meeting_closed_frozen BEFORE UPDATE OR DELETE ON general_meeting
+  FOR EACH ROW WHEN (OLD.status = 'closed') EXECUTE FUNCTION general_meeting_closed_frozen();
 
-CREATE TRIGGER assemblee_close_figee BEFORE UPDATE OR DELETE ON assemblee
-  FOR EACH ROW WHEN (OLD.statut = 'close') EXECUTE FUNCTION assemblee_close_figee();
-
--- Presences and resolutions of a closed meeting are frozen with it
-CREATE FUNCTION assemblee_detail_fige() RETURNS trigger
+CREATE FUNCTION general_meeting_detail_frozen() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM assemblee WHERE id = coalesce(NEW.assemblee_id, OLD.assemblee_id) AND statut = 'close') THEN
+  IF EXISTS (SELECT 1 FROM general_meeting
+             WHERE id = coalesce(NEW.general_meeting_id, OLD.general_meeting_id) AND status = 'closed') THEN
     RAISE EXCEPTION 'Assemblée close : ses présences et résolutions ne changent plus (registre, ADR 0016)';
   END IF;
   RETURN coalesce(NEW, OLD);
 END $$;
-
-CREATE TRIGGER presence_figee BEFORE INSERT OR UPDATE OR DELETE ON presence
-  FOR EACH ROW EXECUTE FUNCTION assemblee_detail_fige();
-CREATE TRIGGER resolution_figee BEFORE INSERT OR UPDATE OR DELETE ON resolution
-  FOR EACH ROW EXECUTE FUNCTION assemblee_detail_fige();
-
-CREATE TABLE compteur (
-  id          serial PRIMARY KEY,
-  immeuble_id int NOT NULL REFERENCES immeuble(id),
-  lot_id      int REFERENCES lot(id),              -- NULL = compteur général
-  libelle     text NOT NULL,                       -- 'F4 froid', 'général'…
-  fluide      text NOT NULL CHECK (fluide IN ('eau_froide', 'eau_chaude', 'general'))
-);
-
-CREATE TABLE releve (
-  id           serial PRIMARY KEY,
-  compteur_id  int NOT NULL REFERENCES compteur(id),
-  date_releve  date NOT NULL,
-  index_m3     numeric(10,3) NOT NULL,
-  UNIQUE (compteur_id, date_releve)
-);
-
--- ---------------------------------------------------------------- journal
-CREATE TABLE evenement (
-  id           serial PRIMARY KEY,
-  immeuble_id  int REFERENCES immeuble(id),
-  sejour_id    int REFERENCES sejour(id),
-  date_evt     date NOT NULL,
-  type         text NOT NULL,                     -- 'entree', 'sortie', 'preavis', 'edl', 'courrier'…
-  description  text
-);
+CREATE TRIGGER attendance_frozen BEFORE INSERT OR UPDATE OR DELETE ON attendance
+  FOR EACH ROW EXECUTE FUNCTION general_meeting_detail_frozen();
+CREATE TRIGGER resolution_frozen BEFORE INSERT OR UPDATE OR DELETE ON resolution
+  FOR EACH ROW EXECUTE FUNCTION general_meeting_detail_frozen();
 
 -- =====================================================================
 -- Moteur de répartition
@@ -516,136 +486,135 @@ CREATE TABLE evenement (
 -- Les bornes p_debut / p_fin de l'exercice sont INCLUSES.
 -- =====================================================================
 
-CREATE OR REPLACE FUNCTION nb_jours(r daterange) RETURNS int
+CREATE FUNCTION day_count(r daterange) RETURNS int
 LANGUAGE sql IMMUTABLE AS $$ SELECT CASE WHEN isempty(r) THEN 0 ELSE upper(r) - lower(r) END $$;
 
--- Détail : une ligne par (ligne de facture, séjour), plus une ligne « propriétaire » par ligne de facture.
-CREATE OR REPLACE FUNCTION repartition(p_immeuble int, p_debut date, p_fin date)
-RETURNS TABLE (ligne_id int, facture_id int, energie energie, categorie categorie_ligne,
-               sejour_id int, jours int, montant numeric)
+-- Each recoverable line of the validated invoices of a building, apportioned to the tenancies of a period by days and
+-- charge shares; the rest (empty units) with tenancy_id NULL
+CREATE FUNCTION apportionment(p_building int, p_start date, p_end date)
+RETURNS TABLE (invoice_line_id int, invoice_id int, energy energy, category line_category,
+               tenancy_id int, days int, amount numeric)
 LANGUAGE sql STABLE AS $$
-WITH exo AS (SELECT daterange(p_debut, p_fin + 1) AS r),
-tot AS (SELECT sum(tantiemes)::numeric AS t FROM lot WHERE immeuble_id = p_immeuble),
-lig AS (
-  SELECT l.id, l.facture_id, f.energie, l.categorie, l.montant_ttc,
-         nb_jours(l.periode) AS n, l.periode * exo.r AS pe
-  FROM ligne_facture l
-  JOIN facture f ON f.id = l.facture_id AND f.immeuble_id = p_immeuble AND f.statut = 'validee'
-  CROSS JOIN exo
-  WHERE l.affectation = 'recuperable' AND l.periode && exo.r
+WITH per AS (SELECT daterange(p_start, p_end + 1) AS r),
+tot AS (SELECT sum(charge_shares)::numeric AS t FROM unit WHERE building_id = p_building),
+lin AS (
+  SELECT l.id, l.invoice_id, i.energy, l.category, l.amount_incl_tax,
+         day_count(l.period) AS n, l.period * per.r AS pe
+  FROM invoice_line l
+  JOIN invoice i ON i.id = l.invoice_id AND i.building_id = p_building AND i.status = 'validated'
+  CROSS JOIN per
+  WHERE l.allocation = 'recoverable' AND l.period && per.r
 ),
 parts AS (
-  SELECT lig.id, lig.facture_id, lig.energie, lig.categorie, s.id AS sejour_id,
-         nb_jours(lig.pe * s.periode) AS jours,
-         lig.montant_ttc * nb_jours(lig.pe * s.periode) / lig.n * lt.tantiemes / tot.t AS montant
-  FROM lig
-  JOIN sejour s ON s.periode && lig.pe
-  JOIN lot lt ON lt.id = s.lot_id AND lt.immeuble_id = p_immeuble
+  SELECT lin.id, lin.invoice_id, lin.energy, lin.category, t.id AS tenancy_id,
+         day_count(lin.pe * t.period) AS days,
+         lin.amount_incl_tax * day_count(lin.pe * t.period) / lin.n * u.charge_shares / tot.t AS amount
+  FROM lin
+  JOIN tenancy t ON t.period && lin.pe
+  JOIN unit u ON u.id = t.unit_id AND u.building_id = p_building
   CROSS JOIN tot
 )
-SELECT id, facture_id, energie, categorie, sejour_id, jours, montant FROM parts
+SELECT id, invoice_id, energy, category, tenancy_id, days, amount FROM parts
 UNION ALL
-SELECT lig.id, lig.facture_id, lig.energie, lig.categorie, NULL, nb_jours(lig.pe),
-       lig.montant_ttc * nb_jours(lig.pe) / lig.n
-         - coalesce((SELECT sum(p.montant) FROM parts p WHERE p.id = lig.id), 0)
-FROM lig
+SELECT lin.id, lin.invoice_id, lin.energy, lin.category, NULL, day_count(lin.pe),
+       lin.amount_incl_tax * day_count(lin.pe) / lin.n
+         - coalesce((SELECT sum(p.amount) FROM parts p WHERE p.id = lin.id), 0)
+FROM lin
 $$;
 
--- Décompte par séjour, mêmes colonnes que la feuille « Décompte » du classeur.
-CREATE OR REPLACE FUNCTION decompte(p_immeuble int, p_debut date, p_fin date)
-RETURNS TABLE (sejour_id int, locataire text, lot text, tantiemes int, present daterange, jours int,
-               gaz_consommation numeric, gaz_autres numeric,
-               electricite_consommation numeric, electricite_autres numeric,
-               eau numeric, ordures_menageres numeric,
-               total numeric, provisions numeric, solde numeric)
+CREATE FUNCTION charge_statement(p_building int, p_start date, p_end date)
+RETURNS TABLE (tenancy_id int, tenant text, unit text, charge_shares int, present daterange, days int,
+               gas_consumption numeric, gas_other numeric,
+               electricity_consumption numeric, electricity_other numeric,
+               water numeric, household_waste numeric,
+               total numeric, advances numeric, balance numeric)
 LANGUAGE sql STABLE AS $$
-WITH r AS (SELECT * FROM repartition(p_immeuble, p_debut, p_fin) WHERE sejour_id IS NOT NULL),
+WITH r AS (SELECT * FROM apportionment(p_building, p_start, p_end) WHERE tenancy_id IS NOT NULL),
 agg AS (
-  SELECT r.sejour_id,
-    coalesce(sum(montant) FILTER (WHERE energie = 'gaz' AND categorie = 'consommation'), 0)          AS gc,
-    coalesce(sum(montant) FILTER (WHERE energie = 'gaz' AND categorie <> 'consommation'), 0)         AS ga,
-    coalesce(sum(montant) FILTER (WHERE energie = 'electricite' AND categorie = 'consommation'), 0)  AS ec,
-    coalesce(sum(montant) FILTER (WHERE energie = 'electricite' AND categorie <> 'consommation'), 0) AS ea,
-    coalesce(sum(montant) FILTER (WHERE energie = 'eau'), 0)                                         AS eau,
-    coalesce(sum(montant) FILTER (WHERE energie = 'ordures_menageres'), 0)                           AS om
-  FROM r GROUP BY r.sejour_id
+  SELECT r.tenancy_id,
+    coalesce(sum(amount) FILTER (WHERE energy = 'gas' AND category = 'consumption'), 0)           AS gc,
+    coalesce(sum(amount) FILTER (WHERE energy = 'gas' AND category <> 'consumption'), 0)          AS go,
+    coalesce(sum(amount) FILTER (WHERE energy = 'electricity' AND category = 'consumption'), 0)   AS ec,
+    coalesce(sum(amount) FILTER (WHERE energy = 'electricity' AND category <> 'consumption'), 0)  AS eo,
+    coalesce(sum(amount) FILTER (WHERE energy = 'water'), 0)                                      AS wa,
+    coalesce(sum(amount) FILTER (WHERE energy = 'household_waste'), 0)                            AS hw
+  FROM r GROUP BY r.tenancy_id
 ),
-prov AS (
-  SELECT pa.sejour_id, sum(pa.montant) AS m FROM v_provision pa
-  WHERE pa.annee BETWEEN extract(year FROM p_debut) AND extract(year FROM p_fin)
-  GROUP BY pa.sejour_id
+adv AS (
+  SELECT a.tenancy_id, sum(a.amount) AS m FROM v_charge_advance a
+  WHERE a.year BETWEEN extract(year FROM p_start) AND extract(year FROM p_end)
+  GROUP BY a.tenancy_id
 )
-SELECT s.id, lo.nom, lt.code, lt.tantiemes,
-       s.periode * daterange(p_debut, p_fin + 1),
-       nb_jours(s.periode * daterange(p_debut, p_fin + 1)),
-       coalesce(a.gc, 0), coalesce(a.ga, 0), coalesce(a.ec, 0), coalesce(a.ea, 0),
-       coalesce(a.eau, 0), coalesce(a.om, 0),
-       coalesce(a.gc + a.ga + a.ec + a.ea + a.eau + a.om, 0),
-       coalesce(p.m, 0),
-       coalesce(a.gc + a.ga + a.ec + a.ea + a.eau + a.om, 0) - coalesce(p.m, 0)
-FROM sejour s
-JOIN lot lt ON lt.id = s.lot_id AND lt.immeuble_id = p_immeuble
-JOIN locataire lo ON lo.id = s.locataire_id
-LEFT JOIN agg a ON a.sejour_id = s.id
-LEFT JOIN prov p ON p.sejour_id = s.id
-WHERE s.periode && daterange(p_debut, p_fin + 1) OR p.m IS NOT NULL
-ORDER BY lt.code, lower(s.periode)
+SELECT t.id, te.name, u.code, u.charge_shares,
+       t.period * daterange(p_start, p_end + 1),
+       day_count(t.period * daterange(p_start, p_end + 1)),
+       coalesce(a.gc, 0), coalesce(a.go, 0), coalesce(a.ec, 0), coalesce(a.eo, 0),
+       coalesce(a.wa, 0), coalesce(a.hw, 0),
+       coalesce(a.gc + a.go + a.ec + a.eo + a.wa + a.hw, 0),
+       coalesce(v.m, 0),
+       coalesce(a.gc + a.go + a.ec + a.eo + a.wa + a.hw, 0) - coalesce(v.m, 0)
+FROM tenancy t
+JOIN unit u ON u.id = t.unit_id AND u.building_id = p_building
+JOIN tenant te ON te.id = t.tenant_id
+LEFT JOIN agg a ON a.tenancy_id = t.id
+LEFT JOIN adv v ON v.tenancy_id = t.id
+WHERE t.period && daterange(p_start, p_end + 1) OR v.m IS NOT NULL
+ORDER BY u.code, lower(t.period)
 $$;
 
--- Synthèse par énergie : total des factures de l'exercice, part des locataires, part du propriétaire (vacance).
-CREATE OR REPLACE FUNCTION synthese(p_immeuble int, p_debut date, p_fin date)
-RETURNS TABLE (energie energie, factures numeric, locataires numeric, proprietaire numeric)
+CREATE FUNCTION summary(p_building int, p_start date, p_end date)
+RETURNS TABLE (energy energy, invoices numeric, tenants numeric, owner numeric)
 LANGUAGE sql STABLE AS $$
-SELECT energie,
-       sum(montant),
-       coalesce(sum(montant) FILTER (WHERE sejour_id IS NOT NULL), 0),
-       coalesce(sum(montant) FILTER (WHERE sejour_id IS NULL), 0)
-FROM repartition(p_immeuble, p_debut, p_fin)
-GROUP BY energie ORDER BY energie
+SELECT energy,
+       sum(amount),
+       coalesce(sum(amount) FILTER (WHERE tenancy_id IS NOT NULL), 0),
+       coalesce(sum(amount) FILTER (WHERE tenancy_id IS NULL), 0)
+FROM apportionment(p_building, p_start, p_end)
+GROUP BY energy ORDER BY energy
 $$;
 
 -- ---------------------------------------------------------------- authentification
 -- ADR 0020 : connexion par passkey (WebAuthn) seulement ; seules les empreintes (SHA-256) des secrets sont gardées
-CREATE TABLE utilisateur (
+CREATE TABLE app_user (
   id       serial PRIMARY KEY,
   email    text NOT NULL UNIQUE,
-  nom      text NOT NULL,
-  cree_le  timestamptz NOT NULL DEFAULT now()
+  name      text NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE passkey (
   id              text PRIMARY KEY,                     -- credential id (base64url)
-  utilisateur_id  int  NOT NULL REFERENCES utilisateur(id) ON DELETE CASCADE,
-  cle_publique    bytea NOT NULL,
-  compteur        bigint NOT NULL DEFAULT 0,
+  app_user_id  int  NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  public_key    bytea NOT NULL,
+  sign_count        bigint NOT NULL DEFAULT 0,
   transports      text[],
-  appareil        text NOT NULL,                        -- name given at registration (« MacBook », « iPhone »)
-  cree_le         timestamptz NOT NULL DEFAULT now(),
-  utilisee_le     timestamptz
+  device        text NOT NULL,                        -- name given at registration (« MacBook », « iPhone »)
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  used_at     timestamptz
 );
-CREATE INDEX ON passkey (utilisateur_id);
+CREATE INDEX ON passkey (app_user_id);
 
 CREATE TABLE session (
-  empreinte       text PRIMARY KEY,                     -- SHA-256 of the cookie
-  utilisateur_id  int  NOT NULL REFERENCES utilisateur(id) ON DELETE CASCADE,
-  cree_le         timestamptz NOT NULL DEFAULT now(),
-  expire_le       timestamptz NOT NULL
+  token_hash       text PRIMARY KEY,                     -- SHA-256 of the cookie
+  app_user_id  int  NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  expires_at       timestamptz NOT NULL
 );
-CREATE INDEX ON session (utilisateur_id);
+CREATE INDEX ON session (app_user_id);
 
-CREATE TABLE lien_enregistrement (
-  empreinte       text PRIMARY KEY,                     -- SHA-256 of the link's token
-  utilisateur_id  int  NOT NULL REFERENCES utilisateur(id) ON DELETE CASCADE,
-  expire_le       timestamptz NOT NULL,
-  utilise_le      timestamptz
+CREATE TABLE registration_link (
+  token_hash       text PRIMARY KEY,                     -- SHA-256 of the link's token
+  app_user_id  int  NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  expires_at       timestamptz NOT NULL,
+  used_at      timestamptz
 );
 
-CREATE TABLE jeton_api (
+CREATE TABLE api_token (
   id              serial PRIMARY KEY,
-  nom             text NOT NULL,
-  empreinte       text NOT NULL UNIQUE,                 -- SHA-256 of the token
-  utilisateur_id  int  NOT NULL REFERENCES utilisateur(id) ON DELETE CASCADE,
-  cree_le         timestamptz NOT NULL DEFAULT now(),
-  utilise_le      timestamptz,
-  revoque_le      timestamptz
+  name             text NOT NULL,
+  token_hash       text NOT NULL UNIQUE,                 -- SHA-256 of the token
+  app_user_id  int  NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  used_at      timestamptz,
+  revoked_at      timestamptz
 );

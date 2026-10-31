@@ -5,7 +5,7 @@ import { estRetenue, type FactureResumee, type Mouvement, type Paiement, type Re
 // incomplete, and the payments of the exercise that no statement shows (typed twice, or not received), counted only
 // over the dates the statements cover.
 
-export type CompteBanque = { compte: string, premier: string, dernier: string, manquants: string[] }
+export type CompteBanque = { account: string, premier: string, last: string, manquants: string[] }
 
 export type EtatBanque = {
   comptes: CompteBanque[]
@@ -16,36 +16,36 @@ export type EtatBanque = {
   sansMouvement: Paiement[]
 }
 
-const plusJours = (date: string, jours: number) => new Date(new Date(date).getTime() + jours * 864e5).toISOString().slice(0, 10)
+const plusJours = (date: string, days: number) => new Date(new Date(date).getTime() + days * 864e5).toISOString().slice(0, 10)
 
-export function etatBanque(releves: ReleveResume[], mouvements: Mouvement[], paiements: Paiement[], debut: string, fin: string,
+export function etatBanque(statements: ReleveResume[], transactions: Mouvement[], payments: Paiement[], start: string, end: string,
   aujourdhui = new Date().toISOString().slice(0, 10)): EtatBanque {
   const parCompte = new Map<string, ReleveResume[]>()
-  for (const r of [...releves].sort((a, b) => a.date_releve.localeCompare(b.date_releve))) {
-    parCompte.set(r.compte, [...(parCompte.get(r.compte) ?? []), r])
+  for (const r of [...statements].sort((a, b) => a.statement_date.localeCompare(b.statement_date))) {
+    parCompte.set(r.account, [...(parCompte.get(r.account) ?? []), r])
   }
-  const comptes = [...parCompte].map(([compte, liste]) => ({
-    compte,
-    premier: liste[0]!.date_releve,
-    dernier: liste.at(-1)!.date_releve,
-    manquants: liste.filter((r) => r.suite === false && r.date_releve >= debut && r.date_releve <= plusJours(fin, 31))
-      .map((r) => r.date_releve),
+  const comptes = [...parCompte].map(([account, liste]) => ({
+    account,
+    premier: liste[0]!.statement_date,
+    last: liste.at(-1)!.statement_date,
+    manquants: liste.filter((r) => r.suite === false && r.statement_date >= start && r.statement_date <= plusJours(end, 31))
+      .map((r) => r.statement_date),
   }))
   const premier = comptes.map((c) => c.premier).sort()[0] ?? null
-  const dernier = comptes.map((c) => c.dernier).sort().at(-1) ?? null
-  const attendu = [fin, aujourdhui].sort()[0]!
-  const finManquante = comptes.length && dernier! < plusJours(attendu, -31) && attendu >= debut ? dernier : null
+  const last = comptes.map((c) => c.last).sort().at(-1) ?? null
+  const attendu = [end, aujourdhui].sort()[0]!
+  const finManquante = comptes.length && last! < plusJours(attendu, -31) && attendu >= start ? last : null
 
-  const surExercice = mouvements.filter((m) => m.date_operation >= debut && m.date_operation <= fin)
+  const surExercice = transactions.filter((m) => m.transaction_date >= start && m.transaction_date <= end)
   // A retention on the deposit (ADR 0021) is seen on no statement
-  const sansMouvement = premier === null ? [] : paiements.filter((p) => !p.mouvement_id && !estRetenue(p) && p.date_paiement >= debut
-    && p.date_paiement <= fin && p.date_paiement >= premier && p.date_paiement <= dernier!)
+  const sansMouvement = premier === null ? [] : payments.filter((p) => !p.bank_transaction_id && !estRetenue(p) && p.payment_date >= start
+    && p.payment_date <= end && p.payment_date >= premier && p.payment_date <= last!)
   return {
     comptes,
     finManquante,
-    aCategoriser: surExercice.filter((m) => m.statut === 'a_categoriser'),
-    incomplets: surExercice.filter((m) => m.statut === 'incomplet'),
-    sansMouvement: sansMouvement.sort((a, b) => a.date_paiement.localeCompare(b.date_paiement)),
+    aCategoriser: surExercice.filter((m) => m.status === 'to_categorise'),
+    incomplets: surExercice.filter((m) => m.status === 'incomplet'),
+    sansMouvement: sansMouvement.sort((a, b) => a.payment_date.localeCompare(b.payment_date)),
   }
 }
 
@@ -57,6 +57,6 @@ export const nbProblemesBanque = (e: EtatBanque) =>
  * Validated invoices paid a little more than their total (ADR 0022: a balance rounded by the supplier, up to 1 euro),
  * whose last payment falls in the exercise: shown in the checks, not a problem.
  */
-export const facturesAvecEcart = (factures: FactureResumee[], debut: string, fin: string) => factures
-  .filter((f) => f.statut === 'validee' && Number(f.reste) < 0 && f.date_paiement !== null && f.date_paiement >= debut
-    && f.date_paiement <= fin)
+export const facturesAvecEcart = (invoices: FactureResumee[], start: string, end: string) => invoices
+  .filter((f) => f.status === 'validated' && Number(f.remaining) < 0 && f.payment_date !== null && f.payment_date >= start
+    && f.payment_date <= end)

@@ -8,39 +8,39 @@ import { body, idParam, InputError, sendError } from '../http.js'
 // invoices and the last version of its extractor; « confidentiel »: its invoices are never joined to the supporting documents;
 // « zones_masquees »: the zones masked on the scans of its invoices, drawn by hand (ADR 0025).
 
-const COLUMNS = `fo.id, fo.nom, fo.confidentiel, fo.zones_masquees,
-  (SELECT array_agg(DISTINCT energie::text ORDER BY energie::text) FROM (
-     SELECT energie FROM facture WHERE fournisseur_id = fo.id UNION SELECT energie FROM extracteur WHERE fournisseur_id = fo.id
-   ) e WHERE energie IS NOT NULL) AS energies,
-  (SELECT count(*)::int FROM facture WHERE fournisseur_id = fo.id) AS nb_factures,
-  (SELECT count(*)::int FROM facture WHERE fournisseur_id = fo.id AND fichier_pdf IS NOT NULL) AS nb_pdf,
-  (SELECT count(*)::int FROM releve_bancaire WHERE fournisseur_id = fo.id) AS nb_releves,
-  (SELECT json_build_object('id', e.id, 'version', e.version, 'type', e.type) FROM extracteur e WHERE e.fournisseur_id = fo.id
-   ORDER BY e.version DESC LIMIT 1) AS extracteur`
+const COLUMNS = `fo.id, fo.name, fo.confidential, fo.masked_zones,
+  (SELECT array_agg(DISTINCT energy::text ORDER BY energy::text) FROM (
+     SELECT energy FROM invoice WHERE supplier_id = fo.id UNION SELECT energy FROM extractor WHERE supplier_id = fo.id
+   ) e WHERE energy IS NOT NULL) AS energies,
+  (SELECT count(*)::int FROM invoice WHERE supplier_id = fo.id) AS invoice_count,
+  (SELECT count(*)::int FROM invoice WHERE supplier_id = fo.id AND pdf_file IS NOT NULL) AS pdf_count,
+  (SELECT count(*)::int FROM bank_statement WHERE supplier_id = fo.id) AS statement_count,
+  (SELECT json_build_object('id', e.id, 'version', e.version, 'type', e.type) FROM extractor e WHERE e.supplier_id = fo.id
+   ORDER BY e.version DESC LIMIT 1) AS extractor`
 
 const fournisseurRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
   app.get('/fournisseurs', async () => {
-    const { rows } = await db.query(`SELECT ${COLUMNS} FROM fournisseur fo ORDER BY fo.nom`)
+    const { rows } = await db.query(`SELECT ${COLUMNS} FROM supplier fo ORDER BY fo.name`)
     return rows
   })
 
   app.get('/fournisseurs/:id', async (request, reply) => {
-    const { rows: [fournisseur] } = await db.query(`SELECT ${COLUMNS} FROM fournisseur fo WHERE fo.id = $1`, [idParam(request)])
-    return fournisseur ?? reply.code(404).send({ message: 'Fournisseur introuvable' })
+    const { rows: [supplier] } = await db.query(`SELECT ${COLUMNS} FROM supplier fo WHERE fo.id = $1`, [idParam(request)])
+    return supplier ?? reply.code(404).send({ message: 'Fournisseur introuvable' })
   })
 
   app.patch('/fournisseurs/:id', async (request, reply) => {
     try {
-      const { confidentiel } = body(request)
-      if (typeof confidentiel !== 'boolean') {
+      const { confidential } = body(request)
+      if (typeof confidential !== 'boolean') {
         throw new InputError('« confidentiel » doit valoir true ou false')
       }
-      const { rowCount } = await db.query('UPDATE fournisseur SET confidentiel = $2 WHERE id = $1', [idParam(request), confidentiel])
+      const { rowCount } = await db.query('UPDATE supplier SET confidential = $2 WHERE id = $1', [idParam(request), confidential])
       if (!rowCount) {
         return reply.code(404).send({ message: 'Fournisseur introuvable' })
       }
-      const { rows: [fournisseur] } = await db.query(`SELECT ${COLUMNS} FROM fournisseur fo WHERE fo.id = $1`, [idParam(request)])
-      return fournisseur
+      const { rows: [supplier] } = await db.query(`SELECT ${COLUMNS} FROM supplier fo WHERE fo.id = $1`, [idParam(request)])
+      return supplier
     } catch (error) {
       return sendError(reply, error)
     }
@@ -50,13 +50,13 @@ const fournisseurRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) 
   app.put('/fournisseurs/:id/zones', async (request, reply) => {
     try {
       const zones = zonesSaisies(body(request).zones)
-      const { rowCount } = await db.query('UPDATE fournisseur SET zones_masquees = $2 WHERE id = $1',
+      const { rowCount } = await db.query('UPDATE supplier SET masked_zones = $2 WHERE id = $1',
         [idParam(request), JSON.stringify(zones)])
       if (!rowCount) {
         return reply.code(404).send({ message: 'Fournisseur introuvable' })
       }
-      const { rows: [fournisseur] } = await db.query(`SELECT ${COLUMNS} FROM fournisseur fo WHERE fo.id = $1`, [idParam(request)])
-      return fournisseur
+      const { rows: [supplier] } = await db.query(`SELECT ${COLUMNS} FROM supplier fo WHERE fo.id = $1`, [idParam(request)])
+      return supplier
     } catch (error) {
       return sendError(reply, error)
     }

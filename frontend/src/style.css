@@ -214,15 +214,15 @@ select {
   vertical-align: middle;
 }
 
-.pastille.a_verifier {
+.pastille.draft {
   background: var(--fond-avertissement);
 }
 
-.pastille.validee {
+.pastille.validated {
   background: var(--fond-ok);
 }
 
-.pastille.remplacee {
+.pastille.replaced {
   background: var(--surface);
   color: var(--discret);
   text-decoration: line-through;
@@ -425,7 +425,7 @@ select {
   flex: 1;
 }
 
-.bandeau-copie.verifiee {
+.bandeau-copie.checked {
   background: var(--fond-ok);
 }
 
@@ -456,11 +456,11 @@ button.principal .etat-ko {
   border: 1px solid var(--bord);
 }
 
-.grille .ligne-erreur {
+.grille .ligne-error {
   background: var(--fond-erreur);
 }
 
-.grille .ligne-avertissement {
+.grille .ligne-warning {
   background: var(--fond-avertissement);
 }
 
@@ -476,12 +476,14 @@ button.principal .etat-ko {
   margin-bottom: 0.2rem;
 }
 
-.constats li.erreur {
+.constats li.erreur,
+.constats li.error {
   border-color: var(--ko);
   background: var(--fond-erreur);
 }
 
-.constats li.avertissement {
+.constats li.avertissement,
+.constats li.warning {
   border-color: #bf8700;
   background: var(--fond-avertissement);
 }
@@ -806,7 +808,7 @@ details ol {
   font-size: 0.85rem;
 }
 
-.case-mois.paye {
+.case-mois.paid {
   color: var(--ok);
 }
 
@@ -1021,11 +1023,11 @@ button.actif {
 }
 
 /* State of a regularisation (computed) or decision of the owner */
-.pastille.en_attente {
+.pastille.pending {
   background: var(--fond-avertissement);
 }
 
-.pastille.soldee {
+.pastille.settled {
   background: var(--fond-ok);
 }
 

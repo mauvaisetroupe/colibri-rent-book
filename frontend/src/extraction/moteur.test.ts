@@ -16,13 +16,13 @@ import { surligner } from './surlignage'
 // and run as in the browser. The real invoices of an operation are tested with its own data.
 
 /** A one-page PDF: each row is [x, text] pieces on a line, from the top. */
-async function facture(lignes: [number, string][][]): Promise<Uint8Array> {
+async function invoice(lines: [number, string][][]): Promise<Uint8Array> {
   const pdf = await PDFDocument.create()
   const page = pdf.addPage([595, 842])
   const police = await pdf.embedFont(StandardFonts.Helvetica)
-  lignes.forEach((ligne, i) => {
-    for (const [x, texte] of ligne) {
-      page.drawText(texte, { x, y: 800 - i * 16, size: 10, font: police })
+  lines.forEach((ligne, i) => {
+    for (const [x, text] of ligne) {
+      page.drawText(text, { x, y: 800 - i * 16, size: 10, font: police })
     }
   })
   return pdf.save()
@@ -46,20 +46,20 @@ const modele = charger(compiler(await readFile(new URL('modeles/modele.ts', impo
 
 describe('extraction engine on a made-up invoice', () => {
   test('pieces grouped into lines, a change of column written as three spaces', async () => {
-    const document = await documentDuPdf(await facture(FACTURE))
+    const document = await documentDuPdf(await invoice(FACTURE))
     assert.equal(document.lines[4], 'Consommation   du 01/01/2026 au 28/02/2026   120,50 €')
     assert.equal(document.pages.length, 1)
   })
 
   test('the template reads the header and the invoice lines, the lines add up to the total', async () => {
-    const document = await documentDuPdf(await facture(FACTURE))
-    assert.equal(energieDe(modele), 'eau')
+    const document = await documentDuPdf(await invoice(FACTURE))
+    assert.equal(energieDe(modele), 'water')
     assert.ok(reconnait(modele, document))
     const lue = extraire(modele, document)
-    assert.deepEqual([lue.numero.valeur, lue.date.valeur, lue.total.valeur], ['F-2026-001', '2026-03-15', '150.5'])
-    assert.deepEqual(lue.lignes.valeur!.map((l) => [l.categorie, l.libelle, l.debut, l.fin, l.montant_ttc, l.affectation]), [
-      ['consommation', 'Consommation', '2026-01-01', '2026-02-28', '120.5', 'recuperable'],
-      ['abonnement', 'Abonnement', '2026-01-01', '2026-03-31', '30', 'recuperable'],
+    assert.deepEqual([lue.number.valeur, lue.date.valeur, lue.total.valeur], ['F-2026-001', '2026-03-15', '150.5'])
+    assert.deepEqual(lue.lines.valeur!.map((l) => [l.category, l.label, l.start, l.end, l.amount_incl_tax, l.allocation]), [
+      ['consumption', 'Consommation', '2026-01-01', '2026-02-28', '120.5', 'recoverable'],
+      ['subscription', 'Abonnement', '2026-01-01', '2026-03-31', '30', 'recoverable'],
     ])
     // « gratuit » is no amount: the line is not an invoice line for the template
     assert.deepEqual(lue.lignesEnErreur, [])
@@ -67,7 +67,7 @@ describe('extraction engine on a made-up invoice', () => {
   })
 
   test('a line found but not read is marked, the others are still read', async () => {
-    const document = await documentDuPdf(await facture([
+    const document = await documentDuPdf(await invoice([
       ...FACTURE.slice(0, 4),
       [[40, 'Consommation'], [200, 'du 01/01/2026 au 31/02/2026'], [450, '120,50 €']],
       ...FACTURE.slice(5),
@@ -77,13 +77,13 @@ describe('extraction engine on a made-up invoice', () => {
     const lue = extraire(charger(compiler(source, ts)), document)
     assert.equal(lue.lignesEnErreur.length, 1)
     assert.equal(lue.lignesEnErreur[0]!.position, 4)
-    assert.equal(lue.lignes.valeur!.length, 1)
-    assert.equal(lue.lignes.erreur, '1 ligne(s) trouvée(s) mais non lue(s)')
+    assert.equal(lue.lines.valeur!.length, 1)
+    assert.equal(lue.lines.erreur, '1 ligne(s) trouvée(s) mais non lue(s)')
     assert.match(surligner(document, [], { enErreur: lue.lignesEnErreur })[4]!.erreur!, /frenchDate/)
   })
 
   test('a document a template does not recognise', async () => {
-    const document = await documentDuPdf(await facture([[[40, 'AUTRE FOURNISSEUR']]]))
+    const document = await documentDuPdf(await invoice([[[40, 'AUTRE FOURNISSEUR']]]))
     assert.equal(reconnait(modele, document), false)
   })
 })

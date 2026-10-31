@@ -6,12 +6,12 @@ import Big from 'big.js'
 import { mailRectificatif, mailRegularisation, mensualites, suggestionProvision, type RegulMail } from './mails.js'
 
 const regul = (overrides: Partial<RegulMail>): RegulMail => ({
-  lot: 'Lot 1', debut: '2024-01-01', fin: '2025-12-31', present_du: '2024-01-01', present_au: '2025-12-31',
-  montant_du: '5533.95', provisions: '3800', solde: '1733.95', date_envoi: null, montant_recu: '0',
+  unit: 'Lot 1', start: '2024-01-01', end: '2025-12-31', present_from: '2024-01-01', present_to: '2025-12-31',
+  amount_due: '5533.95', advances: '3800', balance: '1733.95', sent_on: null, amount_received: '0',
   ...overrides,
 })
 
-const options = { etalement: 1, provision_mensuelle: null, provision_a_partir_du: null, signature: 'La gérance' }
+const options = { etalement: 1, monthly_charge_advance: null, charge_advance_from: null, signature: 'La gérance' }
 const flat = (text: string) => text.replace(/[  ]/g, ' ')
 
 describe('mails', () => {
@@ -28,7 +28,7 @@ describe('mails', () => {
 
   test('standard mail: amounts, instalments and new provision', () => {
     const mail = mailRegularisation(regul({}), {
-      ...options, etalement: 3, provision_mensuelle: '235', provision_a_partir_du: '2026-11-01',
+      ...options, etalement: 3, monthly_charge_advance: '235', charge_advance_from: '2026-11-01',
     })
     assert.equal(mail.objet, 'Régularisation des charges du 01/01/2024 au 31/12/2025')
     const corps = flat(mail.corps)
@@ -41,7 +41,7 @@ describe('mails', () => {
   })
 
   test('a negative balance is a refund, no instalments offered', () => {
-    const corps = flat(mailRegularisation(regul({ solde: '-99.53', present_du: '2025-06-16', present_au: '2025-08-16' }),
+    const corps = flat(mailRegularisation(regul({ balance: '-99.53', present_from: '2025-06-16', present_to: '2025-08-16' }),
       { ...options, etalement: 3 }).corps)
     assert.match(corps, /Trop-perçu en votre faveur : 99,53 €/)
     assert.match(corps, /votre présence : du 16\/06\/2025 au 16\/08\/2025/)
@@ -49,8 +49,8 @@ describe('mails', () => {
   })
 
   test('corrective mail: apology, initial and corrected amounts, payments already made', () => {
-    const before = regul({ solde: '2046', montant_du: '5846', date_envoi: '2026-07-01', montant_recu: '2046' })
-    const mail = mailRectificatif(before, regul({ montant_recu: '2046' }), options)
+    const before = regul({ balance: '2046', amount_due: '5846', sent_on: '2026-07-01', amount_received: '2046' })
+    const mail = mailRectificatif(before, regul({ amount_received: '2046' }), options)
     assert.equal(mail.objet, 'Rectificatif – régularisation des charges du 01/01/2024 au 31/12/2025')
     const corps = flat(mail.corps)
     assert.match(corps, /que je vous ai adressée le 01\/07\/2026/)

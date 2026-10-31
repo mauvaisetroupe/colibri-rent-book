@@ -8,10 +8,10 @@ import Big from 'big.js'
 // Only import: big.js (decimal amounts, never JavaScript numbers). The editor gives this file to Monaco.
 
 // Values stored in the database (SQL enums, French domain vocabulary)
-export type Category = 'consommation' | 'abonnement' | 'taxe' | 'prestation' | 'penalite' | 'autre'
-export type Energy = 'gaz' | 'electricite' | 'eau' | 'ordures_menageres' | 'autre'
+export type Category = 'consumption' | 'subscription' | 'tax' | 'service' | 'penalty' | 'other'
+export type Energy = 'gas' | 'electricity' | 'water' | 'household_waste' | 'other'
 /** recuperable: shared by the tenants; proprietaire: borne by the owner (penalties…); hors_immeuble: another property */
-export type Allocation = 'recuperable' | 'proprietaire' | 'hors_immeuble'
+export type Allocation = 'recoverable' | 'owner' | 'outside_building'
 
 /** The text of the PDF, grouped into lines with the grouping settings of the extractor. */
 export type ExtractionDocument = {

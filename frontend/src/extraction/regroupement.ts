@@ -9,56 +9,56 @@ import type { Row } from './bank-extractor'
 // margin, left of which pieces are ignored (a code printed vertically).
 
 /** A piece of a line of text and where its text is in the line (ADR 0024: what to mask is found in the lines). */
-export type Portion = { morceau: Morceau, debut: number, fin: number }
+export type Portion = { morceau: Morceau, start: number, end: number }
 
 /** The lines of a page as text, each with the pieces it is made of. */
-export function lignesAvecMorceaux(morceaux: Morceau[], reglages: Reglages): { texte: string, portions: Portion[] }[] {
-  const marge = reglages.marge ?? null
-  const tries = morceaux.filter((m) => m.texte.trim() && (marge === null || m.x >= marge)).sort((a, b) => a.y - b.y || a.x - b.x)
-  const lignes: { y: number, morceaux: Morceau[] }[] = []
+export function lignesAvecMorceaux(morceaux: Morceau[], settings: Reglages): { text: string, portions: Portion[] }[] {
+  const margin = settings.margin ?? null
+  const tries = morceaux.filter((m) => m.text.trim() && (margin === null || m.x >= margin)).sort((a, b) => a.y - b.y || a.x - b.x)
+  const lines: { y: number, morceaux: Morceau[] }[] = []
   for (const morceau of tries) {
-    const derniere = lignes.at(-1)
-    if (derniere && morceau.y - derniere.y <= reglages.toleranceHauteur) {
-      derniere.morceaux.push(morceau)
+    const latest = lines.at(-1)
+    if (latest && morceau.y - latest.y <= settings.lineTolerance) {
+      latest.morceaux.push(morceau)
     } else {
-      lignes.push({ y: morceau.y, morceaux: [morceau] })
+      lines.push({ y: morceau.y, morceaux: [morceau] })
     }
   }
-  return lignes.map(({ morceaux: ligne }) => {
+  return lines.map(({ morceaux: ligne }) => {
     ligne.sort((a, b) => a.x - b.x)
-    let texte = ''
-    let fin: number | null = null
+    let text = ''
+    let end: number | null = null
     const portions: Portion[] = []
     for (const m of ligne) {
-      if (fin !== null) {
-        const ecart = m.x - fin
-        texte += ecart <= reglages.collage ? '' : ecart > reglages.colonne ? '   ' : ' '
+      if (end !== null) {
+        const ecart = m.x - end
+        text += ecart <= settings.joinGap ? '' : ecart > settings.columnGap ? '   ' : ' '
       }
-      portions.push({ morceau: m, debut: texte.length, fin: texte.length + m.texte.length })
-      texte += m.texte
-      fin = m.x + m.largeur
+      portions.push({ morceau: m, start: text.length, end: text.length + m.text.length })
+      text += m.text
+      end = m.x + m.largeur
     }
-    return { texte: texte.trimEnd(), portions }
+    return { text: text.trimEnd(), portions }
   })
 }
 
 /** Lines of a page, with their pieces. */
-function rangeesDeLaPage(morceaux: Morceau[], reglages: Reglages, page: number): Omit<Row, 'index'>[] {
-  return lignesAvecMorceaux(morceaux, reglages).map(({ texte, portions }) => ({
-    text: texte,
-    pieces: portions.map(({ morceau: m }) => ({ text: m.texte.trim(), x: m.x, right: m.x + m.largeur })),
+function rangeesDeLaPage(morceaux: Morceau[], settings: Reglages, page: number): Omit<Row, 'index'>[] {
+  return lignesAvecMorceaux(morceaux, settings).map(({ text, portions }) => ({
+    text: text,
+    pieces: portions.map(({ morceau: m }) => ({ text: m.text.trim(), x: m.x, right: m.x + m.largeur })),
     page,
   }))
 }
 
 /** Lines of text of a page. */
-export const regrouperPage = (morceaux: Morceau[], reglages: Reglages): string[] =>
-  rangeesDeLaPage(morceaux, reglages, 1).map((r) => r.text)
+export const regrouperPage = (morceaux: Morceau[], settings: Reglages): string[] =>
+  rangeesDeLaPage(morceaux, settings, 1).map((r) => r.text)
 
-export function regrouper(pages: Morceau[][], reglages: Reglages): Document & { rows: Row[] } {
-  const parPage = pages.map((page, i) => rangeesDeLaPage(page, reglages, i + 1))
+export function regrouper(pages: Morceau[][], settings: Reglages): Document & { rows: Row[] } {
+  const parPage = pages.map((page, i) => rangeesDeLaPage(page, settings, i + 1))
   const rows = parPage.flat().map((r, index) => ({ ...r, index }))
   const lignesParPage = parPage.map((rangees) => rangees.map((r) => r.text))
-  const lignes = rows.map((r) => r.text)
-  return { pages: lignesParPage, lines: lignes, text: lignes.join('\n'), rows }
+  const lines = rows.map((r) => r.text)
+  return { pages: lignesParPage, lines: lines, text: lines.join('\n'), rows }
 }

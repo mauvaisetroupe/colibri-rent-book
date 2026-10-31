@@ -16,28 +16,28 @@ import { isPdf, removeIfUnused, storePdf } from '../pdfStorage.js'
 // several (a deposit, then the balance), linked in « Catégorisation » or from the invoice; here, the invoice alone and
 // its payments to read.
 
-export const NATURES = ['entretien', 'amelioration', 'construction'] as const
+export const NATURES = ['maintenance', 'improvement', 'construction'] as const
 
-const COLUMNS = `t.id, t.immeuble_id, t.lot_id, lt.code AS lot, t.fournisseur, t.description, t.nature,
-  t.date_facture::text, t.montant_ttc::text, t.fichier_pdf IS NOT NULL AS pdf, t.note,
+const COLUMNS = `t.id, t.building_id, t.unit_id, lt.code AS unit, t.supplier, t.description, t.nature,
+  t.invoice_date::text, t.total_incl_tax::text, t.pdf_file IS NOT NULL AS pdf, t.note,
   t.nature <> 'construction' AS deductible,
-  coalesce(r.reglements, '[]'::json) AS reglements, coalesce(r.paye, 0)::text AS paye,
-  (t.montant_ttc - coalesce(r.paye, 0))::text AS reste, r.dernier::text AS date_paiement`
+  coalesce(r.payments, '[]'::json) AS payments, coalesce(r.paid, 0)::text AS paid,
+  (t.total_incl_tax - coalesce(r.paid, 0))::text AS remaining, r.last::text AS payment_date`
 
 // Its payments (the movement: date, label), the amount paid, the date of the last one
-const FROM = `travaux t LEFT JOIN lot lt ON lt.id = t.lot_id
+const FROM = `works_invoice t LEFT JOIN unit lt ON lt.id = t.unit_id
   LEFT JOIN LATERAL (
-    SELECT json_agg(json_build_object('id', rt.id, 'mouvement_id', m.id, 'date_paiement', m.date_operation::text,
-                                      'libelle', m.libelle, 'montant', rt.montant::text) ORDER BY m.date_operation, rt.id) AS reglements,
-           sum(rt.montant) AS paye, max(m.date_operation) AS dernier
-    FROM reglement_travaux rt JOIN mouvement m ON m.id = rt.mouvement_id WHERE rt.travaux_id = t.id
+    SELECT json_agg(json_build_object('id', rt.id, 'bank_transaction_id', m.id, 'payment_date', m.transaction_date::text,
+                                      'label', m.label, 'amount', rt.amount::text) ORDER BY m.transaction_date, rt.id) AS payments,
+           sum(rt.amount) AS paid, max(m.transaction_date) AS last
+    FROM works_invoice_payment rt JOIN bank_transaction m ON m.id = rt.bank_transaction_id WHERE rt.works_invoice_id = t.id
   ) r ON true`
 
 async function readTravaux(db: Pool, raw: Record<string, unknown>) {
-  const immeuble = requiredId(raw.immeuble_id, 'Immeuble')
-  const lot = raw.lot_id === null || raw.lot_id === undefined || raw.lot_id === '' ? null : requiredId(raw.lot_id, 'Lot')
-  if (lot !== null) {
-    const { rowCount } = await db.query('SELECT 1 FROM lot WHERE id = $1 AND immeuble_id = $2', [lot, immeuble])
+  const building = requiredId(raw.building_id, 'Immeuble')
+  const unit = raw.unit_id === null || raw.unit_id === undefined || raw.unit_id === '' ? null : requiredId(raw.unit_id, 'Lot')
+  if (unit !== null) {
+    const { rowCount } = await db.query('SELECT 1 FROM unit WHERE id = $1 AND building_id = $2', [unit, building])
     if (!rowCount) {
       throw new InputError('Ce lot n\'est pas dans cet immeuble')
     }
@@ -46,8 +46,8 @@ async function readTravaux(db: Pool, raw: Record<string, unknown>) {
   if (!(NATURES as readonly string[]).includes(nature)) {
     throw new InputError('Nature : entretien, amélioration ou construction')
   }
-  return [immeuble, lot, requiredText(raw.fournisseur, 'Fournisseur'), requiredText(raw.description, 'Description'),
-    nature, requiredDate(raw.date_facture, 'Date de la facture'), requiredDecimal(raw.montant_ttc, 'Montant TTC'),
+  return [building, unit, requiredText(raw.supplier, 'Fournisseur'), requiredText(raw.description, 'Description'),
+    nature, requiredDate(raw.invoice_date, 'Date de la facture'), requiredDecimal(raw.total_incl_tax, 'Montant TTC'),
     optionalText(raw.note)] as const
 }
 
@@ -60,11 +60,11 @@ const travauxRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = asyn
   // Every works invoice of a building, the latest first (filtered by year on the screen)
   app.get('/travaux', async (request, reply) => {
     try {
-      const immeuble = requiredId(query(request).immeuble, 'Immeuble')
+      const building = requiredId(query(request).building, 'Immeuble')
       const { rows } = await db.query(
-        `SELECT ${COLUMNS} FROM ${FROM} WHERE t.immeuble_id = $1
-         ORDER BY coalesce(r.dernier, t.date_facture) DESC, t.id DESC`,
-        [immeuble],
+        `SELECT ${COLUMNS} FROM ${FROM} WHERE t.building_id = $1
+         ORDER BY coalesce(r.last, t.invoice_date) DESC, t.id DESC`,
+        [building],
       )
       return rows
     } catch (error) {
@@ -75,7 +75,7 @@ const travauxRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = asyn
   app.post('/travaux', async (request, reply) => {
     try {
       const { rows: [created] } = await db.query<{ id: number }>(
-        `INSERT INTO travaux (immeuble_id, lot_id, fournisseur, description, nature, date_facture, montant_ttc, note)
+        `INSERT INTO works_invoice (building_id, unit_id, supplier, description, nature, invoice_date, total_incl_tax, note)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`, [...await readTravaux(db, body(request))])
       return reply.code(201).send(await load(created!.id))
     } catch (error) {
@@ -88,14 +88,14 @@ const travauxRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = asyn
     try {
       const id = idParam(request)
       const champs = await readTravaux(db, body(request))
-      const { rows: [paye] } = await db.query<{ paye: string }>(
-        'SELECT coalesce(sum(montant), 0)::text AS paye FROM reglement_travaux WHERE travaux_id = $1', [id])
-      if (new Big(paye!.paye).gt(champs[6])) {
-        throw new InputError(`Les virements rattachés (${new Big(paye!.paye).toFixed(2)}) dépassent ce montant`)
+      const { rows: [paid] } = await db.query<{ paid: string }>(
+        'SELECT coalesce(sum(amount), 0)::text AS paid FROM works_invoice_payment WHERE works_invoice_id = $1', [id])
+      if (new Big(paid!.paid).gt(champs[6])) {
+        throw new InputError(`Les virements rattachés (${new Big(paid!.paid).toFixed(2)}) dépassent ce montant`)
       }
       const { rowCount } = await db.query(
-        `UPDATE travaux SET immeuble_id = $2, lot_id = $3, fournisseur = $4, description = $5, nature = $6,
-                            date_facture = $7, montant_ttc = $8, note = $9
+        `UPDATE works_invoice SET building_id = $2, unit_id = $3, supplier = $4, description = $5, nature = $6,
+                            invoice_date = $7, total_incl_tax = $8, note = $9
          WHERE id = $1`, [id, ...champs])
       return rowCount ? load(id) : reply.code(404).send({ message: 'Travaux introuvables' })
     } catch (error) {
@@ -104,15 +104,15 @@ const travauxRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = asyn
   })
 
   app.delete('/travaux/:id', async (request, reply) => {
-    const { rows: [deleted] } = await db.query<{ fichier_pdf: string | null }>(
-      'DELETE FROM travaux WHERE id = $1 RETURNING fichier_pdf',
+    const { rows: [deleted] } = await db.query<{ pdf_file: string | null }>(
+      'DELETE FROM works_invoice WHERE id = $1 RETURNING pdf_file',
       [idParam(request)],
     )
     if (!deleted) {
       return reply.code(404).send({ message: 'Travaux introuvables' })
     }
-    if (deleted.fichier_pdf) {
-      await removeIfUnused(db, storageDir, deleted.fichier_pdf)
+    if (deleted.pdf_file) {
+      await removeIfUnused(db, storageDir, deleted.pdf_file)
     }
     return reply.code(204).send()
   })
@@ -120,11 +120,11 @@ const travauxRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = asyn
   // The PDF of the invoice, attached or replaced
   app.post('/travaux/:id/pdf', async (request, reply) => {
     const id = idParam(request)
-    const { rows: [travaux] } = await db.query<{ fichier_pdf: string | null }>(
-      'SELECT fichier_pdf FROM travaux WHERE id = $1',
+    const { rows: [works_invoice] } = await db.query<{ pdf_file: string | null }>(
+      'SELECT pdf_file FROM works_invoice WHERE id = $1',
       [id],
     )
-    if (!travaux) {
+    if (!works_invoice) {
       return reply.code(404).send({ message: 'Travaux introuvables' })
     }
     const file = await request.file()
@@ -136,23 +136,23 @@ const travauxRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = asyn
       return reply.code(415).send({ message: `${file.filename} n'est pas un PDF` })
     }
     const { fileName } = await storePdf(storageDir, content, 'travaux')
-    await db.query('UPDATE travaux SET fichier_pdf = $2 WHERE id = $1', [id, fileName])
-    if (travaux.fichier_pdf && travaux.fichier_pdf !== fileName) {
-      await removeIfUnused(db, storageDir, travaux.fichier_pdf)
+    await db.query('UPDATE works_invoice SET pdf_file = $2 WHERE id = $1', [id, fileName])
+    if (works_invoice.pdf_file && works_invoice.pdf_file !== fileName) {
+      await removeIfUnused(db, storageDir, works_invoice.pdf_file)
     }
     return load(id)
   })
 
   app.get('/travaux/:id/pdf', async (request, reply) => {
-    const { rows: [travaux] } = await db.query<{ fichier_pdf: string | null }>(
-      'SELECT fichier_pdf FROM travaux WHERE id = $1',
+    const { rows: [works_invoice] } = await db.query<{ pdf_file: string | null }>(
+      'SELECT pdf_file FROM works_invoice WHERE id = $1',
       [idParam(request)],
     )
-    if (!travaux?.fichier_pdf) {
+    if (!works_invoice?.pdf_file) {
       return reply.code(404).send({ message: 'Pas de PDF pour ces travaux' })
     }
     return reply.type('application/pdf').header('content-disposition', 'inline')
-      .send(createReadStream(join(storageDir, travaux.fichier_pdf)))
+      .send(createReadStream(join(storageDir, works_invoice.pdf_file)))
   })
 }
 

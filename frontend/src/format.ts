@@ -75,15 +75,15 @@ export function euros(value: string | null | undefined) {
 }
 
 /** Exercise of a regularisation, short: '2025', or '2024-2025' over two years (inclusive ISO dates). */
-export const exerciceCourt = (debut: string, fin: string) =>
-  debut.slice(0, 4) === fin.slice(0, 4) ? debut.slice(0, 4) : `${debut.slice(0, 4)}-${fin.slice(0, 4)}`
+export const exerciceCourt = (start: string, end: string) =>
+  start.slice(0, 4) === end.slice(0, 4) ? start.slice(0, 4) : `${start.slice(0, 4)}-${end.slice(0, 4)}`
 
 // « Affectation » column (ADR 0013): the label, its first letter, or oui/non as in the former « Récup. » column; empty is
 // recoverable. Anything else is sent as typed and reported by the server checks.
 const ALIAS: Record<string, Affectation> = {
-  '': 'recuperable', oui: 'recuperable', o: 'recuperable', r: 'recuperable', recuperable: 'recuperable',
-  non: 'proprietaire', n: 'proprietaire', p: 'proprietaire', proprietaire: 'proprietaire',
-  h: 'hors_immeuble', horsimmeuble: 'hors_immeuble',
+  '': 'recoverable', oui: 'recoverable', o: 'recoverable', r: 'recoverable', recoverable: 'recoverable',
+  non: 'owner', n: 'owner', p: 'owner', owner: 'owner',
+  h: 'outside_building', horsimmeuble: 'outside_building',
 }
 
 export function affectationApi(text: string): Affectation {
@@ -95,35 +95,35 @@ export function affectationApi(text: string): Affectation {
 export type LigneGrille = Record<keyof Ligne, string> & { _classe: string }
 
 export const versGrille = (l: Ligne): LigneGrille => ({
-  categorie: l.categorie,
-  libelle: l.libelle,
-  debut: dateFr(l.debut),
-  fin: dateFr(l.fin),
+  category: l.category,
+  label: l.label,
+  start: dateFr(l.start),
+  end: dateFr(l.end),
   kwh: nombreFr(l.kwh),
-  montant_ht: nombreFr(l.montant_ht),
-  taux_tva: tauxFr(l.taux_tva),
-  montant_ttc: nombreFr(l.montant_ttc),
-  affectation: AFFECTATIONS[l.affectation] ?? l.affectation,
+  amount_excl_tax: nombreFr(l.amount_excl_tax),
+  vat_rate: tauxFr(l.vat_rate),
+  amount_incl_tax: nombreFr(l.amount_incl_tax),
+  allocation: AFFECTATIONS[l.allocation] ?? l.allocation,
   note: l.note ?? '',
   _classe: '',
 })
 
 export function depuisGrille(row: LigneGrille): Ligne {
   return {
-    categorie: String(row.categorie ?? '').trim().toLowerCase() as Ligne['categorie'],
-    libelle: String(row.libelle ?? '').trim(),
-    debut: dateIso(String(row.debut ?? '')),
-    fin: dateIso(String(row.fin ?? '')),
+    category: String(row.category ?? '').trim().toLowerCase() as Ligne['category'],
+    label: String(row.label ?? '').trim(),
+    start: dateIso(String(row.start ?? '')),
+    end: dateIso(String(row.end ?? '')),
     kwh: nombreApi(String(row.kwh ?? '')),
-    montant_ht: nombreApi(String(row.montant_ht ?? '')),
-    taux_tva: tauxApi(String(row.taux_tva ?? '')),
-    montant_ttc: nombreApi(String(row.montant_ttc ?? '')) ?? '',
-    affectation: affectationApi(String(row.affectation ?? '')),
+    amount_excl_tax: nombreApi(String(row.amount_excl_tax ?? '')),
+    vat_rate: tauxApi(String(row.vat_rate ?? '')),
+    amount_incl_tax: nombreApi(String(row.amount_incl_tax ?? '')) ?? '',
+    allocation: affectationApi(String(row.allocation ?? '')),
     note: String(row.note ?? '').trim() || null,
   }
 }
 
 export const ligneVide = (): LigneGrille => ({
-  categorie: '', libelle: '', debut: '', fin: '', kwh: '', montant_ht: '', taux_tva: '', montant_ttc: '',
-  affectation: AFFECTATIONS.recuperable, note: '', _classe: '',
+  category: '', label: '', start: '', end: '', kwh: '', amount_excl_tax: '', vat_rate: '', amount_incl_tax: '',
+  allocation: AFFECTATIONS.recoverable, note: '', _classe: '',
 })

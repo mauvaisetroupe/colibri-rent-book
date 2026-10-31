@@ -22,40 +22,40 @@ const props = defineProps<{ id: number }>()
 const router = useRouter()
 // Opened from a movement (« Catégorisation »): that movement is highlighted
 const route = useRoute()
-const surligne = computed(() => Number(route.query.mouvement) || null)
+const surligne = computed(() => Number(route.query.bank_transaction) || null)
 const confirm = useConfirm()
 const toast = useToast()
 
 const releve = ref<ReleveDetail | null>(null)
-const releves = ref<ReleveResume[]>([])
+const statements = ref<ReleveResume[]>([])
 
 watch(() => props.id, charger, { immediate: true })
 
 async function charger() {
   try {
-    ;[releve.value, releves.value] = await Promise.all([api.releve(props.id), api.releves()])
+    ;[releve.value, statements.value] = await Promise.all([api.releve(props.id), api.statements()])
   } catch (e) {
     toast.add({ severity: 'error', summary: (e as Error).message, life: 6000 })
   }
 }
 
-const credits = computed(() => (releve.value?.mouvements ?? []).filter((m) => new Big(m.montant).gt(0))
-  .reduce((t, m) => t.plus(m.montant), new Big(0)))
-const debits = computed(() => (releve.value?.mouvements ?? []).filter((m) => new Big(m.montant).lt(0))
-  .reduce((t, m) => t.plus(m.montant), new Big(0)).abs())
-const calcule = computed(() => (releve.value ? new Big(releve.value.solde_precedent).plus(credits.value).minus(debits.value) : null))
-const equilibre = computed(() => Boolean(releve.value && calcule.value?.eq(releve.value.nouveau_solde)))
+const credits = computed(() => (releve.value?.transactions ?? []).filter((m) => new Big(m.amount).gt(0))
+  .reduce((t, m) => t.plus(m.amount), new Big(0)))
+const debits = computed(() => (releve.value?.transactions ?? []).filter((m) => new Big(m.amount).lt(0))
+  .reduce((t, m) => t.plus(m.amount), new Big(0)).abs())
+const calcule = computed(() => (releve.value ? new Big(releve.value.previous_balance).plus(credits.value).minus(debits.value) : null))
+const equilibre = computed(() => Boolean(releve.value && calcule.value?.eq(releve.value.new_balance)))
 
 // The statements of the same account, in date order: the previous one, the next one, and whether they follow each other
-const duCompte = computed(() => releves.value.filter((r) => r.compte === releve.value?.compte)
-  .sort((a, b) => a.date_releve.localeCompare(b.date_releve)))
+const duCompte = computed(() => statements.value.filter((r) => r.account === releve.value?.account)
+  .sort((a, b) => a.statement_date.localeCompare(b.statement_date)))
 const rang = computed(() => duCompte.value.findIndex((r) => r.id === props.id))
-const precedent = computed(() => duCompte.value[rang.value - 1] ?? null)
+const previous = computed(() => duCompte.value[rang.value - 1] ?? null)
 const suivant = computed(() => duCompte.value[rang.value + 1] ?? null)
 const suite = computed(() => duCompte.value[rang.value]?.suite ?? null)
 
-const nomCategorie = (c: CategorieMouvement) => CATEGORIES_MOUVEMENT[c].nom
-const categorises = computed(() => (releve.value?.mouvements ?? []).filter((m) => m.categorie).length)
+const nomCategorie = (c: CategorieMouvement) => CATEGORIES_MOUVEMENT[c].name
+const categorises = computed(() => (releve.value?.transactions ?? []).filter((m) => m.category).length)
 
 function supprimer() {
   const r = releve.value
@@ -63,12 +63,12 @@ function supprimer() {
     return
   }
   confirm.require({
-    message: `Supprimer le relevé du ${dateFr(r.date_releve)} (compte ${r.compte}) et ses mouvements ? Pour le lire de nouveau (extracteur corrigé), le réimporter ensuite.`,
+    message: `Supprimer le relevé du ${dateFr(r.statement_date)} (compte ${r.account}) et ses mouvements ? Pour le lire de nouveau (extracteur corrigé), le réimporter ensuite.`,
     header: 'Supprimer', acceptLabel: 'Supprimer', rejectLabel: 'Annuler', acceptClass: 'p-button-danger',
     accept: async () => {
       try {
         await api.supprimerReleve(r.id)
-        await router.push({ name: 'releves' })
+        await router.push({ name: 'statements' })
       } catch (e) {
         toast.add({ severity: 'error', summary: (e as Error).message, life: 6000 })
       }
@@ -80,29 +80,29 @@ function supprimer() {
 <template>
   <Toast />
   <ConfirmDialog />
-  <RouterLink :to="{ name: 'releves' }">← Relevés bancaires</RouterLink>
+  <RouterLink :to="{ name: 'statements' }">← Relevés bancaires</RouterLink>
   <template v-if="releve">
     <section class="entete-page">
-      <h1>Relevé du {{ dateFr(releve.date_releve) }}</h1>
-      <span class="discret">{{ releve.banque }}, compte {{ releve.compte }}</span>
+      <h1>Relevé du {{ dateFr(releve.statement_date) }}</h1>
+      <span class="discret">{{ releve.bank }}, compte {{ releve.account }}</span>
       <span class="navigation">
         <Button
-          icon="oi oi-angle-left" :label="precedent ? dateFr(precedent.date_releve) : ''" size="small" text :disabled="!precedent"
-          @click="precedent && router.push({ name: 'releve', params: { id: precedent.id } })"
+          icon="oi oi-angle-left" :label="previous ? dateFr(previous.statement_date) : ''" size="small" text :disabled="!previous"
+          @click="previous && router.push({ name: 'bank_statement', params: { id: previous.id } })"
         />
         <Button
-          icon="oi oi-angle-right" icon-pos="right" :label="suivant ? dateFr(suivant.date_releve) : ''" size="small" text :disabled="!suivant"
-          @click="suivant && router.push({ name: 'releve', params: { id: suivant.id } })"
+          icon="oi oi-angle-right" icon-pos="right" :label="suivant ? dateFr(suivant.statement_date) : ''" size="small" text :disabled="!suivant"
+          @click="suivant && router.push({ name: 'bank_statement', params: { id: suivant.id } })"
         />
       </span>
     </section>
 
     <ul class="controles">
-      <li>Solde précédent <strong>{{ euros(releve.solde_precedent) }}</strong></li>
+      <li>Solde précédent <strong>{{ euros(releve.previous_balance) }}</strong></li>
       <li>+ crédits <strong class="ok">{{ euros(credits.toString()) }}</strong></li>
       <li>− débits <strong>{{ euros(debits.toString()) }}</strong></li>
       <li>= <strong>{{ euros(calcule?.toString() ?? null) }}</strong></li>
-      <li :class="equilibre ? 'ok' : 'ko'">{{ equilibre ? '✓' : '✗' }} nouveau solde {{ euros(releve.nouveau_solde) }}</li>
+      <li :class="equilibre ? 'ok' : 'ko'">{{ equilibre ? '✓' : '✗' }} nouveau solde {{ euros(releve.new_balance) }}</li>
       <li v-if="suite !== null" :class="suite ? 'ok' : 'ko'">
         {{ suite ? '✓ suit le relevé précédent' : '✗ ne suit pas le relevé précédent (relevé manquant ?)' }}
       </li>
@@ -111,36 +111,36 @@ function supprimer() {
     <div class="cote-a-cote">
       <div class="mouvements">
         <DataTable
-          :value="releve.mouvements" data-key="id" size="small" striped-rows
+          :value="releve.transactions" data-key="id" size="small" striped-rows
           :row-class="(m: { id: number }) => (m.id === surligne ? 'surligne' : '')"
         >
           <template #header>
             <div class="entete-table">
-              <span>{{ releve.mouvements.length }} mouvement(s) lus, {{ categorises }} catégorisé(s)</span>
-              <RouterLink :to="{ name: 'banque', query: { releve: releve.id } }" class="bouton">Catégoriser ses mouvements</RouterLink>
+              <span>{{ releve.transactions.length }} mouvement(s) lus, {{ categorises }} catégorisé(s)</span>
+              <RouterLink :to="{ name: 'bank', query: { releve: releve.id } }" class="bouton">Catégoriser ses mouvements</RouterLink>
             </div>
           </template>
           <Column header="Date">
             <template #body="{ data }">
-              {{ dateFr(data.date_operation) }}
-              <div v-if="data.date_valeur && data.date_valeur !== data.date_operation" class="discret petit">valeur {{ dateFr(data.date_valeur) }}</div>
+              {{ dateFr(data.transaction_date) }}
+              <div v-if="data.value_date && data.value_date !== data.transaction_date" class="discret petit">valeur {{ dateFr(data.value_date) }}</div>
             </template>
           </Column>
           <Column header="Opération">
             <template #body="{ data }">
-              <strong>{{ data.libelle }}</strong>
+              <strong>{{ data.label }}</strong>
               <div v-if="data.detail" class="detail-ligne">{{ data.detail }}</div>
             </template>
           </Column>
           <Column header="Débit" body-class="nombre" header-class="nombre">
-            <template #body="{ data }">{{ Number(data.montant) < 0 ? euros(new Big(data.montant).abs().toString()) : '' }}</template>
+            <template #body="{ data }">{{ Number(data.amount) < 0 ? euros(new Big(data.amount).abs().toString()) : '' }}</template>
           </Column>
           <Column header="Crédit" body-class="nombre" header-class="nombre">
-            <template #body="{ data }"><span class="ok">{{ Number(data.montant) > 0 ? euros(data.montant) : '' }}</span></template>
+            <template #body="{ data }"><span class="ok">{{ Number(data.amount) > 0 ? euros(data.amount) : '' }}</span></template>
           </Column>
           <Column header="Catégorie">
             <template #body="{ data }">
-              <Tag v-if="data.categorie" :value="nomCategorie(data.categorie)" severity="info" />
+              <Tag v-if="data.category" :value="nomCategorie(data.category)" severity="info" />
             </template>
           </Column>
         </DataTable>

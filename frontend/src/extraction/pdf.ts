@@ -20,7 +20,7 @@ export async function morceaux(pdf: PdfDocument): Promise<Morceau[][]> {
     const { height } = page.getViewport({ scale: 1 })
     const { items } = await page.getTextContent()
     pages.push((items as TextItem[]).filter((i) => typeof i.str === 'string' && i.transform).map((i) => ({
-      texte: i.str,
+      text: i.str,
       x: i.transform[4]!,
       // pdf.js counts from the bottom of the page
       y: height - i.transform[5]!,
@@ -66,29 +66,29 @@ export async function estScannee(page: PageOperateurs, OPS: Operateurs): Promise
   const [vx0 = 0, vy0 = 0, vx1 = 0, vy1 = 0] = page.view
   const surface = Math.abs((vx1 - vx0) * (vy1 - vy0))
   let ctm: Matrice = [1, 0, 0, 1, 0, 0]
-  let mode = 0
-  const pile: { ctm: Matrice, mode: number }[] = []
+  let method = 0
+  const pile: { ctm: Matrice, method: number }[] = []
   let image = false
   let texteVisible = false
   fnArray.forEach((fn, i) => {
     const args = argsArray[i] as unknown[] | null
     if (fn === OPS.save || fn === OPS.paintFormXObjectBegin) {
-      pile.push({ ctm, mode })
+      pile.push({ ctm, method })
       const matrice = fn === OPS.save ? null : args?.[0] as Matrice | null
       if (matrice) {
         ctm = produit(matrice, ctm)
       }
     } else if (fn === OPS.restore || fn === OPS.paintFormXObjectEnd) {
-      ({ ctm, mode } = pile.pop() ?? { ctm, mode })
+      ({ ctm, method } = pile.pop() ?? { ctm, method })
     } else if (fn === OPS.transform) {
       ctm = produit(args as unknown as Matrice, ctm)
     } else if (fn === OPS.paintImageXObject || fn === OPS.paintInlineImageXObject) {
       // An image fills the unit square: its area on the page is the determinant of the matrix
       image ||= Math.abs(ctm[0] * ctm[3] - ctm[1] * ctm[2]) >= COUVERTURE_SCAN * surface
     } else if (fn === OPS.setTextRenderingMode) {
-      mode = Number(args?.[0])
+      method = Number(args?.[0])
     } else if ([OPS.showText, OPS.showSpacedText, OPS.nextLineShowText, OPS.nextLineSetSpacingShowText].includes(fn)) {
-      texteVisible ||= !INVISIBLE.includes(mode)
+      texteVisible ||= !INVISIBLE.includes(method)
     }
   })
   return image && !texteVisible

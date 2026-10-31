@@ -21,14 +21,14 @@ const router = useRouter()
 const confirm = useConfirm()
 const toast = useToast()
 
-const releves = ref<ReleveResume[]>([])
+const statements = ref<ReleveResume[]>([])
 const occupe = ref(false)
 
 onMounted(charger)
 
 async function charger() {
   try {
-    releves.value = await api.releves()
+    statements.value = await api.statements()
   } catch (e) {
     toast.add({ severity: 'error', summary: (e as Error).message, life: 6000 })
   }
@@ -37,7 +37,7 @@ async function charger() {
 // ---------------------------------------------------------------- import
 
 const survol = ref(false)
-const resultats = ref<{ nom: string, etat: 'en_cours' | 'importe' | 'doublon' | 'erreur', texte: string, releveId: number | null }[]>([])
+const resultats = ref<{ name: string, state: 'en_cours' | 'importe' | 'doublon' | 'erreur', text: string, releveId: number | null }[]>([])
 
 async function importer(fichiers: FileList | File[] | null | undefined) {
   const liste = [...(fichiers ?? [])].filter((f) => f.name.toLowerCase().endsWith('.pdf'))
@@ -45,35 +45,35 @@ async function importer(fichiers: FileList | File[] | null | undefined) {
     return
   }
   occupe.value = true
-  resultats.value = liste.map((f) => ({ nom: f.name, etat: 'en_cours', texte: 'lecture…', releveId: null }))
+  resultats.value = liste.map((f) => ({ name: f.name, state: 'en_cours', text: 'lecture…', releveId: null }))
   try {
     const { candidatsReleve, lireReleve, morceauxDuPdf } = await import('../extraction/navigateur')
     const { releveAImporter } = await import('../extraction/moteurReleve')
-    const extracteurs: ExtracteurEnregistre[] = await api.extracteurs()
+    const extractors: ExtracteurEnregistre[] = await api.extractors()
     for (const [i, fichier] of liste.entries()) {
       const resultat = resultats.value[i]!
       try {
         const pages = await morceauxDuPdf(fichier)
-        const [candidat] = candidatsReleve(pages, extracteurs)
+        const [candidat] = candidatsReleve(pages, extractors)
         if (!candidat) {
-          Object.assign(resultat, { etat: 'erreur', texte: 'aucun extracteur de relevé ne reconnaît ce PDF (une facture ? une image ?)' })
+          Object.assign(resultat, { state: 'erreur', text: 'aucun extracteur de relevé ne reconnaît ce PDF (une facture ? une image ?)' })
           continue
         }
         const { releve, probleme } = releveAImporter(lireReleve(pages, candidat), candidat.enregistre.id)
         if (!releve) {
-          Object.assign(resultat, { etat: 'erreur', texte: `${candidat.enregistre.fournisseur} : ${probleme}` })
+          Object.assign(resultat, { state: 'erreur', text: `${candidat.enregistre.supplier} : ${probleme}` })
           continue
         }
         const importe = await api.importerReleve(fichier, releve)
         Object.assign(resultat, {
-          etat: 'importe', releveId: importe.id,
-          texte: `${importe.banque}, compte ${importe.compte}, relevé du ${dateFr(importe.date_releve)} : ${importe.mouvements.length} mouvement(s)`,
+          state: 'importe', releveId: importe.id,
+          text: `${importe.bank}, compte ${importe.account}, relevé du ${dateFr(importe.statement_date)} : ${importe.transactions.length} mouvement(s)`,
         })
       } catch (e) {
         const doublon = e instanceof ApiError && e.status === 409
         Object.assign(resultat, {
-          etat: doublon ? 'doublon' : 'erreur', texte: (e as Error).message,
-          releveId: doublon ? (e as ApiError).body.releve_id as number ?? null : null,
+          state: doublon ? 'doublon' : 'erreur', text: (e as Error).message,
+          releveId: doublon ? (e as ApiError).body.bank_statement_id as number ?? null : null,
         })
       }
     }
@@ -82,9 +82,9 @@ async function importer(fichiers: FileList | File[] | null | undefined) {
   }
   await charger()
   // One statement imported: its page, to check what was read
-  const importes = resultats.value.filter((r) => r.etat === 'importe')
+  const importes = resultats.value.filter((r) => r.state === 'importe')
   if (liste.length === 1 && importes.length === 1) {
-    await router.push({ name: 'releve', params: { id: importes[0]!.releveId! } })
+    await router.push({ name: 'bank_statement', params: { id: importes[0]!.releveId! } })
   }
 }
 
@@ -95,7 +95,7 @@ function choisirFichiers(event: Event) {
 
 function supprimer(r: ReleveResume) {
   confirm.require({
-    message: `Supprimer le relevé du ${dateFr(r.date_releve)} (compte ${r.compte}) et ses mouvements ?`,
+    message: `Supprimer le relevé du ${dateFr(r.statement_date)} (compte ${r.account}) et ses mouvements ?`,
     header: 'Supprimer', acceptLabel: 'Supprimer', rejectLabel: 'Annuler', acceptClass: 'p-button-danger',
     accept: async () => {
       try {
@@ -133,30 +133,30 @@ function supprimer(r: ReleveResume) {
     <p class="discret">Un relevé déjà importé est refusé.</p>
   </div>
   <ul v-if="resultats.length" class="resultats">
-    <li v-for="(r, i) in resultats" :key="i" :class="r.etat">
-      <strong>{{ r.nom }}</strong> : {{ r.texte }}
-      <RouterLink v-if="r.releveId" :to="{ name: 'releve', params: { id: r.releveId } }">ouvrir</RouterLink>
+    <li v-for="(r, i) in resultats" :key="i" :class="r.state">
+      <strong>{{ r.name }}</strong> : {{ r.text }}
+      <RouterLink v-if="r.releveId" :to="{ name: 'bank_statement', params: { id: r.releveId } }">ouvrir</RouterLink>
     </li>
   </ul>
 
   <DataTable
-    :value="releves" data-key="id" size="small" striped-rows paginator :rows="25" sort-field="date_releve" :sort-order="-1"
+    :value="statements" data-key="id" size="small" striped-rows paginator :rows="25" sort-field="statement_date" :sort-order="-1"
     state-storage="session" :state-key="stateKey('statements')"
-    class="releves" @row-click="router.push({ name: 'releve', params: { id: $event.data.id } })"
+    class="releves" @row-click="router.push({ name: 'bank_statement', params: { id: $event.data.id } })"
   >
     <template #empty>Aucun relevé importé.</template>
-    <Column field="date_releve" header="Relevé du" sortable>
-      <template #body="{ data }">{{ dateFr(data.date_releve) }}</template>
+    <Column field="statement_date" header="Relevé du" sortable>
+      <template #body="{ data }">{{ dateFr(data.statement_date) }}</template>
     </Column>
-    <Column field="banque" header="Banque" />
-    <Column field="compte" header="Compte" sortable />
+    <Column field="bank" header="Banque" />
+    <Column field="account" header="Compte" sortable />
     <Column header="Solde précédent" body-class="nombre" header-class="nombre">
-      <template #body="{ data }">{{ euros(data.solde_precedent) }}</template>
+      <template #body="{ data }">{{ euros(data.previous_balance) }}</template>
     </Column>
     <Column header="Nouveau solde" body-class="nombre" header-class="nombre">
-      <template #body="{ data }">{{ euros(data.nouveau_solde) }}</template>
+      <template #body="{ data }">{{ euros(data.new_balance) }}</template>
     </Column>
-    <Column field="nb_mouvements" header="Mouvements" body-class="nombre" header-class="nombre" />
+    <Column field="transaction_count" header="Mouvements" body-class="nombre" header-class="nombre" />
     <Column header="Suite">
       <template #body="{ data }">
         <span :class="data.suite === false ? 'ko' : 'ok'">{{ data.suite === false ? '✗ relevé manquant avant' : data.suite ? '✓' : '' }}</span>

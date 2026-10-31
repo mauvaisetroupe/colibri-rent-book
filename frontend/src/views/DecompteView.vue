@@ -15,20 +15,20 @@ import { useImmeuble } from '../immeuble'
 // behind it (function repartition). Amounts come unrounded from the SQL engine: rounding happens here, for display.
 
 const { immeubleId, pret } = useImmeuble()
-const { debut, fin } = useExercice()
-const decompte = ref<Decompte | null>(null)
+const { start, end } = useExercice()
+const charge_statement = ref<Decompte | null>(null)
 const erreur = ref<string | null>(null)
-const detail = ref<{ titre: string, lignes: LigneDetail[] } | null>(null)
+const detail = ref<{ title: string, lines: LigneDetail[] } | null>(null)
 
-const exercice = computed(() =>
-  (immeubleId.value === null ? null : { immeuble: immeubleId.value, debut: debut.value, fin: fin.value }))
+const period = computed(() =>
+  (immeubleId.value === null ? null : { building: immeubleId.value, start: start.value, end: end.value }))
 
 async function charger() {
-  if (!exercice.value) {
+  if (!period.value) {
     return
   }
   try {
-    decompte.value = await api.decompte(exercice.value)
+    charge_statement.value = await api.charge_statement(period.value)
     detail.value = null
     erreur.value = null
   } catch (e) {
@@ -40,50 +40,50 @@ onMounted(async () => {
   await pret
   await charger()
 })
-watch(exercice, charger)
+watch(period, charger)
 
 const colonnes = Object.entries(COLONNES_DECOMPTE) as [ColonneDecompte, string][]
 
-const FILTRES: Record<ColonneDecompte, Pick<DetailFiltre, 'energie' | 'groupe'>> = {
-  gaz_consommation: { energie: 'gaz', groupe: 'consommation' },
-  gaz_autres: { energie: 'gaz', groupe: 'autres' },
-  electricite_consommation: { energie: 'electricite', groupe: 'consommation' },
-  electricite_autres: { energie: 'electricite', groupe: 'autres' },
-  eau: { energie: 'eau' },
-  ordures_menageres: { energie: 'ordures_menageres' },
+const FILTRES: Record<ColonneDecompte, Pick<DetailFiltre, 'energy' | 'group'>> = {
+  gas_consumption: { energy: 'gas', group: 'consumption' },
+  gas_other: { energy: 'gas', group: 'other' },
+  electricity_consumption: { energy: 'electricity', group: 'consumption' },
+  electricity_other: { energy: 'electricity', group: 'other' },
+  water: { energy: 'water' },
+  household_waste: { energy: 'household_waste' },
 }
 
 const somme = (cle: keyof LigneDecompte) =>
-  (decompte.value?.sejours ?? []).reduce((total, s) => total.plus(String(s[cle])), new Big(0)).toString()
+  (charge_statement.value?.tenancies ?? []).reduce((total, s) => total.plus(String(s[cle])), new Big(0)).toString()
 
 const totaux = computed(() => Object.fromEntries(
-  [...colonnes.map(([c]) => c), 'total', 'provisions', 'solde'].map((c) => [c, somme(c as keyof LigneDecompte)]),
+  [...colonnes.map(([c]) => c), 'total', 'advances', 'balance'].map((c) => [c, somme(c as keyof LigneDecompte)]),
 ))
 
-const sens = (solde: string) => {
-  const arrondi = new Big(solde).round(2, Big.roundHalfUp)
+const sens = (balance: string) => {
+  const arrondi = new Big(balance).round(2, Big.roundHalfUp)
   return arrondi.gt(0) ? 'à payer' : arrondi.lt(0) ? 'à rembourser' : ''
 }
 
-async function ouvrir(titre: string, filtre: DetailFiltre) {
-  if (!exercice.value) {
+async function ouvrir(title: string, filtre: DetailFiltre) {
+  if (!period.value) {
     return
   }
   try {
-    detail.value = { titre, lignes: await api.detail(exercice.value, filtre) }
+    detail.value = { title, lines: await api.detail(period.value, filtre) }
   } catch (e) {
     erreur.value = (e as Error).message
   }
 }
 
 const ouvrirCellule = (s: LigneDecompte, c: ColonneDecompte) =>
-  ouvrir(`${s.locataire} (${s.lot}) – ${COLONNES_DECOMPTE[c]}`, { sejour: s.sejour_id, ...FILTRES[c] })
+  ouvrir(`${s.tenant} (${s.unit}) – ${COLONNES_DECOMPTE[c]}`, { tenancy: s.tenancy_id, ...FILTRES[c] })
 
-const ouvrirProprietaire = (energie: Energie) =>
-  ouvrir(`Part du propriétaire (vacance) – ${ENERGIES[energie]}`, { sejour: 'proprietaire', energie })
+const ouvrirProprietaire = (energy: Energie) =>
+  ouvrir(`Part du propriétaire (vacance) – ${ENERGIES[energy]}`, { tenancy: 'owner', energy })
 
 const totalDetail = computed(() =>
-  (detail.value?.lignes ?? []).reduce((t, l) => t.plus(l.montant), new Big(0)).toString())
+  (detail.value?.lines ?? []).reduce((t, l) => t.plus(l.amount), new Big(0)).toString())
 </script>
 
 <template>
@@ -92,15 +92,15 @@ const totalDetail = computed(() =>
     <ChoixExercice />
   </section>
   <p class="actions-page">
-    <a v-if="exercice" class="bouton" :href="api.exportUrl(exercice)">Exporter en Excel</a>
+    <a v-if="period" class="bouton" :href="api.exportUrl(period)">Exporter en Excel</a>
     <RouterLink class="bouton" :to="{ name: 'nouvelle-regularisation' }">Préparer les régularisations →</RouterLink>
   </p>
 
   <p v-if="erreur" class="message erreur">{{ erreur }}</p>
 
-  <template v-if="decompte">
-    <ul v-if="decompte.avertissements.length" class="constats">
-      <li v-for="(a, i) in decompte.avertissements" :key="i" class="avertissement">{{ a }}</li>
+  <template v-if="charge_statement">
+    <ul v-if="charge_statement.avertissements.length" class="constats">
+      <li v-for="(a, i) in charge_statement.avertissements" :key="i" class="avertissement">{{ a }}</li>
     </ul>
 
     <div class="defilement">
@@ -108,24 +108,24 @@ const totalDetail = computed(() =>
         <thead>
           <tr>
             <th>Lot</th><th>Locataire</th><th class="nombre">Tant.</th><th>Présence</th><th class="nombre">Jours</th>
-            <th v-for="[c, nom] in colonnes" :key="c" class="nombre">{{ nom }}</th>
+            <th v-for="[c, name] in colonnes" :key="c" class="nombre">{{ name }}</th>
             <th class="nombre">Total</th><th class="nombre">Provisions</th><th class="nombre">Solde</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="s in decompte.sejours" :key="s.sejour_id" class="sans-clic">
-            <td>{{ s.lot }}</td>
-            <td>{{ s.locataire }}</td>
-            <td class="nombre">{{ s.tantiemes }}</td>
-            <td>{{ s.present_du ? `${dateFr(s.present_du)} → ${dateFr(s.present_au)}` : 'absent' }}</td>
-            <td class="nombre">{{ s.jours }}</td>
+          <tr v-for="s in charge_statement.tenancies" :key="s.tenancy_id" class="sans-clic">
+            <td>{{ s.unit }}</td>
+            <td>{{ s.tenant }}</td>
+            <td class="nombre">{{ s.charge_shares }}</td>
+            <td>{{ s.present_from ? `${dateFr(s.present_from)} → ${dateFr(s.present_to)}` : 'absent' }}</td>
+            <td class="nombre">{{ s.days }}</td>
             <td v-for="[c] in colonnes" :key="c" class="nombre">
               <button type="button" class="lien" @click="ouvrirCellule(s, c)">{{ euros(s[c]) }}</button>
             </td>
             <td class="nombre"><strong>{{ euros(s.total) }}</strong></td>
-            <td class="nombre">{{ euros(s.provisions) }}</td>
-            <td class="nombre" :class="{ ko: sens(s.solde) === 'à payer', ok: sens(s.solde) === 'à rembourser' }" :title="sens(s.solde)">
-              <strong>{{ euros(s.solde) }}</strong>
+            <td class="nombre">{{ euros(s.advances) }}</td>
+            <td class="nombre" :class="{ ko: sens(s.balance) === 'à payer', ok: sens(s.balance) === 'à rembourser' }" :title="sens(s.balance)">
+              <strong>{{ euros(s.balance) }}</strong>
             </td>
           </tr>
         </tbody>
@@ -134,8 +134,8 @@ const totalDetail = computed(() =>
             <th colspan="5">Total locataires</th>
             <th v-for="[c] in colonnes" :key="c" class="nombre">{{ euros(totaux[c]) }}</th>
             <th class="nombre">{{ euros(totaux.total) }}</th>
-            <th class="nombre">{{ euros(totaux.provisions) }}</th>
-            <th class="nombre">{{ euros(totaux.solde) }}</th>
+            <th class="nombre">{{ euros(totaux.advances) }}</th>
+            <th class="nombre">{{ euros(totaux.balance) }}</th>
           </tr>
         </tfoot>
       </table>
@@ -151,17 +151,17 @@ const totalDetail = computed(() =>
         <tr><th>Énergie</th><th class="nombre">Factures de l'exercice</th><th class="nombre">Part des locataires</th><th class="nombre">Part du propriétaire (vacance)</th></tr>
       </thead>
       <tbody>
-        <tr v-for="e in decompte.synthese" :key="e.energie" class="sans-clic">
-          <td>{{ ENERGIES[e.energie] }}</td>
-          <td class="nombre">{{ euros(e.factures) }}</td>
-          <td class="nombre">{{ euros(e.locataires) }}</td>
-          <td class="nombre"><button type="button" class="lien" @click="ouvrirProprietaire(e.energie)">{{ euros(e.proprietaire) }}</button></td>
+        <tr v-for="e in charge_statement.summary" :key="e.energy" class="sans-clic">
+          <td>{{ ENERGIES[e.energy] }}</td>
+          <td class="nombre">{{ euros(e.invoices) }}</td>
+          <td class="nombre">{{ euros(e.tenants) }}</td>
+          <td class="nombre"><button type="button" class="lien" @click="ouvrirProprietaire(e.energy)">{{ euros(e.owner) }}</button></td>
         </tr>
       </tbody>
     </table>
 
     <section v-if="detail" class="detail">
-      <h2>{{ detail.titre }} <button type="button" @click="detail = null">Fermer</button></h2>
+      <h2>{{ detail.title }} <button type="button" @click="detail = null">Fermer</button></h2>
       <p class="discret">Part = TTC de la ligne × jours retenus ÷ jours de la ligne × tantièmes du lot ÷ total des tantièmes (R3).</p>
       <table class="liste">
         <thead>
@@ -171,13 +171,13 @@ const totalDetail = computed(() =>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="l in detail.lignes" :key="`${l.ligne_id}-${l.sejour_id}`" class="sans-clic">
-            <td><RouterLink :to="{ name: 'facture', params: { id: l.facture_id } }">{{ l.fournisseur }} {{ l.numero }}</RouterLink></td>
-            <td>{{ l.libelle }}</td>
-            <td>{{ dateFr(l.debut) }} → {{ dateFr(l.fin) }}</td>
-            <td class="nombre">{{ euros(l.montant_ligne) }}</td>
-            <td class="nombre">{{ l.jours }} / {{ l.jours_ligne }}</td>
-            <td class="nombre">{{ euros(l.montant) }}</td>
+          <tr v-for="l in detail.lines" :key="`${l.invoice_line_id}-${l.tenancy_id}`" class="sans-clic">
+            <td><RouterLink :to="{ name: 'invoice', params: { id: l.invoice_id } }">{{ l.supplier }} {{ l.number }}</RouterLink></td>
+            <td>{{ l.label }}</td>
+            <td>{{ dateFr(l.start) }} → {{ dateFr(l.end) }}</td>
+            <td class="nombre">{{ euros(l.line_amount) }}</td>
+            <td class="nombre">{{ l.days }} / {{ l.line_days }}</td>
+            <td class="nombre">{{ euros(l.amount) }}</td>
           </tr>
         </tbody>
         <tfoot>

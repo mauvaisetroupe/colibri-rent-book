@@ -59,13 +59,13 @@ export function optionalDecimal(value: unknown, name: string) {
 /** Exercise bounds from the query string, both included. */
 export function exercise(request: FastifyRequest) {
   const q = query(request)
-  const immeuble = requiredId(q.immeuble, 'Immeuble')
-  const debut = requiredDate(q.debut, 'Début de l\'exercice')
-  const fin = requiredDate(q.fin, 'Fin de l\'exercice')
-  if (debut > fin) {
+  const building = requiredId(q.building, 'Immeuble')
+  const start = requiredDate(q.start, 'Début de l\'exercice')
+  const end = requiredDate(q.end, 'Fin de l\'exercice')
+  if (start > end) {
     throw new InputError('L\'exercice finit avant de commencer')
   }
-  return { immeuble, debut, fin }
+  return { building, start, end }
 }
 
 const PG_MESSAGES: Record<string, string> = {

@@ -3,7 +3,7 @@
 // read back as a null end date.
 
 /** SELECT fragment: inclusive bounds of a daterange column, as ISO text (end null when infinite). */
-export const inclusiveBounds = (column: string, start = 'debut', end = 'fin') =>
+export const inclusiveBounds = (column: string, start = 'start', end = 'end') =>
   `lower(${column})::text AS ${start}, (upper(${column}) - 1)::text AS ${end}`
 
 /** SQL expression: daterange from two inclusive ISO date parameters (a null end gives an open range). */

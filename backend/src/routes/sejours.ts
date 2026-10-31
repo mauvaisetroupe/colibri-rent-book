@@ -11,33 +11,33 @@ import { inclusiveBounds, inclusiveRange } from '../periods.js'
 // rent and provision called each month (ADR 0009) and yearly provisions per stay (SPEC R9).
 
 const SEJOUR_COLUMNS = `
-  s.id, s.lot_id, lt.code AS lot, s.locataire_id, lo.nom AS locataire, ${inclusiveBounds('s.periode', 'entree', 'sortie')},
-  s.note, s.depot_garantie::text,
+  s.id, s.unit_id, lt.code AS unit, s.tenant_id, lo.name AS tenant, ${inclusiveBounds('s.period', 'move_in', 'move_out')},
+  s.note, s.security_deposit::text,
   -- Deposit kept (ADR 0021): the retention, payments « depot » toward months or regularisations; null without any
-  (SELECT sum(p.loyer + p.provision + p.regularisation)::text FROM paiement p
-   WHERE p.sejour_id = s.id AND p.mode = 'depot') AS depot_retenu,
+  (SELECT sum(p.rent + p.charge_advance + p.charge_adjustment)::text FROM payment p
+   WHERE p.tenancy_id = s.id AND p.method = 'deposit') AS deposit_retained,
   -- Deposit held (ADR 0019, 0021): paid minus refunded minus kept; null without any deposit or retention recorded
   (SELECT sum(x)::text FROM (
-     SELECT vd.montant AS x FROM versement_depot vd WHERE vd.sejour_id = s.id
+     SELECT vd.amount AS x FROM deposit_payment vd WHERE vd.tenancy_id = s.id
      UNION ALL
-     SELECT -(p.loyer + p.provision + p.regularisation) FROM paiement p WHERE p.sejour_id = s.id AND p.mode = 'depot') d
-  ) AS depot_detenu`
+     SELECT -(p.rent + p.charge_advance + p.charge_adjustment) FROM payment p WHERE p.tenancy_id = s.id AND p.method = 'deposit') d
+  ) AS deposit_held`
 
-const SEJOUR_FROM = 'sejour s JOIN lot lt ON lt.id = s.lot_id JOIN locataire lo ON lo.id = s.locataire_id'
+const SEJOUR_FROM = 'tenancy s JOIN unit lt ON lt.id = s.unit_id JOIN tenant lo ON lo.id = s.tenant_id'
 
 function readSejour(raw: Record<string, unknown>) {
-  const entree = requiredDate(raw.entree, 'Entrée')
-  const sortie = optionalDate(raw.sortie, 'Sortie')
-  if (sortie && sortie < entree) {
+  const move_in = requiredDate(raw.move_in, 'Entrée')
+  const move_out = optionalDate(raw.move_out, 'Sortie')
+  if (move_out && move_out < move_in) {
     throw new InputError('La sortie est avant l\'entrée')
   }
   return {
-    lot_id: requiredId(raw.lot_id, 'Lot'),
-    locataire_id: requiredId(raw.locataire_id, 'Locataire'),
-    entree,
-    sortie,
+    unit_id: requiredId(raw.unit_id, 'Lot'),
+    tenant_id: requiredId(raw.tenant_id, 'Locataire'),
+    move_in,
+    move_out,
     note: optionalText(raw.note),
-    depot_garantie: optionalDecimal(raw.depot_garantie, 'Dépôt de garantie'),
+    security_deposit: optionalDecimal(raw.security_deposit, 'Dépôt de garantie'),
   }
 }
 
@@ -48,14 +48,14 @@ const SEJOUR_ERRORS = {
 
 function readEcheance(raw: Record<string, unknown>) {
   const e = {
-    sejour_id: requiredId(raw.sejour_id, 'Séjour'),
+    tenancy_id: requiredId(raw.tenancy_id, 'Séjour'),
     // A month ('AAAA-MM') or any day of it: the 1st of the month is stored
-    a_partir_du: requiredDate(`${String(raw.a_partir_du ?? '').slice(0, 7)}-01`, 'À partir du'),
-    loyer: requiredDecimal(raw.loyer, 'Loyer'),
-    provision: requiredDecimal(raw.provision, 'Provision'),
+    from_month: requiredDate(`${String(raw.from_month ?? '').slice(0, 7)}-01`, 'À partir du'),
+    rent: requiredDecimal(raw.rent, 'Loyer'),
+    charge_advance: requiredDecimal(raw.charge_advance, 'Provision'),
     note: optionalText(raw.note),
   }
-  if (e.loyer.startsWith('-') || e.provision.startsWith('-')) {
+  if (e.rent.startsWith('-') || e.charge_advance.startsWith('-')) {
     throw new InputError('Le loyer et la provision ne peuvent pas être négatifs')
   }
   return e
@@ -67,14 +67,14 @@ const ECHEANCE_ERRORS = {
 }
 
 function readProvision(raw: Record<string, unknown>) {
-  const annee = Number(raw.annee)
-  if (!Number.isInteger(annee) || annee < 2000 || annee > 2100) {
+  const year = Number(raw.year)
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
     throw new InputError('Année invalide')
   }
   return {
-    sejour_id: requiredId(raw.sejour_id, 'Séjour'),
-    annee,
-    montant: requiredDecimal(raw.montant, 'Montant'),
+    tenancy_id: requiredId(raw.tenancy_id, 'Séjour'),
+    year,
+    amount: requiredDecimal(raw.amount, 'Montant'),
     note: optionalText(raw.note),
   }
 }
@@ -84,24 +84,24 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
 
   app.get('/locataires', async () => {
     const { rows } = await db.query(
-      `SELECT lo.id, lo.nom, lo.email, lo.telephone, lo.note, count(s.id)::int AS nb_sejours
-       FROM locataire lo LEFT JOIN sejour s ON s.locataire_id = lo.id
-       GROUP BY lo.id ORDER BY lo.nom`,
+      `SELECT lo.id, lo.name, lo.email, lo.phone, lo.note, count(s.id)::int AS tenancy_count
+       FROM tenant lo LEFT JOIN tenancy s ON s.tenant_id = lo.id
+       GROUP BY lo.id ORDER BY lo.name`,
     )
     return rows
   })
 
   const saveLocataire = (id: number | null, raw: Record<string, unknown>) => {
     const values = [
-      requiredText(raw.nom, 'Nom'), optionalText(raw.email), optionalText(raw.telephone), optionalText(raw.note),
+      requiredText(raw.name, 'Nom'), optionalText(raw.email), optionalText(raw.phone), optionalText(raw.note),
     ]
     return id === null
       ? db.query(
-        'INSERT INTO locataire (nom, email, telephone, note) VALUES ($1, $2, $3, $4) RETURNING *',
+        'INSERT INTO tenant (name, email, phone, note) VALUES ($1, $2, $3, $4) RETURNING *',
         values,
       )
       : db.query(
-        'UPDATE locataire SET nom = $2, email = $3, telephone = $4, note = $5 WHERE id = $1 RETURNING *',
+        'UPDATE tenant SET name = $2, email = $3, phone = $4, note = $5 WHERE id = $1 RETURNING *',
         [id, ...values],
       )
   }
@@ -126,7 +126,7 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
 
   app.delete('/locataires/:id', async (request, reply) => {
     try {
-      const { rowCount } = await db.query('DELETE FROM locataire WHERE id = $1', [idParam(request)])
+      const { rowCount } = await db.query('DELETE FROM tenant WHERE id = $1', [idParam(request)])
       return rowCount ? reply.code(204).send() : reply.code(404).send({ message: 'Locataire introuvable' })
     } catch (error) {
       return sendError(reply, error, { 23503: 'Ce locataire a des séjours : suppression impossible' })
@@ -137,10 +137,10 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
 
   app.get('/sejours', async (request, reply) => {
     try {
-      const immeuble = requiredId(query(request).immeuble, 'Immeuble')
+      const building = requiredId(query(request).building, 'Immeuble')
       const { rows } = await db.query(
-        `SELECT ${SEJOUR_COLUMNS} FROM ${SEJOUR_FROM} WHERE lt.immeuble_id = $1 ORDER BY lt.code, lower(s.periode)`,
-        [immeuble],
+        `SELECT ${SEJOUR_COLUMNS} FROM ${SEJOUR_FROM} WHERE lt.building_id = $1 ORDER BY lt.code, lower(s.period)`,
+        [building],
       )
       return rows
     } catch (error) {
@@ -155,9 +155,9 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
     try {
       const s = readSejour(body(request))
       const { rows: [created] } = await db.query<{ id: number }>(
-        `INSERT INTO sejour (lot_id, locataire_id, periode, note, depot_garantie)
+        `INSERT INTO tenancy (unit_id, tenant_id, period, note, security_deposit)
          VALUES ($1, $2, ${inclusiveRange('$3', '$4')}, $5, $6) RETURNING id`,
-        [s.lot_id, s.locataire_id, s.entree, s.sortie, s.note, s.depot_garantie],
+        [s.unit_id, s.tenant_id, s.move_in, s.move_out, s.note, s.security_deposit],
       )
       return reply.code(201).send(await loadSejour(created!.id))
     } catch (error) {
@@ -169,10 +169,10 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
     try {
       const s = readSejour(body(request))
       const { rowCount } = await db.query(
-        `UPDATE sejour SET lot_id = $2, locataire_id = $3, periode = ${inclusiveRange('$4', '$5')}, note = $6,
-           depot_garantie = $7
+        `UPDATE tenancy SET unit_id = $2, tenant_id = $3, period = ${inclusiveRange('$4', '$5')}, note = $6,
+           security_deposit = $7
          WHERE id = $1`,
-        [idParam(request), s.lot_id, s.locataire_id, s.entree, s.sortie, s.note, s.depot_garantie],
+        [idParam(request), s.unit_id, s.tenant_id, s.move_in, s.move_out, s.note, s.security_deposit],
       )
       return rowCount ? loadSejour(idParam(request)) : reply.code(404).send({ message: 'Séjour introuvable' })
     } catch (error) {
@@ -182,7 +182,7 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
 
   app.delete('/sejours/:id', async (request, reply) => {
     try {
-      const { rowCount } = await db.query('DELETE FROM sejour WHERE id = $1', [idParam(request)])
+      const { rowCount } = await db.query('DELETE FROM tenancy WHERE id = $1', [idParam(request)])
       return rowCount ? reply.code(204).send() : reply.code(404).send({ message: 'Séjour introuvable' })
     } catch (error) {
       return sendError(reply, error, SEJOUR_ERRORS)
@@ -194,12 +194,12 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
   // History of the amounts called each month, per stay: a row applies from its month until the next row of the stay
   app.get('/echeances', async (request, reply) => {
     try {
-      const immeuble = requiredId(query(request).immeuble, 'Immeuble')
+      const building = requiredId(query(request).building, 'Immeuble')
       const { rows } = await db.query(
-        `SELECT e.id, e.sejour_id, e.a_partir_du::text, e.loyer::text, e.provision::text, e.note
-         FROM echeance e JOIN sejour s ON s.id = e.sejour_id JOIN lot lt ON lt.id = s.lot_id
-         WHERE lt.immeuble_id = $1 ORDER BY e.sejour_id, e.a_partir_du`,
-        [immeuble],
+        `SELECT e.id, e.tenancy_id, e.from_month::text, e.rent::text, e.charge_advance::text, e.note
+         FROM rent_schedule e JOIN tenancy s ON s.id = e.tenancy_id JOIN unit lt ON lt.id = s.unit_id
+         WHERE lt.building_id = $1 ORDER BY e.tenancy_id, e.from_month`,
+        [building],
       )
       return rows
     } catch (error) {
@@ -207,15 +207,15 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
     }
   })
 
-  const ECHEANCE_COLUMNS = 'id, sejour_id, a_partir_du::text, loyer::text, provision::text, note'
+  const ECHEANCE_COLUMNS = 'id, tenancy_id, from_month::text, rent::text, charge_advance::text, note'
 
   app.post('/echeances', async (request, reply) => {
     try {
       const e = readEcheance(body(request))
       const { rows: [created] } = await db.query(
-        `INSERT INTO echeance (sejour_id, a_partir_du, loyer, provision, note) VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO rent_schedule (tenancy_id, from_month, rent, charge_advance, note) VALUES ($1, $2, $3, $4, $5)
          RETURNING ${ECHEANCE_COLUMNS}`,
-        [e.sejour_id, e.a_partir_du, e.loyer, e.provision, e.note],
+        [e.tenancy_id, e.from_month, e.rent, e.charge_advance, e.note],
       )
       return reply.code(201).send(created)
     } catch (error) {
@@ -227,9 +227,9 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
     try {
       const e = readEcheance(body(request))
       const { rows: [updated] } = await db.query(
-        `UPDATE echeance SET sejour_id = $2, a_partir_du = $3, loyer = $4, provision = $5, note = $6 WHERE id = $1
+        `UPDATE rent_schedule SET tenancy_id = $2, from_month = $3, rent = $4, charge_advance = $5, note = $6 WHERE id = $1
          RETURNING ${ECHEANCE_COLUMNS}`,
-        [idParam(request), e.sejour_id, e.a_partir_du, e.loyer, e.provision, e.note],
+        [idParam(request), e.tenancy_id, e.from_month, e.rent, e.charge_advance, e.note],
       )
       return updated ?? reply.code(404).send({ message: 'Loyer appelé introuvable' })
     } catch (error) {
@@ -238,7 +238,7 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
   })
 
   app.delete('/echeances/:id', async (request, reply) => {
-    const { rowCount } = await db.query('DELETE FROM echeance WHERE id = $1', [idParam(request)])
+    const { rowCount } = await db.query('DELETE FROM rent_schedule WHERE id = $1', [idParam(request)])
     return rowCount ? reply.code(204).send() : reply.code(404).send({ message: 'Loyer appelé introuvable' })
   })
 
@@ -248,16 +248,16 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
   // has any (source « paiements »), otherwise the yearly total entered by hand (source « saisie », id to edit it)
   app.get('/provisions', async (request, reply) => {
     try {
-      const immeuble = requiredId(query(request).immeuble, 'Immeuble')
+      const building = requiredId(query(request).building, 'Immeuble')
       const { rows } = await db.query(
-        `SELECT pa.id, v.sejour_id, v.annee, v.montant::text, v.source, pa.note, lo.nom AS locataire, lt.code AS lot
-         FROM v_provision v
-         LEFT JOIN provision_annuelle pa ON pa.sejour_id = v.sejour_id AND pa.annee = v.annee AND v.source = 'saisie'
-         JOIN sejour s ON s.id = v.sejour_id
-         JOIN lot lt ON lt.id = s.lot_id
-         JOIN locataire lo ON lo.id = s.locataire_id
-         WHERE lt.immeuble_id = $1 ORDER BY v.annee DESC, lt.code, lower(s.periode)`,
-        [immeuble],
+        `SELECT pa.id, v.tenancy_id, v.year, v.amount::text, v.source, pa.note, lo.name AS tenant, lt.code AS unit
+         FROM v_charge_advance v
+         LEFT JOIN annual_charge_advance pa ON pa.tenancy_id = v.tenancy_id AND pa.year = v.year AND v.source = 'entered'
+         JOIN tenancy s ON s.id = v.tenancy_id
+         JOIN unit lt ON lt.id = s.unit_id
+         JOIN tenant lo ON lo.id = s.tenant_id
+         WHERE lt.building_id = $1 ORDER BY v.year DESC, lt.code, lower(s.period)`,
+        [building],
       )
       return rows
     } catch (error) {
@@ -270,17 +270,17 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
     try {
       const p = readProvision(body(request))
       const { rowCount: payes } = await db.query(
-        'SELECT 1 FROM paiement WHERE sejour_id = $1 AND extract(year FROM mois) = $2',
-        [p.sejour_id, p.annee],
+        'SELECT 1 FROM payment WHERE tenancy_id = $1 AND extract(year FROM month) = $2',
+        [p.tenancy_id, p.year],
       )
       if (payes) {
-        return reply.code(409).send({ message: `Les provisions ${p.annee} viennent des paiements mensuels saisis` })
+        return reply.code(409).send({ message: `Les provisions ${p.year} viennent des paiements mensuels saisis` })
       }
       const { rows: [saved] } = await db.query(
-        `INSERT INTO provision_annuelle (sejour_id, annee, montant, note) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (sejour_id, annee) DO UPDATE SET montant = excluded.montant, note = excluded.note
-         RETURNING id, sejour_id, annee, montant::text, note`,
-        [p.sejour_id, p.annee, p.montant, p.note],
+        `INSERT INTO annual_charge_advance (tenancy_id, year, amount, note) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (tenancy_id, year) DO UPDATE SET amount = excluded.amount, note = excluded.note
+         RETURNING id, tenancy_id, year, amount::text, note`,
+        [p.tenancy_id, p.year, p.amount, p.note],
       )
       return saved
     } catch (error) {
@@ -289,7 +289,7 @@ const sejourRoutes: FastifyPluginAsync<{ db: Pool }> = async (app, { db }) => {
   })
 
   app.delete('/provisions/:id', async (request, reply) => {
-    const { rowCount } = await db.query('DELETE FROM provision_annuelle WHERE id = $1', [idParam(request)])
+    const { rowCount } = await db.query('DELETE FROM annual_charge_advance WHERE id = $1', [idParam(request)])
     return rowCount ? reply.code(204).send() : reply.code(404).send({ message: 'Provision introuvable' })
   })
 }

@@ -7,15 +7,16 @@ import type { Pool } from 'pg'
 // PDFs archived on disk (STORAGE_DIR), named by the SHA-256 of their content: the same PDF is stored once per kind.
 // One folder per kind (ADR 0018); the columns hold the path relative to the storage: « factures/<sha>.pdf ».
 
+// Folders of the storage, as they are on disk (the paths stored in the database begin with them)
 export type Dossier = 'factures' | 'annexes' | 'releves' | 'travaux' | 'assemblees'
 
 // Every column that refers to an archived PDF
 const REFERENCES = `
-  SELECT fichier_pdf AS chemin FROM facture WHERE fichier_pdf IS NOT NULL
-  UNION ALL SELECT fichier_pdf FROM facture_annexe
-  UNION ALL SELECT fichier_pdf FROM travaux WHERE fichier_pdf IS NOT NULL
-  UNION ALL SELECT pv_signe FROM assemblee WHERE pv_signe IS NOT NULL
-  UNION ALL SELECT fichier_pdf FROM releve_bancaire WHERE fichier_pdf IS NOT NULL`
+  SELECT pdf_file AS path FROM invoice WHERE pdf_file IS NOT NULL
+  UNION ALL SELECT pdf_file FROM invoice_tenant_copy
+  UNION ALL SELECT pdf_file FROM works_invoice WHERE pdf_file IS NOT NULL
+  UNION ALL SELECT signed_minutes FROM general_meeting WHERE signed_minutes IS NOT NULL
+  UNION ALL SELECT pdf_file FROM bank_statement WHERE pdf_file IS NOT NULL`
 
 export const isPdf = (content: Buffer) => content.subarray(0, 5).toString('latin1') === '%PDF-'
 
@@ -34,7 +35,7 @@ export async function storePdf(storageDir: string, content: Buffer, dossier: Dos
 
 /** Deletes an archived PDF that nothing refers to any more. */
 export async function removeIfUnused(db: Pool, storageDir: string, fileName: string) {
-  const { rowCount } = await db.query(`SELECT 1 FROM (${REFERENCES}) r WHERE chemin = $1`, [fileName])
+  const { rowCount } = await db.query(`SELECT 1 FROM (${REFERENCES}) r WHERE path = $1`, [fileName])
   if (!rowCount) {
     await rm(join(storageDir, fileName), { force: true })
   }
@@ -46,12 +47,12 @@ export async function removeIfUnused(db: Pool, storageDir: string, fileName: str
  * is deleted. Run at start-up; does nothing once the storage is in order.
  */
 export async function rangerStockage(db: Pool, storageDir: string): Promise<number> {
-  const { rows } = await db.query<{ chemin: string }>(
-    `SELECT DISTINCT chemin FROM (${REFERENCES}) r WHERE chemin LIKE '%/%'`)
+  const { rows } = await db.query<{ path: string }>(
+    `SELECT DISTINCT path FROM (${REFERENCES}) r WHERE path LIKE '%/%'`)
   let copies = 0
-  for (const { chemin } of rows) {
-    const cible = join(storageDir, chemin)
-    const ancien = join(storageDir, basename(chemin))
+  for (const { path } of rows) {
+    const cible = join(storageDir, path)
+    const ancien = join(storageDir, basename(path))
     if (!(await present(cible)) && (await present(ancien))) {
       await mkdir(dirname(cible), { recursive: true })
       await copyFile(ancien, cible)
@@ -60,10 +61,10 @@ export async function rangerStockage(db: Pool, storageDir: string): Promise<numb
   }
   // A root file now in the folder(s) of the kinds that refer to it is no longer needed
   const racine = await readdir(storageDir).catch(() => [] as string[])
-  for (const nom of racine.filter((n) => n.endsWith('.pdf'))) {
-    const dans = rows.filter(({ chemin }) => basename(chemin) === nom)
-    if (dans.length && (await Promise.all(dans.map(({ chemin }) => present(join(storageDir, chemin))))).every(Boolean)) {
-      await rm(join(storageDir, nom), { force: true })
+  for (const name of racine.filter((n) => n.endsWith('.pdf'))) {
+    const dans = rows.filter(({ path }) => basename(path) === name)
+    if (dans.length && (await Promise.all(dans.map(({ path }) => present(join(storageDir, path))))).every(Boolean)) {
+      await rm(join(storageDir, name), { force: true })
     }
   }
   return copies

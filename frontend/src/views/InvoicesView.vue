@@ -30,14 +30,14 @@ type ImportResult = {
 }
 
 type ManualInvoice = {
-  fournisseur: string, energie: Energie, numero: string, date_facture: string, montant_ttc: string, note: string
+  supplier: string, energy: Energie, number: string, invoice_date: string, total_incl_tax: string, note: string
   file: File | null
 }
 
 const router = useRouter()
-const { immeubles: buildings, immeubleId: building, pret: ready } = useImmeuble()
+const { buildings: buildings, immeubleId: building, pret: ready } = useImmeuble()
 // The building an invoice goes to: the one chosen in the menu, shown again where invoices are dropped or typed
-const buildingName = (id: number | null) => buildings.value.find((b) => b.id === id)?.nom ?? ''
+const buildingName = (id: number | null) => buildings.value.find((b) => b.id === id)?.name ?? ''
 const invoices = ref<FactureResumee[]>([])
 const error = ref<string | null>(null)
 const results = ref<ImportResult[]>([])
@@ -59,7 +59,7 @@ async function load() {
     return
   }
   try {
-    invoices.value = await api.factures(building.value)
+    invoices.value = await api.invoices(building.value)
     error.value = null
   } catch (e) {
     error.value = (e as Error).message
@@ -72,11 +72,11 @@ watch(building, load)
 
 // Its tenant version (ADR 0024): to make or to check before it is joined to a supporting document
 const MASKING: Record<EtatAnnexe, { label: string, cssClass: string, title: string }> = {
-  verifiee: { label: '✓ validé', cssClass: 'ok', title: 'Version locataire contrôlée : jointe aux justificatifs' },
-  a_verifier: { label: 'à contrôler', cssClass: 'ko', title: 'Version locataire à contrôler (onglet « Version locataire »)' },
-  a_faire: { label: 'à créer', cssClass: 'ko', title: 'Version locataire pas encore créée' },
-  confidentiel: { label: 'confidentielle', cssClass: 'discret', title: 'Fournisseur confidentiel : jamais jointe' },
-  sans_pdf: { label: '—', cssClass: 'discret', title: 'Pas de PDF : rien à joindre' },
+  checked: { label: '✓ validé', cssClass: 'ok', title: 'Version locataire contrôlée : jointe aux justificatifs' },
+  to_check: { label: 'à contrôler', cssClass: 'ko', title: 'Version locataire à contrôler (onglet « Version locataire »)' },
+  to_make: { label: 'à créer', cssClass: 'ko', title: 'Version locataire pas encore créée' },
+  confidential: { label: 'confidentielle', cssClass: 'discret', title: 'Fournisseur confidentiel : jamais jointe' },
+  no_pdf: { label: '—', cssClass: 'discret', title: 'Pas de PDF : rien à joindre' },
 }
 
 // Paid by bank movements (ADR 0022): the only field computed here, shown and filtered under « Payée »
@@ -86,19 +86,19 @@ const PAYMENT_CLASSES: Record<PaymentStatus, string> = { unpaid: 'discret', part
 
 function paymentStatus(f: FactureResumee): PaymentStatus | null {
   // A replaced invoice, or a draft without a total: nothing to pay; a draft with one may already be paid
-  if (f.statut === 'remplacee' || f.montant_ttc === null || (f.statut === 'a_verifier' && Number(f.paye) === 0)) {
+  if (f.status === 'replaced' || f.total_incl_tax === null || (f.status === 'draft' && Number(f.paid) === 0)) {
     return null
   }
-  return Number(f.reste) <= 0 ? 'paid' : Number(f.paye) > 0 ? 'partial' : 'unpaid'
+  return Number(f.remaining) <= 0 ? 'paid' : Number(f.paid) > 0 ? 'partial' : 'unpaid'
 }
 
 /** The detail of its payment, as a tooltip: last payment, what is left, or paid too much. */
 function paymentTitle(f: FactureResumee) {
-  const last = f.date_paiement ? `Dernier règlement le ${f.date_paiement}` : 'Aucun mouvement bancaire rattaché'
-  if (Number(f.reste) < 0) {
-    return `${last} ; payé ${f.paye}, écart ${f.reste.replace('-', '')}`
+  const last = f.payment_date ? `Dernier règlement le ${f.payment_date}` : 'Aucun mouvement bancaire rattaché'
+  if (Number(f.remaining) < 0) {
+    return `${last} ; payé ${f.paid}, écart ${f.remaining.replace('-', '')}`
   }
-  return Number(f.reste) > 0 && Number(f.paye) > 0 ? `${last} ; reste ${f.reste}` : last
+  return Number(f.remaining) > 0 && Number(f.paid) > 0 ? `${last} ; reste ${f.remaining}` : last
 }
 
 const rows = computed(() => invoices.value.map((f) => ({ ...f, payment_status: paymentStatus(f) })))
@@ -106,14 +106,14 @@ type Row = (typeof rows.value)[number]
 
 // Filters on the fields of the API; replaced invoices (ADR 0017) stay in the database, hidden unless asked
 const defaultFilters = (): Filters => ({
-  date_facture: contains(), fournisseur: equals(), numero: contains(), energie: equals(), debut: contains(), fin: contains(),
-  montant_ttc: contains(), statut: anyOf(['a_verifier', 'validee']), payment_status: equals(), annexe: equals(),
+  invoice_date: contains(), supplier: equals(), number: contains(), energy: equals(), start: contains(), end: contains(),
+  total_incl_tax: contains(), status: anyOf(['draft', 'validated']), payment_status: equals(), tenant_copy: equals(),
 })
 const filters = ref<Filters>(defaultFilters())
 const table = ref<FilteredTable<Row>>(null)
 const shown = computed(() => table.value?.processedData ?? [])
 
-const drafts = computed(() => invoices.value.filter((f) => f.statut === 'a_verifier').length)
+const drafts = computed(() => invoices.value.filter((f) => f.status === 'draft').length)
 
 // ---------------------------------------------------------------- import of PDFs
 
@@ -124,7 +124,7 @@ async function importFiles(files: FileList | File[] | null) {
   let extractors: ExtracteurEnregistre[]
   let terms: string[]
   try {
-    [extractors, terms] = await Promise.all([api.extracteurs(), api.termesMasques()])
+    [extractors, terms] = await Promise.all([api.extractors(), api.termesMasques()])
   } catch (e) {
     error.value = (e as Error).message
     return
@@ -172,16 +172,16 @@ async function readAndImport(
   const candidate = found[0]!
   const { brouillon: draft, probleme: problem } = brouillonDe(lire(pages, candidate), candidate.enregistre.id)
   if (!draft) {
-    fail(`${candidate.enregistre.fournisseur} v${candidate.enregistre.version} : ${problem}`)
+    fail(`${candidate.enregistre.supplier} v${candidate.enregistre.version} : ${problem}`)
     return
   }
   try {
-    const { facture: invoice, controle: checks } = await api.importer(target, file, draft)
+    const { invoice: invoice, checks: checks } = await api.importer(target, file, draft)
     let copy = ''
-    if (invoice.annexe === 'a_faire') {
+    if (invoice.tenant_copy === 'to_make') {
       try {
         await preparerAnnexe(invoice, terms && extractors.length
-          ? { termes: terms, extracteurs: extractors, modele: (await api.fournisseur(invoice.fournisseur_id)).zones_masquees }
+          ? { terms: terms, extractors: extractors, modele: (await api.supplier(invoice.supplier_id)).masked_zones }
           : undefined)
         copy = ', version locataire à contrôler'
       } catch (e) {
@@ -192,16 +192,16 @@ async function readAndImport(
       status: 'imported',
       id: invoice.id,
       choice: undefined,
-      message: `${invoice.fournisseur} n° ${invoice.numero} : brouillon créé dans ${buildingName(target)}`
-        + (checks.validable ? '' : ' (contrôles en erreur)') + copy,
+      message: `${invoice.supplier} n° ${invoice.number} : brouillon créé dans ${buildingName(target)}`
+        + (checks.can_validate ? '' : ' (contrôles en erreur)') + copy,
     })
   } catch (e) {
     const duplicate = e instanceof ApiError && e.status === 409
     Object.assign(result, {
       status: duplicate ? 'duplicate' : 'error',
-      id: duplicate ? Number(e.body.facture_id) : undefined,
+      id: duplicate ? Number(e.body.invoice_id) : undefined,
       message: (e as Error).message,
-      toType: e instanceof ApiError && e.body.code === 'saisie_manuelle' ? file : undefined,
+      toType: e instanceof ApiError && e.body.code === 'manual_entry' ? file : undefined,
       choice: undefined,
     })
   }
@@ -229,18 +229,18 @@ function pick(event: Event) {
 
 // ---------------------------------------------------------------- invoice typed by hand (no PDF, or not read)
 
-const suppliers = computed(() => [...new Set(invoices.value.map((f) => f.fournisseur))].sort())
+const suppliers = computed(() => [...new Set(invoices.value.map((f) => f.supplier))].sort())
 
 // A known supplier gives the energy of its other invoices
-watch(() => manual.value?.fournisseur, (name) => {
-  const known = invoices.value.find((f) => f.fournisseur === name)
+watch(() => manual.value?.supplier, (name) => {
+  const known = invoices.value.find((f) => f.supplier === name)
   if (manual.value && known) {
-    manual.value.energie = known.energie
+    manual.value.energy = known.energy
   }
 })
 
 function newManual(file: File | null = null) {
-  manual.value = { fournisseur: '', energie: 'eau', numero: '', date_facture: '', montant_ttc: '', note: '', file }
+  manual.value = { supplier: '', energy: 'water', number: '', invoice_date: '', total_incl_tax: '', note: '', file }
   manualError.value = null
 }
 
@@ -248,14 +248,14 @@ async function create() {
   if (!manual.value || building.value === null) {
     return
   }
-  const { file, montant_ttc, note, ...header } = manual.value
+  const { file, total_incl_tax, note, ...header } = manual.value
   try {
-    const { facture: invoice } = await api.creerFacture(
+    const { invoice: invoice } = await api.creerFacture(
       building.value,
-      { ...header, montant_ttc: nombreApi(montant_ttc) ?? montant_ttc, note: note.trim() || null },
+      { ...header, total_incl_tax: nombreApi(total_incl_tax) ?? total_incl_tax, note: note.trim() || null },
       file,
     )
-    await router.push({ name: 'facture', params: { id: invoice.id } })
+    await router.push({ name: 'invoice', params: { id: invoice.id } })
   } catch (e) {
     manualError.value = (e as Error).message
   }
@@ -278,7 +278,7 @@ async function create() {
   >
     <label class="immeuble-import">Importer dans
       <select v-model="building">
-        <option v-for="b in buildings" :key="b.id" :value="b.id">{{ b.nom }}</option>
+        <option v-for="b in buildings" :key="b.id" :value="b.id">{{ b.name }}</option>
       </select>
     </label>
     <p>Déposer des factures PDF ici, ou</p>
@@ -286,17 +286,17 @@ async function create() {
       Choisir des fichiers…
       <input type="file" accept="application/pdf" multiple hidden @change="pick">
     </label>
-    <p class="discret">Les factures d'un fournisseur qui a un extracteur (EDF, ENGIE… voir <RouterLink :to="{ name: 'fournisseurs' }">Fournisseurs</RouterLink>) sont lues automatiquement, dans le navigateur. Chaque facture importée reste un brouillon jusqu'à sa validation.</p>
+    <p class="discret">Les factures d'un fournisseur qui a un extracteur (EDF, ENGIE… voir <RouterLink :to="{ name: 'suppliers' }">Fournisseurs</RouterLink>) sont lues automatiquement, dans le navigateur. Chaque facture importée reste un brouillon jusqu'à sa validation.</p>
   </section>
 
   <ul v-if="results.length" class="resultats">
     <li v-for="(r, i) in results" :key="i" :class="IMPORT_CLASSES[r.status]">
       <strong>{{ r.file }}</strong> : {{ r.message }}
-      <RouterLink v-if="r.id" :to="{ name: 'facture', params: { id: r.id } }">ouvrir</RouterLink>
+      <RouterLink v-if="r.id" :to="{ name: 'invoice', params: { id: r.id } }">ouvrir</RouterLink>
       <button v-if="r.toType" type="button" @click="newManual(r.toType)">Saisir à la main avec ce PDF</button>
       <template v-if="r.choice">
         <button v-for="c in r.choice.candidates" :key="c.enregistre.id" type="button" @click="chooseExtractor(r, c)">
-          {{ c.enregistre.fournisseur }} (v{{ c.enregistre.version }})
+          {{ c.enregistre.supplier }} (v{{ c.enregistre.version }})
         </button>
       </template>
     </li>
@@ -306,21 +306,21 @@ async function create() {
     <strong>Nouvelle facture {{ manual.file ? `(PDF joint : ${manual.file.name})` : 'sans PDF' }}</strong>
     <label>Immeuble
       <select v-model="building" required>
-        <option v-for="b in buildings" :key="b.id" :value="b.id">{{ b.nom }}</option>
+        <option v-for="b in buildings" :key="b.id" :value="b.id">{{ b.name }}</option>
       </select>
     </label>
-    <label>Fournisseur <input v-model="manual.fournisseur" list="suppliers" size="16" required></label>
+    <label>Fournisseur <input v-model="manual.supplier" list="suppliers" size="16" required></label>
     <datalist id="suppliers">
       <option v-for="s in suppliers" :key="s" :value="s" />
     </datalist>
     <label>Énergie
-      <select v-model="manual.energie">
+      <select v-model="manual.energy">
         <option v-for="(name, code) in ENERGIES" :key="code" :value="code">{{ name }}</option>
       </select>
     </label>
-    <label>N° <input v-model="manual.numero" size="14" required></label>
-    <label>Date <input v-model="manual.date_facture" type="date" required></label>
-    <label>Total imprimé TTC <input v-model="manual.montant_ttc" class="nombre" size="9" required></label>
+    <label>N° <input v-model="manual.number" size="14" required></label>
+    <label>Date <input v-model="manual.invoice_date" type="date" required></label>
+    <label>Total imprimé TTC <input v-model="manual.total_incl_tax" class="nombre" size="9" required></label>
     <label>Note <input v-model="manual.note" size="26"></label>
     <button type="submit" class="principal">Créer le brouillon</button>
     <button type="button" @click="manual = null">Annuler</button>
@@ -342,51 +342,51 @@ async function create() {
   <!-- Short columns at a fixed width; the supplier and the number take the rest -->
   <DataTable
     ref="table" v-model:filters="filters" :value="rows" data-key="id" filter-display="row" size="small"
-    sort-field="date_facture" :sort-order="-1" state-storage="session" :state-key="stateKey('invoices')"
-    class="clickable" @row-click="router.push({ name: 'facture', params: { id: $event.data.id } })"
+    sort-field="invoice_date" :sort-order="-1" state-storage="session" :state-key="stateKey('invoices')"
+    class="clickable" @row-click="router.push({ name: 'invoice', params: { id: $event.data.id } })"
     @state-restore="filters = withDefaults(defaultFilters(), $event.filters)"
   >
     <template #empty>Aucune facture.</template>
-    <Column field="date_facture" header="Date" sortable :show-filter-menu="false" style="width: 7.5rem">
+    <Column field="invoice_date" header="Date" sortable :show-filter-menu="false" style="width: 7.5rem">
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
-    <Column field="fournisseur" header="Fournisseur" sortable :show-filter-menu="false">
+    <Column field="supplier" header="Fournisseur" sortable :show-filter-menu="false">
       <template #filter="{ filterModel, filterCallback }">
-        <ColumnFilter :model="filterModel" :apply="filterCallback" :options="distinctOptions(invoices.map((f) => f.fournisseur))" />
+        <ColumnFilter :model="filterModel" :apply="filterCallback" :options="distinctOptions(invoices.map((f) => f.supplier))" />
       </template>
     </Column>
-    <Column field="numero" header="N°" :show-filter-menu="false">
+    <Column field="number" header="N°" :show-filter-menu="false">
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
-    <Column field="energie" header="Énergie" sortable :show-filter-menu="false" style="width: 9rem">
-      <template #body="{ data }">{{ ENERGIES[data.energie as Energie] }}</template>
+    <Column field="energy" header="Énergie" sortable :show-filter-menu="false" style="width: 9rem">
+      <template #body="{ data }">{{ ENERGIES[data.energy as Energie] }}</template>
       <template #filter="{ filterModel, filterCallback }">
         <ColumnFilter :model="filterModel" :apply="filterCallback" :options="optionsOf(ENERGIES)" />
       </template>
     </Column>
     <!-- The period of its lines: the first day and the last one -->
-    <Column field="debut" header="Début" sortable :show-filter-menu="false" style="width: 7.5rem">
+    <Column field="start" header="Début" sortable :show-filter-menu="false" style="width: 7.5rem">
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
-    <Column field="fin" header="Fin" sortable :show-filter-menu="false" style="width: 7.5rem">
+    <Column field="end" header="Fin" sortable :show-filter-menu="false" style="width: 7.5rem">
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
     </Column>
     <Column
-      field="montant_ttc" header="Total TTC" sortable body-class="nombre" header-class="nombre" :show-filter-menu="false"
+      field="total_incl_tax" header="Total TTC" sortable body-class="nombre" header-class="nombre" :show-filter-menu="false"
       style="width: 8rem"
     >
       <template #filter="{ filterModel, filterCallback }"><ColumnFilter :model="filterModel" :apply="filterCallback" /></template>
       <!-- The sum of the lines against the printed total: a green tick, or a red cross -->
       <template #body="{ data }">
-        {{ data.montant_ttc }}
+        {{ data.total_incl_tax }}
         <span
           :class="data.total_ok ? 'ok' : 'ko'"
-          :title="data.total_ok ? 'Somme des lignes = total imprimé' : data.montant_ttc === null ? 'Total imprimé à saisir' : 'Écart entre la somme des lignes et le total imprimé'"
+          :title="data.total_ok ? 'Somme des lignes = total imprimé' : data.total_incl_tax === null ? 'Total imprimé à saisir' : 'Écart entre la somme des lignes et le total imprimé'"
         >{{ data.total_ok ? '✓' : '✗' }}</span>
       </template>
     </Column>
-    <Column field="statut" header="Statut" :show-filter-menu="false" style="width: 9rem">
-      <template #body="{ data }"><span class="pastille" :class="data.statut">{{ STATUTS[data.statut as FactureResumee['statut']] }}</span></template>
+    <Column field="status" header="Statut" :show-filter-menu="false" style="width: 9rem">
+      <template #body="{ data }"><span class="pastille" :class="data.status">{{ STATUTS[data.status as FactureResumee['status']] }}</span></template>
       <template #filter="{ filterModel, filterCallback }">
         <ColumnFilter :model="filterModel" :apply="filterCallback" :options="optionsOf(STATUTS)" multiple />
       </template>
@@ -394,7 +394,7 @@ async function create() {
     <Column field="payment_status" header="Payée" :show-filter-menu="false" style="width: 10rem">
       <template #body="{ data }">
         <span v-if="data.payment_status" :class="PAYMENT_CLASSES[data.payment_status as PaymentStatus]" :title="paymentTitle(data)">
-          <template v-if="data.payment_status === 'paid'">✓ {{ data.date_paiement }}</template>
+          <template v-if="data.payment_status === 'paid'">✓ {{ data.payment_date }}</template>
           <template v-else>{{ PAYMENT_STATUSES[data.payment_status as PaymentStatus] }}</template>
         </span>
       </template>
@@ -402,10 +402,10 @@ async function create() {
         <ColumnFilter :model="filterModel" :apply="filterCallback" :options="optionsOf(PAYMENT_STATUSES)" />
       </template>
     </Column>
-    <Column field="annexe" header="Masquage" :show-filter-menu="false" style="width: 9rem">
+    <Column field="tenant_copy" header="Masquage" :show-filter-menu="false" style="width: 9rem">
       <template #body="{ data }">
-        <span v-if="data.statut !== 'remplacee'" :class="MASKING[data.annexe as EtatAnnexe].cssClass" :title="MASKING[data.annexe as EtatAnnexe].title">
-          {{ MASKING[data.annexe as EtatAnnexe].label }}
+        <span v-if="data.status !== 'replaced'" :class="MASKING[data.tenant_copy as EtatAnnexe].cssClass" :title="MASKING[data.tenant_copy as EtatAnnexe].title">
+          {{ MASKING[data.tenant_copy as EtatAnnexe].label }}
         </span>
       </template>
       <template #filter="{ filterModel, filterCallback }">

@@ -27,47 +27,47 @@ export type FactureOptions = {
   storageDir: string
 }
 
-const ENERGIES = ['gaz', 'electricite', 'eau', 'ordures_menageres', 'autre']
+const ENERGIES = ['gas', 'electricity', 'water', 'household_waste', 'other']
 
 const LINE_COLUMNS = `
-  categorie, libelle, ${inclusiveBounds('periode')},
-  kwh::text, montant_ht::text, taux_tva::text, montant_ttc::text, affectation, note`
+  category, label, ${inclusiveBounds('period')},
+  kwh::text, amount_excl_tax::text, vat_rate::text, amount_incl_tax::text, allocation, note`
 
 const FACTURE_COLUMNS = `
-  f.id, f.immeuble_id, fo.nom AS fournisseur, f.energie, f.numero, f.date_facture::text,
-  f.montant_ttc::text, f.statut, f.note, f.fichier_pdf IS NOT NULL AS pdf, fo.id AS fournisseur_id, f.extracteur_id,
-  ${ETAT_ANNEXE_SQL} AS annexe, f.zones_masquees,
-  f.remplacee_par, f.remplacee_le::text, f.motif_remplacement, f.remplace_id,
-  (SELECT coalesce(sum(rf.montant), 0) FROM reglement_facture rf WHERE rf.facture_id = f.id)::text AS paye,
-  ${RESTE_FACTURE_SQL}::text AS reste,
-  (SELECT max(m.date_operation) FROM reglement_facture rf JOIN mouvement m ON m.id = rf.mouvement_id
-   WHERE rf.facture_id = f.id)::text AS date_paiement`
+  f.id, f.building_id, fo.name AS supplier, f.energy, f.number, f.invoice_date::text,
+  f.total_incl_tax::text, f.status, f.note, f.pdf_file IS NOT NULL AS pdf, fo.id AS supplier_id, f.extractor_id,
+  ${ETAT_ANNEXE_SQL} AS tenant_copy, f.masked_zones,
+  f.replaced_by, f.replaced_at::text, f.replacement_reason, f.replaces_id,
+  (SELECT coalesce(sum(rf.amount), 0) FROM invoice_payment rf WHERE rf.invoice_id = f.id)::text AS paid,
+  ${RESTE_FACTURE_SQL}::text AS remaining,
+  (SELECT max(m.transaction_date) FROM invoice_payment rf JOIN bank_transaction m ON m.id = rf.bank_transaction_id
+   WHERE rf.invoice_id = f.id)::text AS payment_date`
 
 // Another invoice, as shown in a link: « EDF n° 123 »
-type Reference = { id: number, fournisseur: string, numero: string, statut: string }
-const REFERENCE = `SELECT f.id, fo.nom AS fournisseur, f.numero, f.statut
-  FROM facture f JOIN fournisseur fo ON fo.id = f.fournisseur_id`
+type Reference = { id: number, supplier: string, number: string, status: string }
+const REFERENCE = `SELECT f.id, fo.name AS supplier, f.number, f.status
+  FROM invoice f JOIN supplier fo ON fo.id = f.supplier_id`
 
 // numeric::text keeps the scale ('148.540', '0.0550'): canonical form for the API
 const canonical = (value: string | null) => (value === null ? null : new Big(value).toString())
 
-type Header = { numero: string, date_facture: string, montant_ttc: string | null, energie: string, note: string | null }
+type Header = { number: string, invoice_date: string, total_incl_tax: string | null, energy: string, note: string | null }
 
 /** Invoice header as typed in the form, with what is wrong with it (empty when it can be stored). */
 function readHeader(body: Record<string, unknown>): { header: Header, problems: string[] } {
   const note = String(body.note ?? '').trim()
   const header = {
-    numero: String(body.numero ?? '').trim(),
-    date_facture: String(body.date_facture ?? '').trim(),
-    montant_ttc: readTotal(body.montant_ttc) || null,
-    energie: String(body.energie ?? ''),
+    number: String(body.number ?? '').trim(),
+    invoice_date: String(body.invoice_date ?? '').trim(),
+    total_incl_tax: readTotal(body.total_incl_tax) || null,
+    energy: String(body.energy ?? ''),
     note: note || null,
   }
   const problems = [
-    !header.numero && 'numéro manquant',
-    !/^\d{4}-\d\d-\d\d$/.test(header.date_facture) && 'date de facture invalide',
-    header.montant_ttc !== null && !isDecimal(header.montant_ttc) && 'total imprimé invalide',
-    !ENERGIES.includes(header.energie) && 'énergie inconnue',
+    !header.number && 'numéro manquant',
+    !/^\d{4}-\d\d-\d\d$/.test(header.invoice_date) && 'date de facture invalide',
+    header.total_incl_tax !== null && !isDecimal(header.total_incl_tax) && 'total imprimé invalide',
+    !ENERGIES.includes(header.energy) && 'énergie inconnue',
   ].filter((p): p is string => Boolean(p))
   return { header, problems }
 }
@@ -76,90 +76,90 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
   await app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024, files: 1, fieldSize: 5 * 1024 * 1024 } })
 
   async function load(id: number) {
-    const { rows: [facture] } = await db.query(
-      `SELECT ${FACTURE_COLUMNS} FROM facture f JOIN fournisseur fo ON fo.id = f.fournisseur_id WHERE f.id = $1`,
+    const { rows: [invoice] } = await db.query(
+      `SELECT ${FACTURE_COLUMNS} FROM invoice f JOIN supplier fo ON fo.id = f.supplier_id WHERE f.id = $1`,
       [id],
     )
-    if (!facture) {
+    if (!invoice) {
       return null
     }
     const { rows } = await db.query<InvoiceLine>(
-      `SELECT ${LINE_COLUMNS} FROM ligne_facture WHERE facture_id = $1 ORDER BY ordre, id`,
+      `SELECT ${LINE_COLUMNS} FROM invoice_line WHERE invoice_id = $1 ORDER BY position, id`,
       [id],
     )
-    const lignes = rows.map((l) => ({
+    const lines = rows.map((l) => ({
       ...l,
       kwh: canonical(l.kwh),
-      montant_ht: canonical(l.montant_ht),
-      taux_tva: canonical(l.taux_tva),
-      montant_ttc: new Big(l.montant_ttc).toString(),
+      amount_excl_tax: canonical(l.amount_excl_tax),
+      vat_rate: canonical(l.vat_rate),
+      amount_incl_tax: new Big(l.amount_incl_tax).toString(),
     }))
-    facture.montant_ttc = canonical(facture.montant_ttc)
+    invoice.total_incl_tax = canonical(invoice.total_incl_tax)
     // The invoices linked by a replacement (ADR 0017): the one replacing it, those it replaced, the one it corrects
     const reference = async (fid: number | null) =>
       fid === null ? null : (await db.query<Reference>(`${REFERENCE} WHERE f.id = $1`, [fid])).rows[0] ?? null
     const liens = {
-      remplacante: await reference(facture.remplacee_par),
-      remplacees: (await db.query<Reference>(`${REFERENCE} WHERE f.remplacee_par = $1 ORDER BY f.id`, [id])).rows,
-      corrige: await reference(facture.remplace_id),
+      remplacante: await reference(invoice.replaced_by),
+      remplacees: (await db.query<Reference>(`${REFERENCE} WHERE f.replaced_by = $1 ORDER BY f.id`, [id])).rows,
+      corrige: await reference(invoice.replaces_id),
       correction: (await db.query<Reference>(
-        `${REFERENCE} WHERE f.remplace_id = $1 AND f.statut = 'a_verifier'`, [id])).rows[0] ?? null,
+        `${REFERENCE} WHERE f.replaces_id = $1 AND f.status = 'draft'`, [id])).rows[0] ?? null,
     }
     // Its payments (ADR 0022): the movement (date, label), the amount
-    const { rows: reglements } = await db.query(
-      `SELECT rf.id, rf.mouvement_id, m.date_operation::text AS date_paiement, m.libelle, rf.montant::text
-       FROM reglement_facture rf JOIN mouvement m ON m.id = rf.mouvement_id
-       WHERE rf.facture_id = $1 ORDER BY m.date_operation, rf.id`, [id])
+    const { rows: payments } = await db.query(
+      `SELECT rf.id, rf.bank_transaction_id, m.transaction_date::text AS payment_date, m.label, rf.amount::text
+       FROM invoice_payment rf JOIN bank_transaction m ON m.id = rf.bank_transaction_id
+       WHERE rf.invoice_id = $1 ORDER BY m.transaction_date, rf.id`, [id])
     // Its current version in images (ADR 0024)
-    const { rows: [annexe] } = await db.query(
-      `SELECT a.id, a.extracteur_id, a.termes, a.reglages, jsonb_array_length(a.zones) AS zones, a.cree_le,
-              a.verifiee_le, a.pages_scannees
-       FROM facture f JOIN facture_annexe a ON a.id = f.annexe_id WHERE f.id = $1`, [id])
+    const { rows: [tenant_copy] } = await db.query(
+      `SELECT a.id, a.extractor_id, a.terms, a.settings, jsonb_array_length(a.zones) AS zones, a.created_at,
+              a.checked_at, a.scanned_pages
+       FROM invoice f JOIN invoice_tenant_copy a ON a.id = f.tenant_copy_id WHERE f.id = $1`, [id])
     return {
-      facture, lignes, liens, reglements, annexe: annexe ?? null,
-      controle: checkInvoice({ montant_ttc: facture.montant_ttc, lignes }),
+      invoice, lines, liens, payments, tenant_copy: tenant_copy ?? null,
+      checks: checkInvoice({ total_incl_tax: invoice.total_incl_tax, lines }),
     }
   }
 
   /** Sent regularisations, not rectified yet, whose period touches recoverable lines of these invoices: to check. */
   async function regularisationsTouchees(ids: number[]) {
     const { rows } = await db.query(
-      `SELECT DISTINCT r.id, lo.nom AS locataire, lt.code AS lot, ${inclusiveBounds('r.exercice')}, r.solde::text
-       FROM regularisation r
-       JOIN sejour s ON s.id = r.sejour_id
-       JOIN lot lt ON lt.id = s.lot_id
-       JOIN locataire lo ON lo.id = s.locataire_id
-       WHERE r.date_envoi IS NOT NULL
-         AND NOT EXISTS (SELECT 1 FROM regularisation n WHERE n.remplace_id = r.id)
+      `SELECT DISTINCT r.id, lo.name AS tenant, lt.code AS unit, ${inclusiveBounds('r.period')}, r.balance::text
+       FROM charge_adjustment r
+       JOIN tenancy s ON s.id = r.tenancy_id
+       JOIN unit lt ON lt.id = s.unit_id
+       JOIN tenant lo ON lo.id = s.tenant_id
+       WHERE r.sent_on IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM charge_adjustment n WHERE n.replaces_id = r.id)
          AND EXISTS (
-           SELECT 1 FROM ligne_facture l JOIN facture f ON f.id = l.facture_id
-           WHERE l.facture_id = ANY($1) AND l.affectation = 'recuperable' AND f.immeuble_id = lt.immeuble_id
-             AND l.periode && r.exercice)
-       ORDER BY debut, locataire`,
+           SELECT 1 FROM invoice_line l JOIN invoice f ON f.id = l.invoice_id
+           WHERE l.invoice_id = ANY($1) AND l.allocation = 'recoverable' AND f.building_id = lt.building_id
+             AND l.period && r.period)
+       ORDER BY start, tenant`,
       [ids],
     )
     return rows
   }
 
   app.get('/factures', async (request, reply) => {
-    const immeuble = Number((request.query as { immeuble?: string }).immeuble)
-    if (!Number.isInteger(immeuble)) {
+    const building = Number((request.query as { building?: string }).building)
+    if (!Number.isInteger(building)) {
       return reply.code(400).send({ message: 'Paramètre « immeuble » manquant' })
     }
     const { rows } = await db.query(
-      `SELECT ${FACTURE_COLUMNS}, c.ok AS total_ok, ${inclusiveBounds('e.etendue')}, e.nb_lignes
-       FROM facture f
-       JOIN fournisseur fo ON fo.id = f.fournisseur_id
-       JOIN v_controle_facture c ON c.id = f.id
+      `SELECT ${FACTURE_COLUMNS}, c.ok AS total_ok, ${inclusiveBounds('e.span')}, e.line_count
+       FROM invoice f
+       JOIN supplier fo ON fo.id = f.supplier_id
+       JOIN v_invoice_check c ON c.id = f.id
        CROSS JOIN LATERAL (
-         SELECT range_merge(range_agg(l.periode)) AS etendue, count(*)::int AS nb_lignes
-         FROM ligne_facture l WHERE l.facture_id = f.id
+         SELECT range_merge(range_agg(l.period)) AS span, count(*)::int AS line_count
+         FROM invoice_line l WHERE l.invoice_id = f.id
        ) e
-       WHERE f.immeuble_id = $1
-       ORDER BY f.date_facture DESC NULLS LAST, f.id DESC`,
-      [immeuble],
+       WHERE f.building_id = $1
+       ORDER BY f.invoice_date DESC NULLS LAST, f.id DESC`,
+      [building],
     )
-    return rows.map((r) => ({ ...r, montant_ttc: canonical(r.montant_ttc) }))
+    return rows.map((r) => ({ ...r, total_incl_tax: canonical(r.total_incl_tax) }))
   })
 
   app.get('/factures/:id', async (request, reply) => {
@@ -168,26 +168,26 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
   })
 
   app.get('/factures/:id/pdf', async (request, reply) => {
-    const { rows: [facture] } = await db.query<{ fichier_pdf: string | null }>(
-      'SELECT fichier_pdf FROM facture WHERE id = $1',
+    const { rows: [invoice] } = await db.query<{ pdf_file: string | null }>(
+      'SELECT pdf_file FROM invoice WHERE id = $1',
       [Number((request.params as { id: string }).id)],
     )
-    if (!facture?.fichier_pdf) {
+    if (!invoice?.pdf_file) {
       return reply.code(404).send({ message: 'Pas de PDF pour cette facture' })
     }
     return reply
       .type('application/pdf')
       .header('content-disposition', 'inline')
-      .send(createReadStream(join(storageDir, facture.fichier_pdf)))
+      .send(createReadStream(join(storageDir, invoice.pdf_file)))
   })
 
   // PDF and the draft read from it by an extractor, in the browser (ADR 0013): stored as a draft (statut a_verifier)
   // with the version of the extractor. Multipart: the PDF « file » and the field « brouillon », JSON
   // { extracteur_id, numero, date_facture, montant_ttc (may be null: typed later), lignes }.
   app.post('/factures/import', async (request, reply) => {
-    const immeuble = Number((request.query as { immeuble?: string }).immeuble)
-    const { rowCount } = await db.query('SELECT 1 FROM immeuble WHERE id = $1', [immeuble])
-    if (!Number.isInteger(immeuble) || !rowCount) {
+    const building = Number((request.query as { building?: string }).building)
+    const { rowCount } = await db.query('SELECT 1 FROM building WHERE id = $1', [building])
+    if (!Number.isInteger(building) || !rowCount) {
       return reply.code(400).send({ message: 'Immeuble inconnu' })
     }
     let content: Buffer | null = null
@@ -197,7 +197,7 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
       if (part.type === 'file') {
         content = await part.toBuffer()
         filename = part.filename
-      } else if (part.fieldname === 'brouillon') {
+      } else if (part.fieldname === 'draft') {
         try {
           brouillon = JSON.parse(String(part.value))
         } catch {
@@ -214,31 +214,31 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     if (!brouillon) {
       return reply.code(400).send({ message: 'Brouillon manquant : la facture est lue dans le navigateur' })
     }
-    const { rows: [extracteur] } = await db.query<{ id: number, fournisseur: string, energie: string }>(
-      `SELECT e.id, fo.nom AS fournisseur, e.energie FROM extracteur e JOIN fournisseur fo ON fo.id = e.fournisseur_id
+    const { rows: [extractor] } = await db.query<{ id: number, supplier: string, energy: string }>(
+      `SELECT e.id, fo.name AS supplier, e.energy FROM extractor e JOIN supplier fo ON fo.id = e.supplier_id
        WHERE e.id = $1`,
-      [Number(brouillon.extracteur_id)],
+      [Number(brouillon.extractor_id)],
     )
-    if (!extracteur) {
+    if (!extractor) {
       return reply.code(400).send({ message: 'Extracteur inconnu' })
     }
-    let lignes: InvoiceLine[]
+    let lines: InvoiceLine[]
     try {
-      lignes = readLines(brouillon.lignes)
+      lines = readLines(brouillon.lines)
     } catch (error) {
       if (error instanceof BadRequestError) {
         return reply.code(400).send({ message: error.message })
       }
       throw error
     }
-    const { header, problems } = readHeader({ ...brouillon, energie: extracteur.energie })
+    const { header, problems } = readHeader({ ...brouillon, energy: extractor.energy })
     if (problems.length) {
-      return reply.code(422).send({ message: `Facture mal lue : ${problems.join(', ')}`, code: 'saisie_manuelle' })
+      return reply.code(422).send({ message: `Facture mal lue : ${problems.join(', ')}`, code: 'manual_entry' })
     }
-    const controle = checkInvoice({ montant_ttc: header.montant_ttc, lignes })
-    if (!controle.enregistrable) {
+    const checks = checkInvoice({ total_incl_tax: header.total_incl_tax, lines })
+    if (!checks.can_save) {
       return reply.code(422).send({
-        message: 'Lignes mal lues (corriger l\'extracteur, ou saisir la facture à la main)', code: 'saisie_manuelle', controle,
+        message: 'Lignes mal lues (corriger l\'extracteur, ou saisir la facture à la main)', code: 'manual_entry', checks,
       })
     }
 
@@ -247,29 +247,29 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     try {
       await client.query('BEGIN')
       const { rows: [existing] } = await client.query<{ id: number }>(
-        `SELECT f.id FROM facture f JOIN fournisseur fo ON fo.id = f.fournisseur_id
-         WHERE fo.nom = $1 AND f.numero = $2 AND f.statut <> 'remplacee'
-         ORDER BY f.statut DESC LIMIT 1`,
-        [extracteur.fournisseur, header.numero],
+        `SELECT f.id FROM invoice f JOIN supplier fo ON fo.id = f.supplier_id
+         WHERE fo.name = $1 AND f.number = $2 AND f.status <> 'replaced'
+         ORDER BY f.status DESC LIMIT 1`,
+        [extractor.supplier, header.number],
       )
       if (existing) {
         await client.query('ROLLBACK')
         await removeIfUnused(fileName)
         return reply.code(409).send({
-          message: `Facture ${extracteur.fournisseur} n° ${header.numero} déjà importée`,
-          facture_id: existing.id,
+          message: `Facture ${extractor.supplier} n° ${header.number} déjà importée`,
+          invoice_id: existing.id,
         })
       }
       const { rows: [created] } = await client.query<{ id: number }>(
-        `INSERT INTO facture (immeuble_id, fournisseur_id, energie, numero, date_facture, montant_ttc, fichier_pdf,
-                              extracteur_id)
-         VALUES ($1, (SELECT fournisseur_id FROM extracteur WHERE id = $7), $2, $3, $4, $5, $6, $7) RETURNING id`,
-        [immeuble, header.energie, header.numero, header.date_facture, header.montant_ttc, fileName, extracteur.id],
+        `INSERT INTO invoice (building_id, supplier_id, energy, number, invoice_date, total_incl_tax, pdf_file,
+                              extractor_id)
+         VALUES ($1, (SELECT supplier_id FROM extractor WHERE id = $7), $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [building, header.energy, header.number, header.invoice_date, header.total_incl_tax, fileName, extractor.id],
       )
       if (!created) {
         throw new Error('Insertion de la facture sans identifiant')
       }
-      await insertLines(client, created.id, lignes)
+      await insertLines(client, created.id, lines)
       await client.query('COMMIT')
       return reply.code(201).send(await load(created.id))
     } catch (error) {
@@ -283,9 +283,9 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
   // Invoice typed by hand (no PDF, or a PDF the parsers do not read): draft with its header and no lines, then
   // edited like an imported one. JSON body, or multipart with the same fields and an optional PDF « file ».
   app.post('/factures', async (request, reply) => {
-    const immeuble = Number((request.query as { immeuble?: string }).immeuble)
-    const { rowCount } = await db.query('SELECT 1 FROM immeuble WHERE id = $1', [immeuble])
-    if (!Number.isInteger(immeuble) || !rowCount) {
+    const building = Number((request.query as { building?: string }).building)
+    const { rowCount } = await db.query('SELECT 1 FROM building WHERE id = $1', [building])
+    if (!Number.isInteger(building) || !rowCount) {
       return reply.code(400).send({ message: 'Immeuble inconnu' })
     }
     let body: Record<string, unknown> = {}
@@ -301,9 +301,9 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     } else {
       body = (request.body ?? {}) as Record<string, unknown>
     }
-    const fournisseur = String(body.fournisseur ?? '').trim()
+    const supplier = String(body.supplier ?? '').trim()
     const { header, problems } = readHeader(body)
-    if (!fournisseur) {
+    if (!supplier) {
       problems.unshift('fournisseur manquant')
     }
     if (problems.length) {
@@ -321,12 +321,12 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     const client = await db.connect()
     try {
       await client.query('BEGIN')
-      await client.query('INSERT INTO fournisseur (nom) VALUES ($1) ON CONFLICT (nom) DO NOTHING', [fournisseur])
+      await client.query('INSERT INTO supplier (name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [supplier])
       const { rows: [existing] } = await client.query<{ id: number }>(
-        `SELECT f.id FROM facture f JOIN fournisseur fo ON fo.id = f.fournisseur_id
-         WHERE fo.nom = $1 AND f.numero = $2 AND f.statut <> 'remplacee'
-         ORDER BY f.statut DESC LIMIT 1`,
-        [fournisseur, header.numero],
+        `SELECT f.id FROM invoice f JOIN supplier fo ON fo.id = f.supplier_id
+         WHERE fo.name = $1 AND f.number = $2 AND f.status <> 'replaced'
+         ORDER BY f.status DESC LIMIT 1`,
+        [supplier, header.number],
       )
       if (existing) {
         await client.query('ROLLBACK')
@@ -334,14 +334,14 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
           await removeIfUnused(fileName)
         }
         return reply.code(409).send({
-          message: `Facture ${fournisseur} n° ${header.numero} déjà enregistrée`,
-          facture_id: existing.id,
+          message: `Facture ${supplier} n° ${header.number} déjà enregistrée`,
+          invoice_id: existing.id,
         })
       }
       const { rows: [created] } = await client.query<{ id: number }>(
-        `INSERT INTO facture (immeuble_id, fournisseur_id, energie, numero, date_facture, montant_ttc, note, fichier_pdf)
-         VALUES ($1, (SELECT id FROM fournisseur WHERE nom = $2), $3, $4, $5, $6, $7, $8) RETURNING id`,
-        [immeuble, fournisseur, header.energie, header.numero, header.date_facture, header.montant_ttc, header.note,
+        `INSERT INTO invoice (building_id, supplier_id, energy, number, invoice_date, total_incl_tax, note, pdf_file)
+         VALUES ($1, (SELECT id FROM supplier WHERE name = $2), $3, $4, $5, $6, $7, $8) RETURNING id`,
+        [building, supplier, header.energy, header.number, header.invoice_date, header.total_incl_tax, header.note,
           fileName],
       )
       if (!created) {
@@ -361,9 +361,9 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
   app.put('/factures/:id', async (request, reply) => {
     const id = Number((request.params as { id: string }).id)
     const body = (request.body ?? {}) as Record<string, unknown>
-    let lignes: InvoiceLine[]
+    let lines: InvoiceLine[]
     try {
-      lignes = readLines(body.lignes)
+      lines = readLines(body.lines)
     } catch (error) {
       if (error instanceof BadRequestError) {
         return reply.code(400).send({ message: error.message })
@@ -374,45 +374,45 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     if (problems.length) {
       return reply.code(422).send({ message: `En-tête : ${problems.join(', ')}` })
     }
-    const controle = checkInvoice({ montant_ttc: header.montant_ttc, lignes })
-    if (!controle.enregistrable) {
-      return reply.code(422).send({ message: 'Corriger les erreurs de saisie avant d\'enregistrer', controle })
+    const checks = checkInvoice({ total_incl_tax: header.total_incl_tax, lines })
+    if (!checks.can_save) {
+      return reply.code(422).send({ message: 'Corriger les erreurs de saisie avant d\'enregistrer', checks })
     }
 
     const client = await db.connect()
     try {
       await client.query('BEGIN')
-      const { rows: [current] } = await client.query<{ statut: string }>(
-        'SELECT statut FROM facture WHERE id = $1 FOR UPDATE',
+      const { rows: [current] } = await client.query<{ status: string }>(
+        'SELECT status FROM invoice WHERE id = $1 FOR UPDATE',
         [id],
       )
       if (!current) {
         await client.query('ROLLBACK')
         return reply.code(404).send({ message: 'Facture introuvable' })
       }
-      if (current.statut !== 'a_verifier') {
+      if (current.status !== 'draft') {
         await client.query('ROLLBACK')
         return reply.code(409).send({
-          message: current.statut === 'remplacee'
+          message: current.status === 'replaced'
             ? 'Facture remplacée : elle n\'est plus modifiable'
             : 'Facture validée : elle n\'est plus modifiable (« Corriger » ou « Remplacer par… »)',
         })
       }
       // A draft already paid (ADR 0022): its total stays known, and no lower than what is linked to it
-      const { rows: [paye] } = await client.query<{ paye: string }>(
-        'SELECT coalesce(sum(montant), 0)::text AS paye FROM reglement_facture WHERE facture_id = $1', [id])
-      if (new Big(paye!.paye).gt(0) && (header.montant_ttc === null || new Big(paye!.paye).gt(header.montant_ttc))) {
+      const { rows: [paid] } = await client.query<{ paid: string }>(
+        'SELECT coalesce(sum(amount), 0)::text AS paid FROM invoice_payment WHERE invoice_id = $1', [id])
+      if (new Big(paid!.paid).gt(0) && (header.total_incl_tax === null || new Big(paid!.paid).gt(header.total_incl_tax))) {
         await client.query('ROLLBACK')
         return reply.code(422).send({
-          message: `Des paiements de ${new Big(paye!.paye).toFixed(2)} € sont rattachés : le total ne peut pas être inférieur`,
+          message: `Des paiements de ${new Big(paid!.paid).toFixed(2)} € sont rattachés : le total ne peut pas être inférieur`,
         })
       }
       await client.query(
-        'UPDATE facture SET numero = $2, date_facture = $3, montant_ttc = $4, energie = $5, note = $6 WHERE id = $1',
-        [id, header.numero, header.date_facture, header.montant_ttc, header.energie, header.note],
+        'UPDATE invoice SET number = $2, invoice_date = $3, total_incl_tax = $4, energy = $5, note = $6 WHERE id = $1',
+        [id, header.number, header.invoice_date, header.total_incl_tax, header.energy, header.note],
       )
-      await client.query('DELETE FROM ligne_facture WHERE facture_id = $1', [id])
-      await insertLines(client, id, lignes)
+      await client.query('DELETE FROM invoice_line WHERE invoice_id = $1', [id])
+      await insertLines(client, id, lines)
       await client.query('COMMIT')
     } catch (error) {
       await client.query('ROLLBACK')
@@ -426,7 +426,7 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     return load(id)
   })
 
-  // Validation: the checks run again on the stored lines; any « erreur » refuses it. The draft of a correction
+  // Validation: the checks run again on the stored lines; any « error » refuses it. The draft of a correction
   // replaces, in the same transaction, the invoice it corrects (ADR 0017).
   app.post('/factures/:id/valider', async (request, reply) => {
     const id = Number((request.params as { id: string }).id)
@@ -434,23 +434,23 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     if (!current) {
       return reply.code(404).send({ message: 'Facture introuvable' })
     }
-    if (current.facture.statut !== 'a_verifier') {
+    if (current.invoice.status !== 'draft') {
       return reply.code(409).send({ message: 'Facture déjà validée' })
     }
-    if (!current.controle.validable) {
-      return reply.code(422).send({ message: 'Contrôles en erreur : validation impossible', controle: current.controle })
+    if (!current.checks.can_validate) {
+      return reply.code(422).send({ message: 'Contrôles en erreur : validation impossible', checks: current.checks })
     }
-    const corrige: number | null = current.facture.remplace_id
+    const corrige: number | null = current.invoice.replaces_id
     const client = await db.connect()
     try {
       await client.query('BEGIN')
       if (corrige !== null) {
         // The corrected invoice first: the number is unique among validated invoices
         const { rowCount } = await client.query(
-          `UPDATE facture SET statut = 'remplacee', remplacee_par = $2, remplacee_le = now(),
-                              motif_remplacement = 'Corrigée' || coalesce(' : ' || $3, '')
-           WHERE id = $1 AND statut = 'validee'`,
-          [corrige, id, current.facture.note],
+          `UPDATE invoice SET status = 'replaced', replaced_by = $2, replaced_at = now(),
+                              replacement_reason = 'Corrigée' || coalesce(' : ' || $3, '')
+           WHERE id = $1 AND status = 'validated'`,
+          [corrige, id, current.invoice.note],
         )
         if (!rowCount) {
           await client.query('ROLLBACK')
@@ -461,7 +461,7 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
         // Its payments go to the correction (ADR 0022)
         await transfererReglements(client, corrige, id)
       }
-      await client.query('UPDATE facture SET statut = \'validee\' WHERE id = $1 AND statut = \'a_verifier\'', [id])
+      await client.query('UPDATE invoice SET status = \'validated\' WHERE id = $1 AND status = \'draft\'', [id])
       await client.query('COMMIT')
     } catch (error) {
       await client.query('ROLLBACK')
@@ -474,7 +474,7 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     }
     return {
       ...(await load(id))!,
-      regularisations: corrige === null ? [] : await regularisationsTouchees([corrige, id]),
+      charge_adjustments: corrige === null ? [] : await regularisationsTouchees([corrige, id]),
     }
   })
 
@@ -494,24 +494,24 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     const client = await db.connect()
     try {
       await client.query('BEGIN')
-      const { rows } = await client.query<{ id: number, immeuble_id: number, statut: string }>(
-        'SELECT id, immeuble_id, statut FROM facture WHERE id = ANY($1) ORDER BY id FOR UPDATE',
+      const { rows } = await client.query<{ id: number, building_id: number, status: string }>(
+        'SELECT id, building_id, status FROM invoice WHERE id = ANY($1) ORDER BY id FOR UPDATE',
         [[id, par]],
       )
       const ancienne = rows.find((f) => f.id === id)
       const nouvelle = rows.find((f) => f.id === par)
       const refus = !ancienne ? [404, 'Facture introuvable']
-        : ancienne.statut !== 'validee' ? [409, 'Seule une facture validée se remplace (un brouillon se supprime)']
+        : ancienne.status !== 'validated' ? [409, 'Seule une facture validée se remplace (un brouillon se supprime)']
           : !nouvelle ? [400, 'Facture de remplacement introuvable']
-            : nouvelle.immeuble_id !== ancienne.immeuble_id ? [400, 'La facture de remplacement est d\'un autre immeuble']
-              : nouvelle.statut !== 'validee' ? [400, 'La facture de remplacement doit être validée']
+            : nouvelle.building_id !== ancienne.building_id ? [400, 'La facture de remplacement est d\'un autre immeuble']
+              : nouvelle.status !== 'validated' ? [400, 'La facture de remplacement doit être validée']
                 : null
       if (refus) {
         await client.query('ROLLBACK')
         return reply.code(refus[0] as number).send({ message: refus[1] })
       }
       await client.query(
-        `UPDATE facture SET statut = 'remplacee', remplacee_par = $2, remplacee_le = now(), motif_remplacement = $3
+        `UPDATE invoice SET status = 'replaced', replaced_by = $2, replaced_at = now(), replacement_reason = $3
          WHERE id = $1`,
         [id, par, motif],
       )
@@ -523,7 +523,7 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     } finally {
       client.release()
     }
-    return { ...(await load(id))!, regularisations: await regularisationsTouchees([id, par]) }
+    return { ...(await load(id))!, charge_adjustments: await regularisationsTouchees([id, par]) }
   })
 
   // Correct a validated invoice: a draft copy (header, lines, PDF, extractor) that replaces it once validated
@@ -533,26 +533,26 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     if (!current) {
       return reply.code(404).send({ message: 'Facture introuvable' })
     }
-    if (current.facture.statut !== 'validee') {
+    if (current.invoice.status !== 'validated') {
       return reply.code(409).send({ message: 'Seule une facture validée se corrige (un brouillon se modifie)' })
     }
     if (current.liens.correction) {
       return reply.code(409).send({
-        message: 'Une correction de cette facture est déjà en cours', facture_id: current.liens.correction.id,
+        message: 'Une correction de cette facture est déjà en cours', invoice_id: current.liens.correction.id,
       })
     }
     const client = await db.connect()
     try {
       await client.query('BEGIN')
       const { rows: [copie] } = await client.query<{ id: number }>(
-        `INSERT INTO facture (immeuble_id, fournisseur_id, energie, numero, date_facture, montant_ttc, fichier_pdf, note,
-                              extracteur_id, remplace_id, annexe_id, zones_masquees)
-         SELECT immeuble_id, fournisseur_id, energie, numero, date_facture, montant_ttc, fichier_pdf, note,
-                extracteur_id, id, annexe_id, zones_masquees
-         FROM facture WHERE id = $1 RETURNING id`,
+        `INSERT INTO invoice (building_id, supplier_id, energy, number, invoice_date, total_incl_tax, pdf_file, note,
+                              extractor_id, replaces_id, tenant_copy_id, masked_zones)
+         SELECT building_id, supplier_id, energy, number, invoice_date, total_incl_tax, pdf_file, note,
+                extractor_id, id, tenant_copy_id, masked_zones
+         FROM invoice WHERE id = $1 RETURNING id`,
         [id],
       )
-      await insertLines(client, copie!.id, current.lignes)
+      await insertLines(client, copie!.id, current.lines)
       await client.query('COMMIT')
       return reply.code(201).send(await load(copie!.id))
     } catch (error) {
@@ -569,26 +569,26 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
   // without category, not covered in full; those of the same amount as its rest first, then by closeness to its date
   app.get('/factures/:id/mouvements', async (request, reply) => {
     const id = Number((request.params as { id: string }).id)
-    const { rows: [f] } = await db.query<{ reste: string, date_facture: string | null }>(
-      `SELECT ${RESTE_FACTURE_SQL}::text AS reste, f.date_facture::text FROM facture f WHERE f.id = $1`, [id])
+    const { rows: [f] } = await db.query<{ remaining: string, invoice_date: string | null }>(
+      `SELECT ${RESTE_FACTURE_SQL}::text AS remaining, f.invoice_date::text FROM invoice f WHERE f.id = $1`, [id])
     if (!f) {
       return reply.code(404).send({ message: 'Facture introuvable' })
     }
     const { rows } = await db.query(
       `SELECT * FROM (
-         SELECT m.id, m.date_operation::text, m.libelle, m.montant::text, m.categorie,
-                (abs(m.montant) - ${COUVERT_SQL})::text AS reste
-         FROM mouvement m
-         WHERE (m.categorie IS NULL OR m.categorie = ANY($1))
-           AND NOT EXISTS (SELECT 1 FROM reglement_facture rf WHERE rf.facture_id = $2 AND rf.mouvement_id = m.id)
+         SELECT m.id, m.transaction_date::text, m.label, m.amount::text, m.category,
+                (abs(m.amount) - ${COUVERT_SQL})::text AS remaining
+         FROM bank_transaction m
+         WHERE (m.category IS NULL OR m.category = ANY($1))
+           AND NOT EXISTS (SELECT 1 FROM invoice_payment rf WHERE rf.invoice_id = $2 AND rf.bank_transaction_id = m.id)
        ) x
-       WHERE reste::numeric > 0
-       ORDER BY (reste::numeric = $3::numeric AND montant::numeric < 0) DESC,
-                abs(date_operation::date - coalesce($4::date, date_operation::date)), id
+       WHERE remaining::numeric > 0
+       ORDER BY (remaining::numeric = $3::numeric AND amount::numeric < 0) DESC,
+                abs(transaction_date::date - coalesce($4::date, transaction_date::date)), id
        LIMIT 200`,
-      [AVEC_FACTURE, id, f.reste, f.date_facture],
+      [AVEC_FACTURE, id, f.remaining, f.invoice_date],
     )
-    return rows.map((m) => ({ ...m, correspond: new Big(m.montant).lt(0) && new Big(m.reste).eq(f.reste) }))
+    return rows.map((m) => ({ ...m, correspond: new Big(m.amount).lt(0) && new Big(m.remaining).eq(f.remaining) }))
   })
 
   // Linked to a debit: a payment of what remains of the movement, no more than what remains of the invoice; to a
@@ -596,11 +596,11 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
   app.post('/factures/:id/reglements', async (request, reply) => {
     const id = Number((request.params as { id: string }).id)
     try {
-      const mouvement = Number((request.body as { mouvement_id?: unknown } | undefined)?.mouvement_id)
-      if (!Number.isInteger(mouvement)) {
+      const bank_transaction = Number((request.body as { bank_transaction_id?: unknown } | undefined)?.bank_transaction_id)
+      if (!Number.isInteger(bank_transaction)) {
         throw new InputError('Choisir le mouvement bancaire qui règle la facture')
       }
-      await reglerFacture(db, id, mouvement)
+      await reglerFacture(db, id, bank_transaction)
       return load(id)
     } catch (error) {
       if (error instanceof IntrouvableError) {
@@ -612,26 +612,26 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
 
   app.delete('/factures/:id/reglements/:reglement', async (request, reply) => {
     const { id, reglement } = request.params as { id: string, reglement: string }
-    await db.query('DELETE FROM reglement_facture WHERE id = $1 AND facture_id = $2', [Number(reglement), Number(id)])
+    await db.query('DELETE FROM invoice_payment WHERE id = $1 AND invoice_id = $2', [Number(reglement), Number(id)])
     return (await load(Number(id))) ?? reply.code(404).send({ message: 'Facture introuvable' })
   })
 
   // Only a draft can be deleted (to import it again, for instance)
   app.delete('/factures/:id', async (request, reply) => {
     const id = Number((request.params as { id: string }).id)
-    const { rows: annexes } = await db.query<{ fichier_pdf: string }>(
-      'SELECT fichier_pdf FROM facture_annexe WHERE facture_id = $1', [id])
-    const { rows: [deleted] } = await db.query<{ fichier_pdf: string | null }>(
-      'DELETE FROM facture WHERE id = $1 AND statut = \'a_verifier\' RETURNING fichier_pdf',
+    const { rows: tenant_copies } = await db.query<{ pdf_file: string }>(
+      'SELECT pdf_file FROM invoice_tenant_copy WHERE invoice_id = $1', [id])
+    const { rows: [deleted] } = await db.query<{ pdf_file: string | null }>(
+      'DELETE FROM invoice WHERE id = $1 AND status = \'draft\' RETURNING pdf_file',
       [id],
     )
     if (!deleted) {
-      const { rowCount } = await db.query('SELECT 1 FROM facture WHERE id = $1', [id])
+      const { rowCount } = await db.query('SELECT 1 FROM invoice WHERE id = $1', [id])
       return rowCount
         ? reply.code(409).send({ message: 'Facture validée : suppression impossible (« Remplacer par… »)' })
         : reply.code(404).send({ message: 'Facture introuvable' })
     }
-    for (const fichier of [deleted.fichier_pdf, ...annexes.map((a) => a.fichier_pdf)]) {
+    for (const fichier of [deleted.pdf_file, ...tenant_copies.map((a) => a.pdf_file)]) {
       if (fichier) {
         await removeIfUnused(fichier)
       }
@@ -645,12 +645,12 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
   // checks first, with the extractors, that the PDF is this invoice (ADR 0013).
   app.post('/factures/:id/pdf', async (request, reply) => {
     const id = Number((request.params as { id: string }).id)
-    const { rows: [facture] } = await db.query<{ fournisseur: string, numero: string, fichier_pdf: string | null }>(
-      `SELECT fo.nom AS fournisseur, f.numero, f.fichier_pdf
-       FROM facture f JOIN fournisseur fo ON fo.id = f.fournisseur_id WHERE f.id = $1`,
+    const { rows: [invoice] } = await db.query<{ supplier: string, number: string, pdf_file: string | null }>(
+      `SELECT fo.name AS supplier, f.number, f.pdf_file
+       FROM invoice f JOIN supplier fo ON fo.id = f.supplier_id WHERE f.id = $1`,
       [id],
     )
-    if (!facture) {
+    if (!invoice) {
       return reply.code(404).send({ message: 'Facture introuvable' })
     }
     const file = await request.file()
@@ -664,12 +664,12 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     const { fileName } = await storePdf(storageDir, content, 'factures')
     // A new PDF: its version in images is to be made again (ADR 0024), its zones drawn by hand were for the other one
     await db.query(
-      `UPDATE facture SET fichier_pdf = $2, annexe_id = CASE WHEN fichier_pdf = $2 THEN annexe_id END,
-                          zones_masquees = CASE WHEN fichier_pdf = $2 THEN zones_masquees END
+      `UPDATE invoice SET pdf_file = $2, tenant_copy_id = CASE WHEN pdf_file = $2 THEN tenant_copy_id END,
+                          masked_zones = CASE WHEN pdf_file = $2 THEN masked_zones END
        WHERE id = $1`,
       [id, fileName])
-    if (facture.fichier_pdf && facture.fichier_pdf !== fileName) {
-      await removeIfUnused(facture.fichier_pdf)
+    if (invoice.pdf_file && invoice.pdf_file !== fileName) {
+      await removeIfUnused(invoice.pdf_file)
     }
     return load(id)
   })
@@ -681,22 +681,22 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
   // A new version, to verify.
   app.post('/factures/:id/annexe', async (request, reply) => {
     const id = Number((request.params as { id: string }).id)
-    const { rows: [facture] } = await db.query<{ fichier_pdf: string | null }>(
-      'SELECT fichier_pdf FROM facture WHERE id = $1', [id])
-    if (!facture) {
+    const { rows: [invoice] } = await db.query<{ pdf_file: string | null }>(
+      'SELECT pdf_file FROM invoice WHERE id = $1', [id])
+    if (!invoice) {
       return reply.code(404).send({ message: 'Facture introuvable' })
     }
-    if (!facture.fichier_pdf) {
+    if (!invoice.pdf_file) {
       return reply.code(409).send({ message: 'Facture sans PDF : rien à joindre' })
     }
     let content: Buffer | null = null
-    let annexe: Record<string, unknown> | null = null
+    let tenant_copy: Record<string, unknown> | null = null
     for await (const part of request.parts()) {
       if (part.type === 'file') {
         content = await part.toBuffer()
-      } else if (part.fieldname === 'annexe') {
+      } else if (part.fieldname === 'tenant_copy') {
         try {
-          annexe = JSON.parse(String(part.value))
+          tenant_copy = JSON.parse(String(part.value))
         } catch {
           return reply.code(400).send({ message: '« annexe » doit être du JSON' })
         }
@@ -705,28 +705,28 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
     if (!content || !isPdf(content)) {
       return reply.code(400).send({ message: 'PDF de l\'annexe manquant' })
     }
-    if (!annexe || !Array.isArray(annexe.zones) || !Array.isArray(annexe.termes)
-      || typeof annexe.reglages !== 'object' || annexe.reglages === null) {
+    if (!tenant_copy || !Array.isArray(tenant_copy.zones) || !Array.isArray(tenant_copy.terms)
+      || typeof tenant_copy.settings !== 'object' || tenant_copy.settings === null) {
       return reply.code(400).send({ message: 'Annexe incomplète : zones, termes et réglages attendus' })
     }
-    const extracteurId = annexe.extracteur_id === null || annexe.extracteur_id === undefined
-      ? null : Number(annexe.extracteur_id)
-    const scannees = annexe.pages_scannees ?? []
+    const extracteurId = tenant_copy.extractor_id === null || tenant_copy.extractor_id === undefined
+      ? null : Number(tenant_copy.extractor_id)
+    const scannees = tenant_copy.scanned_pages ?? []
     if (!Array.isArray(scannees) || !scannees.every((p) => Number.isInteger(p) && p >= 1)) {
-      return reply.code(400).send({ message: '« pages_scannees » : une liste de numéros de page attendue' })
+      return reply.code(400).send({ message: '« scanned_pages » : une liste de numéros de page attendue' })
     }
     const { fileName } = await storePdf(storageDir, content, 'annexes')
     const client = await db.connect()
     try {
       await client.query('BEGIN')
       const { rows: [created] } = await client.query<{ id: number }>(
-        `INSERT INTO facture_annexe (facture_id, fichier_pdf, source_pdf, zones, extracteur_id, termes, reglages,
-                                     pages_scannees)
+        `INSERT INTO invoice_tenant_copy (invoice_id, pdf_file, source_pdf, zones, extractor_id, terms, settings,
+                                     scanned_pages)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-        [id, fileName, facture.fichier_pdf, JSON.stringify(annexe.zones), extracteurId,
-          annexe.termes.map(String), JSON.stringify(annexe.reglages), scannees],
+        [id, fileName, invoice.pdf_file, JSON.stringify(tenant_copy.zones), extracteurId,
+          tenant_copy.terms.map(String), JSON.stringify(tenant_copy.settings), scannees],
       )
-      await client.query('UPDATE facture SET annexe_id = $2 WHERE id = $1', [id, created!.id])
+      await client.query('UPDATE invoice SET tenant_copy_id = $2 WHERE id = $1', [id, created!.id])
       await client.query('COMMIT')
     } catch (error) {
       await client.query('ROLLBACK')
@@ -739,26 +739,26 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
   })
 
   app.get('/factures/:id/annexe/pdf', async (request, reply) => {
-    const { rows: [annexe] } = await db.query<{ fichier_pdf: string }>(
-      'SELECT a.fichier_pdf FROM facture f JOIN facture_annexe a ON a.id = f.annexe_id WHERE f.id = $1',
+    const { rows: [tenant_copy] } = await db.query<{ pdf_file: string }>(
+      'SELECT a.pdf_file FROM invoice f JOIN invoice_tenant_copy a ON a.id = f.tenant_copy_id WHERE f.id = $1',
       [Number((request.params as { id: string }).id)],
     )
-    if (!annexe) {
+    if (!tenant_copy) {
       return reply.code(404).send({ message: 'Pas de version en images pour cette facture' })
     }
     return reply
       .type('application/pdf')
       .header('content-disposition', 'inline')
-      .send(createReadStream(join(storageDir, annexe.fichier_pdf)))
+      .send(createReadStream(join(storageDir, tenant_copy.pdf_file)))
   })
 
   // Checked by eye: nothing personal left. Only the current version, made from the current PDF.
   app.post('/factures/:id/annexe/verifiee', async (request, reply) => {
     const id = Number((request.params as { id: string }).id)
-    const annexeId = Number((request.body as { annexe_id?: unknown } | null)?.annexe_id)
+    const annexeId = Number((request.body as { tenant_copy_id?: unknown } | null)?.tenant_copy_id)
     const { rowCount } = await db.query(
-      `UPDATE facture_annexe a SET verifiee_le = now() FROM facture f
-       WHERE f.id = $1 AND a.id = f.annexe_id AND a.id = $2 AND a.source_pdf = f.fichier_pdf AND a.verifiee_le IS NULL`,
+      `UPDATE invoice_tenant_copy a SET checked_at = now() FROM invoice f
+       WHERE f.id = $1 AND a.id = f.tenant_copy_id AND a.id = $2 AND a.source_pdf = f.pdf_file AND a.checked_at IS NULL`,
       [id, annexeId],
     )
     return rowCount
@@ -773,7 +773,7 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
       const valeur = (request.body as { zones?: unknown } | null)?.zones
       const zones = valeur === null ? null : JSON.stringify(zonesSaisies(valeur))
       const id = Number((request.params as { id: string }).id)
-      const { rowCount } = await db.query('UPDATE facture SET zones_masquees = $2 WHERE id = $1', [id, zones])
+      const { rowCount } = await db.query('UPDATE invoice SET masked_zones = $2 WHERE id = $1', [id, zones])
       return rowCount ? load(id) : reply.code(404).send({ message: 'Facture introuvable' })
     } catch (error) {
       return sendError(reply, error)
@@ -782,19 +782,19 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
 
   // Terms masked on every invoice (manager, address, bank account): data of the deployment, never in this repository
   app.get('/termes-masques', async () =>
-    (await db.query<{ terme: string }>('SELECT terme FROM terme_masque ORDER BY terme')).rows.map((r) => r.terme))
+    (await db.query<{ term: string }>('SELECT term FROM masked_term ORDER BY term')).rows.map((r) => r.term))
 
   app.put('/termes-masques', async (request, reply) => {
-    const termes = (request.body as { termes?: unknown } | null)?.termes
-    if (!Array.isArray(termes)) {
+    const terms = (request.body as { terms?: unknown } | null)?.terms
+    if (!Array.isArray(terms)) {
       return reply.code(400).send({ message: '« termes » : une liste attendue' })
     }
-    const propres = [...new Set(termes.map((t) => String(t).trim()).filter(Boolean))]
+    const propres = [...new Set(terms.map((t) => String(t).trim()).filter(Boolean))]
     const client = await db.connect()
     try {
       await client.query('BEGIN')
-      await client.query('DELETE FROM terme_masque')
-      await client.query('INSERT INTO terme_masque (terme) SELECT unnest($1::text[])', [propres])
+      await client.query('DELETE FROM masked_term')
+      await client.query('INSERT INTO masked_term (term) SELECT unnest($1::text[])', [propres])
       await client.query('COMMIT')
     } catch (error) {
       await client.query('ROLLBACK')
@@ -806,14 +806,14 @@ const facturesRoutes: FastifyPluginAsync<FactureOptions> = async (app, { db, sto
   })
 }
 
-async function insertLines(client: PoolClient, factureId: number, lignes: InvoiceLine[]) {
-  for (const [ordre, l] of lignes.entries()) {
+async function insertLines(client: PoolClient, factureId: number, lines: InvoiceLine[]) {
+  for (const [position, l] of lines.entries()) {
     await client.query(
-      `INSERT INTO ligne_facture
-         (facture_id, ordre, categorie, libelle, periode, kwh, montant_ht, taux_tva, montant_ttc, affectation, note)
+      `INSERT INTO invoice_line
+         (invoice_id, position, category, label, period, kwh, amount_excl_tax, vat_rate, amount_incl_tax, allocation, note)
        VALUES ($1, $2, $3, $4, ${inclusiveRange('$5', '$6')}, $7, $8, $9, $10, $11, $12)`,
-      [factureId, ordre, l.categorie, l.libelle, l.debut, l.fin, l.kwh, l.montant_ht, l.taux_tva, l.montant_ttc,
-        l.affectation, l.note],
+      [factureId, position, l.category, l.label, l.start, l.end, l.kwh, l.amount_excl_tax, l.vat_rate, l.amount_incl_tax,
+        l.allocation, l.note],
     )
   }
 }

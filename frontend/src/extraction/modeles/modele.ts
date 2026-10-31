@@ -15,7 +15,7 @@ import { AMOUNT, DATE, InvoiceExtractor, rx, type Category, type Redaction } fro
 const LINE = rx`^(.+?)\s+du (${DATE}) au (${DATE})\s.*?(${AMOUNT}) €$`
 
 export default class NewSupplierExtractor extends InvoiceExtractor {
-  readonly energy = 'eau'
+  readonly energy = 'water'
 
   recognizes() {
     return this.doc.text.includes('NOM DU FOURNISSEUR')
@@ -56,8 +56,8 @@ export default class NewSupplierExtractor extends InvoiceExtractor {
 
   /** Category and normalised label, from the start of the printed label. */
   private categorize(label: string): { category: Category, label: string } {
-    if (label.startsWith('Consommation')) return { category: 'consommation', label }
-    if (label.startsWith('Abonnement')) return { category: 'abonnement', label }
-    return { category: 'autre', label }
+    if (label.startsWith('Consommation')) return { category: 'consumption', label }
+    if (label.startsWith('Abonnement')) return { category: 'subscription', label }
+    return { category: 'other', label }
   }
 }

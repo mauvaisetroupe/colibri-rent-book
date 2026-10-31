@@ -5,7 +5,7 @@
 // action is saved at once, apart from the form's own « Enregistrer »: no nested form, and Enter does not submit the
 // form. Opened from the bank (« Dépôt de garantie… » on a transfer), a deposit received or a refund comes prefilled.
 
-export type DepotPrerempli = { sens: 'recu' | 'restitution', date: string, montant: string, mouvement_id: number }
+export type DepotPrerempli = { sens: 'recu' | 'restitution', date: string, amount: string, bank_transaction_id: number }
 </script>
 
 <script setup lang="ts">
@@ -19,23 +19,23 @@ import {
 import { dusDuSejour, partageMois, type Du } from '../depot'
 import { dateFr, euros, nombreApi, nombreFr } from '../format'
 
-const props = defineProps<{ sejour: Sejour, immeuble: number, echeances: Echeance[], prerempli: DepotPrerempli | null }>()
+const props = defineProps<{ tenancy: Sejour, building: number, rent_schedules: Echeance[], prerempli: DepotPrerempli | null }>()
 const emit = defineEmits<{ modifie: [] }>()
 
 const versements = ref<VersementDepot[]>([])
-const paiements = ref<Paiement[]>([])
-const regularisations = ref<Regularisation[]>([])
-const mouvements = ref<Mouvement[]>([])
+const payments = ref<Paiement[]>([])
+const charge_adjustments = ref<Regularisation[]>([])
+const transactions = ref<Mouvement[]>([])
 const erreur = ref<string | null>(null)
 const occupe = ref(false)
 
 async function charger() {
-  const [v, p, r, m] = await Promise.all([api.depots(props.immeuble), api.paiements(props.immeuble, null),
-    api.regularisations(props.immeuble), api.mouvements('tous')])
-  versements.value = v.filter((x) => x.sejour_id === props.sejour.id)
-  paiements.value = p
-  regularisations.value = r
-  mouvements.value = m
+  const [v, p, r, m] = await Promise.all([api.deposits(props.building), api.payments(props.building, null),
+    api.charge_adjustments(props.building), api.transactions('tous')])
+  versements.value = v.filter((x) => x.tenancy_id === props.tenancy.id)
+  payments.value = p
+  charge_adjustments.value = r
+  transactions.value = m
 }
 
 onMounted(async () => {
@@ -43,26 +43,26 @@ onMounted(async () => {
     await charger()
     if (props.prerempli) {
       const p = props.prerempli
-      versement.value = { id: null, sens: p.sens, date: p.date, montant: nombreFr(p.montant), mouvement_id: p.mouvement_id, note: '' }
+      versement.value = { id: null, sens: p.sens, date: p.date, amount: nombreFr(p.amount), bank_transaction_id: p.bank_transaction_id, note: '' }
     }
   } catch (e) {
     erreur.value = (e as Error).message
   }
 })
 
-const retenue = computed(() => paiements.value.filter((p) => p.sejour_id === props.sejour.id && estRetenue(p)))
+const retenue = computed(() => payments.value.filter((p) => p.tenancy_id === props.tenancy.id && estRetenue(p)))
 const somme = (valeurs: string[]) => valeurs.reduce((t, v) => t.plus(v), new Big(0))
-const verse = computed(() => somme(versements.value.map((v) => v.montant)))
-const retenu = computed(() => somme(retenue.value.map((p) => new Big(p.loyer).plus(p.provision).plus(p.regularisation).toString())))
-const detenu = computed(() => verse.value.minus(retenu.value))
+const paid = computed(() => somme(versements.value.map((v) => v.amount)))
+const retained = computed(() => somme(retenue.value.map((p) => new Big(p.rent).plus(p.charge_advance).plus(p.charge_adjustment).toString())))
+const detenu = computed(() => paid.value.minus(retained.value))
 
-const mouvementDe = (id: number | null) => mouvements.value.find((m) => m.id === id)
+const mouvementDe = (id: number | null) => transactions.value.find((m) => m.id === id)
 const libelleRetenue = (p: Paiement) => {
-  if (p.mois) {
-    return `Loyer ${p.mois.slice(5, 7)}/${p.mois.slice(0, 4)}`
+  if (p.month) {
+    return `Loyer ${p.month.slice(5, 7)}/${p.month.slice(0, 4)}`
   }
-  const r = regularisations.value.find((x) => x.id === p.regularisation_id)
-  return r ? `Régularisation ${r.debut.slice(0, 4)}${r.fin.slice(0, 4) !== r.debut.slice(0, 4) ? `-${r.fin.slice(0, 4)}` : ''}` : 'Régularisation'
+  const r = charge_adjustments.value.find((x) => x.id === p.charge_adjustment_id)
+  return r ? `Régularisation ${r.start.slice(0, 4)}${r.end.slice(0, 4) !== r.start.slice(0, 4) ? `-${r.end.slice(0, 4)}` : ''}` : 'Régularisation'
 }
 
 async function agir(action: () => Promise<unknown>) {
@@ -83,21 +83,21 @@ async function agir(action: () => Promise<unknown>) {
 
 // ---------------------------------------------------------------- deposit received, refund
 
-type SaisieVersement = { id: number | null, sens: 'recu' | 'restitution', date: string, montant: string, mouvement_id: number | null, note: string }
+type SaisieVersement = { id: number | null, sens: 'recu' | 'restitution', date: string, amount: string, bank_transaction_id: number | null, note: string }
 const versement = ref<SaisieVersement | null>(null)
 
 function nouveauVersement(sens: 'recu' | 'restitution') {
-  const montant = sens === 'recu' ? props.sejour.depot_garantie : (detenu.value.gt(0) ? detenu.value.toString() : null)
+  const amount = sens === 'recu' ? props.tenancy.security_deposit : (detenu.value.gt(0) ? detenu.value.toString() : null)
   versement.value = {
-    id: null, sens, date: sens === 'recu' ? props.sejour.entree : (props.sejour.sortie ?? new Date().toISOString().slice(0, 10)),
-    montant: nombreFr(montant), mouvement_id: null, note: '',
+    id: null, sens, date: sens === 'recu' ? props.tenancy.move_in : (props.tenancy.move_out ?? new Date().toISOString().slice(0, 10)),
+    amount: nombreFr(amount), bank_transaction_id: null, note: '',
   }
 }
 
 function modifierVersement(v: VersementDepot) {
   versement.value = {
-    id: v.id, sens: new Big(v.montant).gt(0) ? 'recu' : 'restitution', date: v.date_versement,
-    montant: nombreFr(new Big(v.montant).abs().toString()), mouvement_id: v.mouvement_id, note: v.note ?? '',
+    id: v.id, sens: new Big(v.amount).gt(0) ? 'recu' : 'restitution', date: v.payment_date,
+    amount: nombreFr(new Big(v.amount).abs().toString()), bank_transaction_id: v.bank_transaction_id, note: v.note ?? '',
   }
 }
 
@@ -108,27 +108,27 @@ const candidats = computed(() => {
   if (!v) {
     return []
   }
-  const montant = new Big(nombreApi(v.montant) ?? '0')
-  const ecart = (m: Mouvement) => Math.abs(new Date(m.date_operation).getTime() - new Date(v.date || props.sejour.entree).getTime())
-  return mouvements.value
-    .filter((m) => (new Big(m.montant).gt(0) === (v.sens === 'recu'))
-      && (m.categorie === null || m.categorie === 'locataire' || m.categorie === 'depot_garantie')
-      && (m.id === v.mouvement_id || new Big(m.montant).abs().minus(m.couvert).gt(0)))
-    .map((m) => ({ m, egal: new Big(m.montant).abs().minus(m.couvert).eq(montant) }))
+  const amount = new Big(nombreApi(v.amount) ?? '0')
+  const ecart = (m: Mouvement) => Math.abs(new Date(m.transaction_date).getTime() - new Date(v.date || props.tenancy.move_in).getTime())
+  return transactions.value
+    .filter((m) => (new Big(m.amount).gt(0) === (v.sens === 'recu'))
+      && (m.category === null || m.category === 'tenant' || m.category === 'security_deposit')
+      && (m.id === v.bank_transaction_id || new Big(m.amount).abs().minus(m.covered).gt(0)))
+    .map((m) => ({ m, egal: new Big(m.amount).abs().minus(m.covered).eq(amount) }))
     .sort((a, b) => Number(b.egal) - Number(a.egal) || ecart(a.m) - ecart(b.m))
     .slice(0, 30)
 })
 
 async function enregistrerVersement() {
   const v = versement.value!
-  const montant = nombreApi(v.montant)
-  if (!montant || !new Big(montant).gt(0)) {
+  const amount = nombreApi(v.amount)
+  if (!amount || !new Big(amount).gt(0)) {
     erreur.value = 'Montant : un nombre positif (le sens vient du bouton)'
     return
   }
   const donnees = {
-    sejour_id: props.sejour.id, date_versement: v.date, montant: v.sens === 'recu' ? montant : `-${montant}`,
-    mouvement_id: v.mouvement_id, note: v.note.trim() || null,
+    tenancy_id: props.tenancy.id, payment_date: v.date, amount: v.sens === 'recu' ? amount : `-${amount}`,
+    bank_transaction_id: v.bank_transaction_id, note: v.note.trim() || null,
   }
   if (await agir(() => (v.id === null ? api.creerDepot(donnees) : api.modifierDepot(v.id, donnees)))) {
     versement.value = null
@@ -136,47 +136,47 @@ async function enregistrerVersement() {
 }
 
 function supprimerVersement(v: VersementDepot) {
-  if (confirm(`Supprimer ce ${new Big(v.montant).gt(0) ? 'dépôt' : 'remboursement'} de ${euros(new Big(v.montant).abs().toString())} ?`)) {
+  if (confirm(`Supprimer ce ${new Big(v.amount).gt(0) ? 'dépôt' : 'remboursement'} de ${euros(new Big(v.amount).abs().toString())} ?`)) {
     return agir(() => api.supprimerDepot(v.id))
   }
 }
 
 // ---------------------------------------------------------------- retention
 
-type LigneSaisie = Du & { pris: boolean, montant: string }
-const saisieRetenue = ref<{ date: string, lignes: LigneSaisie[] } | null>(null)
+type LigneSaisie = Du & { pris: boolean, amount: string }
+const saisieRetenue = ref<{ date: string, lines: LigneSaisie[] } | null>(null)
 
 function ouvrirRetenue() {
-  const dus = dusDuSejour(props.sejour, props.echeances, paiements.value, regularisations.value, verse.value.toString())
+  const dus = dusDuSejour(props.tenancy, props.rent_schedules, payments.value, charge_adjustments.value, paid.value.toString())
   // A retention already made: its amounts; else the proposal, the oldest first up to the deposit
-  const actuel = (d: Du) => retenue.value.filter((p) => (d.mois ? p.mois?.startsWith(d.mois) : p.regularisation_id === d.regularisation_id))
-    .reduce((t, p) => t.plus(p.loyer).plus(p.provision).plus(p.regularisation), new Big(0))
+  const actuel = (d: Du) => retenue.value.filter((p) => (d.month ? p.month?.startsWith(d.month) : p.charge_adjustment_id === d.charge_adjustment_id))
+    .reduce((t, p) => t.plus(p.rent).plus(p.charge_advance).plus(p.charge_adjustment), new Big(0))
   saisieRetenue.value = {
-    date: retenue.value[0]?.date_paiement ?? props.sejour.sortie ?? new Date().toISOString().slice(0, 10),
-    lignes: dus.map((d) => {
-      const montant = retenue.value.length ? actuel(d).toString() : d.propose
-      return { ...d, pris: new Big(montant).gt(0), montant: nombreFr(montant) }
+    date: retenue.value[0]?.payment_date ?? props.tenancy.move_out ?? new Date().toISOString().slice(0, 10),
+    lines: dus.map((d) => {
+      const amount = retenue.value.length ? actuel(d).toString() : d.propose
+      return { ...d, pris: new Big(amount).gt(0), amount: nombreFr(amount) }
     }),
   }
 }
 
-const totalRetenue = computed(() => somme((saisieRetenue.value?.lignes ?? []).filter((l) => l.pris).map((l) => nombreApi(l.montant) ?? '0')))
-const aRendre = computed(() => verse.value.minus(totalRetenue.value))
+const totalRetenue = computed(() => somme((saisieRetenue.value?.lines ?? []).filter((l) => l.pris).map((l) => nombreApi(l.amount) ?? '0')))
+const aRendre = computed(() => paid.value.minus(totalRetenue.value))
 
 async function enregistrerRetenue() {
   const s = saisieRetenue.value!
-  const lignes = s.lignes.filter((l) => l.pris && Number(nombreApi(l.montant) ?? 0) > 0).map((l) => {
-    const montant = nombreApi(l.montant)!
-    return l.mois ? { mois: l.mois, ...partageMois(l, montant) } : { regularisation_id: l.regularisation_id!, regularisation: montant }
+  const lines = s.lines.filter((l) => l.pris && Number(nombreApi(l.amount) ?? 0) > 0).map((l) => {
+    const amount = nombreApi(l.amount)!
+    return l.month ? { month: l.month, ...partageMois(l, amount) } : { charge_adjustment_id: l.charge_adjustment_id!, charge_adjustment: amount }
   })
-  if (await agir(() => api.retenue(props.sejour.id, { date: s.date, lignes }))) {
+  if (await agir(() => api.retenue(props.tenancy.id, { date: s.date, lines }))) {
     saisieRetenue.value = null
   }
 }
 
 function annulerRetenue() {
   if (confirm('Annuler la retenue ? Les mois et régularisations qu\'elle couvrait redeviennent dus.')) {
-    return agir(() => api.retenue(props.sejour.id, { date: props.sejour.sortie ?? new Date().toISOString().slice(0, 10), lignes: [] }))
+    return agir(() => api.retenue(props.tenancy.id, { date: props.tenancy.move_out ?? new Date().toISOString().slice(0, 10), lines: [] }))
   }
 }
 </script>
@@ -184,8 +184,8 @@ function annulerRetenue() {
 <template>
   <div class="bloc-depot" @keydown.enter.prevent>
     <p class="resume">
-      Versé {{ euros(verse.toString()) }}
-      <template v-if="retenu.gt(0)"> · retenu {{ euros(retenu.toString()) }}</template>
+      Versé {{ euros(paid.toString()) }}
+      <template v-if="retained.gt(0)"> · retenu {{ euros(retained.toString()) }}</template>
       · <strong>détenu {{ euros(detenu.toString()) }}</strong>
     </p>
 
@@ -193,11 +193,11 @@ function annulerRetenue() {
       <thead><tr><th>Date</th><th>Mouvement</th><th class="nombre">Montant</th><th>Virement</th><th>Note</th><th /></tr></thead>
       <tbody>
         <tr v-for="v in versements" :key="`v${v.id}`" class="sans-clic">
-          <td>{{ dateFr(v.date_versement) }}</td>
-          <td>{{ new Big(v.montant).gt(0) ? 'Dépôt reçu' : 'Restitution' }}</td>
-          <td class="nombre">{{ euros(v.montant) }}</td>
+          <td>{{ dateFr(v.payment_date) }}</td>
+          <td>{{ new Big(v.amount).gt(0) ? 'Dépôt reçu' : 'Restitution' }}</td>
+          <td class="nombre">{{ euros(v.amount) }}</td>
           <td>
-            <template v-if="mouvementDe(v.mouvement_id)">{{ dateFr(mouvementDe(v.mouvement_id)!.date_operation) }} {{ mouvementDe(v.mouvement_id)!.libelle }}</template>
+            <template v-if="mouvementDe(v.bank_transaction_id)">{{ dateFr(mouvementDe(v.bank_transaction_id)!.transaction_date) }} {{ mouvementDe(v.bank_transaction_id)!.label }}</template>
             <span v-else class="discret">sans virement</span>
           </td>
           <td class="discret">{{ v.note }}</td>
@@ -207,9 +207,9 @@ function annulerRetenue() {
           </td>
         </tr>
         <tr v-for="(p, i) in retenue" :key="`r${p.id}`" class="sans-clic">
-          <td>{{ dateFr(p.date_paiement) }}</td>
+          <td>{{ dateFr(p.payment_date) }}</td>
           <td>Retenue : {{ libelleRetenue(p) }}</td>
-          <td class="nombre">{{ euros(new Big(p.loyer).plus(p.provision).plus(p.regularisation).neg().toString()) }}</td>
+          <td class="nombre">{{ euros(new Big(p.rent).plus(p.charge_advance).plus(p.charge_adjustment).neg().toString()) }}</td>
           <td><span class="discret">sans virement</span></td>
           <td />
           <td class="actions-ligne">
@@ -226,7 +226,7 @@ function annulerRetenue() {
     <div v-if="!versement && !saisieRetenue" class="actions">
       <button type="button" :disabled="occupe" @click="nouveauVersement('recu')">Dépôt reçu…</button>
       <button type="button" :disabled="occupe || !detenu.gt(0)" @click="nouveauVersement('restitution')">Restitution…</button>
-      <button type="button" :disabled="occupe || !verse.gt(0)" @click="ouvrirRetenue">Retenue…</button>
+      <button type="button" :disabled="occupe || !paid.gt(0)" @click="ouvrirRetenue">Retenue…</button>
     </div>
 
     <!-- Deposit received or refunded -->
@@ -234,14 +234,14 @@ function annulerRetenue() {
       <h3>{{ versement.sens === 'recu' ? 'Dépôt reçu' : 'Restitution' }}</h3>
       <div class="rangee">
         <label>Date <input v-model="versement.date" type="date"></label>
-        <label>Montant <input v-model="versement.montant" class="nombre" size="9"></label>
+        <label>Montant <input v-model="versement.amount" class="nombre" size="9"></label>
       </div>
       <label class="large">Virement
-        <select v-model="versement.mouvement_id">
+        <select v-model="versement.bank_transaction_id">
           <option :value="null">Aucun (agence, espèces, avant les relevés…)</option>
           <option v-for="c in candidats" :key="c.m.id" :value="c.m.id">
-            {{ c.egal ? '✓ ' : '' }}{{ dateFr(c.m.date_operation) }} · {{ c.m.libelle }} · {{ euros(c.m.montant) }}
-            <template v-if="Number(c.m.couvert) > 0"> (reste {{ euros(new Big(c.m.montant).abs().minus(c.m.couvert).toString()) }})</template>
+            {{ c.egal ? '✓ ' : '' }}{{ dateFr(c.m.transaction_date) }} · {{ c.m.label }} · {{ euros(c.m.amount) }}
+            <template v-if="Number(c.m.covered) > 0"> (reste {{ euros(new Big(c.m.amount).abs().minus(c.m.covered).toString()) }})</template>
           </option>
         </select>
       </label>
@@ -254,20 +254,20 @@ function annulerRetenue() {
 
     <!-- Retention: what the deposit covers -->
     <div v-if="saisieRetenue" class="formulaire">
-      <h3>Retenue sur le dépôt de {{ euros(verse.toString()) }}</h3>
+      <h3>Retenue sur le dépôt de {{ euros(paid.toString()) }}</h3>
       <p class="discret">
         Ce que le locataire doit encore, les plus anciens d'abord : les mois impayés et les régularisations envoyées non
         soldées. Les montants sont proposés jusqu'au dépôt versé ; ils se modifient.
       </p>
       <label>Date <input v-model="saisieRetenue.date" type="date"></label>
-      <table v-if="saisieRetenue.lignes.length" class="liste">
+      <table v-if="saisieRetenue.lines.length" class="liste">
         <thead><tr><th /><th>Dû</th><th class="nombre">Reste dû</th><th class="nombre">Retenu</th></tr></thead>
         <tbody>
-          <tr v-for="l in saisieRetenue.lignes" :key="l.cle" class="sans-clic">
-            <td><input v-model="l.pris" type="checkbox" :aria-label="l.libelle"></td>
-            <td>{{ l.libelle }}</td>
+          <tr v-for="l in saisieRetenue.lines" :key="l.cle" class="sans-clic">
+            <td><input v-model="l.pris" type="checkbox" :aria-label="l.label"></td>
+            <td>{{ l.label }}</td>
             <td class="nombre">{{ euros(l.du) }}</td>
-            <td class="nombre"><input v-model="l.montant" class="nombre" size="9" :disabled="!l.pris" :aria-label="`Retenu sur ${l.libelle}`"></td>
+            <td class="nombre"><input v-model="l.amount" class="nombre" size="9" :disabled="!l.pris" :aria-label="`Retenu sur ${l.label}`"></td>
           </tr>
         </tbody>
       </table>

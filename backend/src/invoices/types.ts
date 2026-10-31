@@ -2,28 +2,28 @@
 // Field names follow the SQL schema (French domain vocabulary). Amounts and quantities are decimal strings,
 // never JS numbers; dates are ISO strings with both bounds INCLUDED.
 
-export const CATEGORIES = ['consommation', 'abonnement', 'taxe', 'prestation', 'penalite', 'autre'] as const
+export const CATEGORIES = ['consumption', 'subscription', 'tax', 'service', 'penalty', 'other'] as const
 
 export type Categorie = typeof CATEGORIES[number]
 
 // ADR 0013: recoverable (allocated to the tenants), borne by the owner (penalties: fiscal summary), or about another
 // property (neither allocated nor in the fiscal summary of the building)
-export const AFFECTATIONS = ['recuperable', 'proprietaire', 'hors_immeuble'] as const
+export const AFFECTATIONS = ['recoverable', 'owner', 'outside_building'] as const
 
 export type Affectation = typeof AFFECTATIONS[number]
 
-export type Energie = 'gaz' | 'electricite' | 'eau' | 'ordures_menageres' | 'autre'
+export type Energie = 'gas' | 'electricity' | 'water' | 'household_waste' | 'other'
 
 export type InvoiceLine = {
-  categorie: Categorie
-  libelle: string
-  debut: string
-  fin: string
+  category: Categorie
+  label: string
+  start: string
+  end: string
   kwh: string | null
-  montant_ht: string | null
-  taux_tva: string | null
-  montant_ttc: string
-  affectation: Affectation
+  amount_excl_tax: string | null
+  vat_rate: string | null
+  amount_incl_tax: string
+  allocation: Affectation
   note: string | null
 }
 

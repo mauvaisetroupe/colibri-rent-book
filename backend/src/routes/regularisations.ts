@@ -19,39 +19,39 @@ import { inclusiveBounds, inclusiveRange } from '../periods.js'
 // the payments; the owner only records a decision: charge given up, unrecoverable (ADR 0010).
 
 const COLUMNS = `
-  r.id, r.sejour_id, lo.nom AS locataire, lo.email, lt.code AS lot, lt.immeuble_id,
-  ${inclusiveBounds('r.exercice')}, r.montant_du::text, r.provisions::text, r.solde::text,
-  regularisation_etat(r.id) AS etat, r.decision, r.date_envoi::text, regularisation_verse(r.id)::text AS montant_recu,
-  regularisation_date_solde(r.id)::text AS date_solde, r.remplace_id,
-  (SELECT n.id FROM regularisation n WHERE n.remplace_id = r.id) AS remplacee_par,
-  r.instantane IS NOT NULL AS justificatif, r.note, r.cree_le`
+  r.id, r.tenancy_id, lo.name AS tenant, lo.email, lt.code AS unit, lt.building_id,
+  ${inclusiveBounds('r.period')}, r.amount_due::text, r.advances::text, r.balance::text,
+  charge_adjustment_state(r.id) AS state, r.decision, r.sent_on::text, charge_adjustment_paid(r.id)::text AS amount_received,
+  charge_adjustment_settled_on(r.id)::text AS settled_on, r.replaces_id,
+  (SELECT n.id FROM charge_adjustment n WHERE n.replaces_id = r.id) AS replaced_by,
+  r.snapshot IS NOT NULL AS supporting_statement, r.note, r.created_at`
 
-const FROM = `regularisation r
-  JOIN sejour s ON s.id = r.sejour_id
-  JOIN lot lt ON lt.id = s.lot_id
-  JOIN locataire lo ON lo.id = s.locataire_id`
+const FROM = `charge_adjustment r
+  JOIN tenancy s ON s.id = r.tenancy_id
+  JOIN unit lt ON lt.id = s.unit_id
+  JOIN tenant lo ON lo.id = s.tenant_id`
 
 type Regularisation = {
   id: number
-  sejour_id: number
-  locataire: string
+  tenancy_id: number
+  tenant: string
   email: string | null
-  lot: string
-  immeuble_id: number
-  debut: string
-  fin: string
-  montant_du: string
-  provisions: string
-  solde: string
-  etat: 'brouillon' | 'en_attente' | 'soldee'
-  decision: 'abandonnee' | 'irrecouvrable' | null
-  date_envoi: string | null
+  unit: string
+  building_id: number
+  start: string
+  end: string
+  amount_due: string
+  advances: string
+  balance: string
+  state: 'draft' | 'pending' | 'settled'
+  decision: 'written_off' | 'unrecoverable' | null
+  sent_on: string | null
   // Payments received, corrective chain included (ADR 0008)
-  montant_recu: string
-  date_solde: string | null
-  remplace_id: number | null
-  remplacee_par: number | null
-  justificatif: boolean
+  amount_received: string
+  settled_on: string | null
+  replaces_id: number | null
+  replaced_by: number | null
+  supporting_statement: boolean
   note: string | null
 }
 
@@ -69,47 +69,47 @@ const nextMonth = () => {
 const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }> = async (app, { db, storageDir }) => {
   async function load(id: number) {
     const { rows: [r] } = await db.query<Regularisation & {
-      instantane: Justificatif | null, annexes_envoyees: Record<string, number> | null
+      snapshot: Justificatif | null, sent_tenant_copies: Record<string, number> | null
     }>(
-      `SELECT ${COLUMNS}, r.instantane, r.annexes_envoyees FROM ${FROM} WHERE r.id = $1`,
+      `SELECT ${COLUMNS}, r.snapshot, r.sent_tenant_copies FROM ${FROM} WHERE r.id = $1`,
       [id],
     )
     return r ?? null
   }
 
   /** The PDF; `envoyees`: the versions in images joined at sending (ADR 0024), null: the current verified ones. */
-  const pdf = async (reply: FastifyReply, j: Justificatif, entete: Entete, nom: string,
+  const pdf = async (reply: FastifyReply, j: Justificatif, entete: Entete, name: string,
     envoyees: Record<string, number> | null = null) => reply
     .type('application/pdf')
-    .header('content-disposition', `inline; filename="${nom}.pdf"`)
+    .header('content-disposition', `inline; filename="${name}.pdf"`)
     .send(await justificatifPdf(j, entete,
-      await annexesJointes(db, storageDir, j.factures.map((f) => f.facture_id), envoyees)))
+      await annexesJointes(db, storageDir, j.invoices.map((f) => f.invoice_id), envoyees)))
 
   /** Statement row of a stay frozen into a new regularisation (draft). */
-  async function create(sejourId: number, debut: string, fin: string, remplace: number | null) {
-    const { rows: [sejour] } = await db.query<{ immeuble_id: number }>(
-      'SELECT lt.immeuble_id FROM sejour s JOIN lot lt ON lt.id = s.lot_id WHERE s.id = $1',
+  async function create(sejourId: number, start: string, end: string, remplace: number | null) {
+    const { rows: [tenancy] } = await db.query<{ building_id: number }>(
+      'SELECT lt.building_id FROM tenancy s JOIN unit lt ON lt.id = s.unit_id WHERE s.id = $1',
       [sejourId],
     )
-    if (!sejour) {
+    if (!tenancy) {
       throw new InputError('Séjour inconnu')
     }
-    const j = await buildJustificatif(db, { immeuble: sejour.immeuble_id, debut, fin }, sejourId)
+    const j = await buildJustificatif(db, { building: tenancy.building_id, start, end }, sejourId)
     const { rows: [created] } = await db.query<{ id: number }>(
-      `INSERT INTO regularisation (sejour_id, exercice, montant_du, provisions, remplace_id, instantane)
+      `INSERT INTO charge_adjustment (tenancy_id, period, amount_due, advances, replaces_id, snapshot)
        VALUES ($1, ${inclusiveRange('$2', '$3')}, $4, $5, $6, $7) RETURNING id`,
-      [sejourId, debut, fin, cents(j.total), cents(j.provisions), remplace, JSON.stringify(j)],
+      [sejourId, start, end, cents(j.total), cents(j.advances), remplace, JSON.stringify(j)],
     )
     return load(created!.id)
   }
 
   /** The current (not replaced) regularisation of a stay for an exercise, if any. */
-  async function current(sejourId: number, debut: string, fin: string) {
+  async function current(sejourId: number, start: string, end: string) {
     const { rows: [r] } = await db.query<{ id: number }>(
-      `SELECT r.id FROM regularisation r
-       WHERE r.sejour_id = $1 AND r.exercice = ${inclusiveRange('$2', '$3')}
-         AND NOT EXISTS (SELECT 1 FROM regularisation n WHERE n.remplace_id = r.id)`,
-      [sejourId, debut, fin],
+      `SELECT r.id FROM charge_adjustment r
+       WHERE r.tenancy_id = $1 AND r.period = ${inclusiveRange('$2', '$3')}
+         AND NOT EXISTS (SELECT 1 FROM charge_adjustment n WHERE n.replaces_id = r.id)`,
+      [sejourId, start, end],
     )
     return r?.id ?? null
   }
@@ -119,10 +119,10 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
 
   app.get('/regularisations', async (request, reply) => {
     try {
-      const immeuble = requiredId(query(request).immeuble, 'Immeuble')
+      const building = requiredId(query(request).building, 'Immeuble')
       const { rows } = await db.query<Regularisation>(
-        `SELECT ${COLUMNS} FROM ${FROM} WHERE lt.immeuble_id = $1 ORDER BY lower(r.exercice) DESC, lt.code, r.id`,
-        [immeuble],
+        `SELECT ${COLUMNS} FROM ${FROM} WHERE lt.building_id = $1 ORDER BY lower(r.period) DESC, lt.code, r.id`,
+        [building],
       )
       return rows
     } catch (error) {
@@ -135,15 +135,15 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
     if (!r) {
       return reply.code(404).send({ message: 'Régularisation introuvable' })
     }
-    const { instantane, annexes_envoyees: _, ...rest } = r
+    const { snapshot, sent_tenant_copies: _, ...rest } = r
     return {
       ...rest,
-      instantane,
+      snapshot,
       // What becomes of each invoice in the annexes now (ADR 0024): shown before sending
-      annexes: instantane ? await etatsAnnexes(db, instantane.factures.map((f) => f.facture_id)) : [],
+      tenant_copies: snapshot ? await etatsAnnexes(db, snapshot.invoices.map((f) => f.invoice_id)) : [],
       suggestion: {
-        provision_mensuelle: instantane ? suggestionProvision(instantane.total, instantane.sejour.jours) : null,
-        provision_a_partir_du: nextMonth(),
+        monthly_charge_advance: snapshot ? suggestionProvision(snapshot.total, snapshot.tenancy.days) : null,
+        charge_advance_from: nextMonth(),
       },
     }
   })
@@ -152,17 +152,17 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
   app.post('/regularisations', async (request, reply) => {
     try {
       const b = body(request)
-      const sejourId = requiredId(b.sejour_id, 'Séjour')
-      const debut = requiredDate(b.debut, 'Début')
-      const fin = requiredDate(b.fin, 'Fin')
-      const existing = await current(sejourId, debut, fin)
+      const sejourId = requiredId(b.tenancy_id, 'Séjour')
+      const start = requiredDate(b.start, 'Début')
+      const end = requiredDate(b.end, 'Fin')
+      const existing = await current(sejourId, start, end)
       if (existing) {
         return reply.code(409).send({
           message: 'Une régularisation existe déjà pour ce séjour et cette période : faire un rectificatif',
-          regularisation_id: existing,
+          charge_adjustment_id: existing,
         })
       }
-      return reply.code(201).send(await create(sejourId, debut, fin, null))
+      return reply.code(201).send(await create(sejourId, start, end, null))
     } catch (error) {
       return handle(reply, error)
     }
@@ -172,27 +172,27 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
   app.post('/regularisations/manuelle', async (request, reply) => {
     try {
       const b = body(request)
-      const sejourId = requiredId(b.sejour_id, 'Séjour')
-      const debut = requiredDate(b.debut, 'Début')
-      const fin = requiredDate(b.fin, 'Fin')
-      const solde = requiredDecimal(b.solde, 'Montant demandé')
-      const provisions = optionalDecimal(b.provisions, 'Provisions') ?? '0'
-      const existing = await current(sejourId, debut, fin)
+      const sejourId = requiredId(b.tenancy_id, 'Séjour')
+      const start = requiredDate(b.start, 'Début')
+      const end = requiredDate(b.end, 'Fin')
+      const balance = requiredDecimal(b.balance, 'Montant demandé')
+      const advances = optionalDecimal(b.advances, 'Provisions') ?? '0'
+      const existing = await current(sejourId, start, end)
       if (existing) {
         return reply.code(409).send({ message: 'Une régularisation existe déjà pour ce séjour et cette période',
-          regularisation_id: existing })
+          charge_adjustment_id: existing })
       }
-      const dateEnvoi = requiredDate(b.date_envoi, 'Date d\'envoi')
-      const recu = optionalDecimal(b.montant_recu, 'Montant reçu')
+      const dateEnvoi = requiredDate(b.sent_on, 'Date d\'envoi')
+      const recu = optionalDecimal(b.amount_received, 'Montant reçu')
       const { rows: [created] } = await db.query<{ id: number }>(
-        `INSERT INTO regularisation (sejour_id, exercice, montant_du, provisions, date_envoi, note)
+        `INSERT INTO charge_adjustment (tenancy_id, period, amount_due, advances, sent_on, note)
          VALUES ($1, ${inclusiveRange('$2', '$3')}, $4, $5, $6, $7) RETURNING id`,
-        [sejourId, debut, fin, new Big(solde).plus(provisions).toString(), provisions, dateEnvoi, optionalText(b.note)],
+        [sejourId, start, end, new Big(balance).plus(advances).toString(), advances, dateEnvoi, optionalText(b.note)],
       )
       // What was already received becomes a payment (date unknown: the sending date)
       if (recu && Number(recu) !== 0) {
         await db.query(
-          `INSERT INTO paiement (sejour_id, date_paiement, regularisation_id, regularisation, note)
+          `INSERT INTO payment (tenancy_id, payment_date, charge_adjustment_id, charge_adjustment, note)
            VALUES ($1, $2, $3, $4, 'Montant reçu indiqué à la saisie')`,
           [sejourId, dateEnvoi, created!.id, recu],
         )
@@ -210,14 +210,14 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
       if (!previous) {
         return reply.code(404).send({ message: 'Régularisation introuvable' })
       }
-      if (previous.remplacee_par) {
+      if (previous.replaced_by) {
         return reply.code(409).send({ message: 'Cette régularisation a déjà un rectificatif',
-          regularisation_id: previous.remplacee_par })
+          charge_adjustment_id: previous.replaced_by })
       }
-      if (previous.etat === 'brouillon') {
+      if (previous.state === 'draft') {
         return reply.code(409).send({ message: 'Brouillon jamais envoyé : le supprimer et en créer un nouveau' })
       }
-      return reply.code(201).send(await create(previous.sejour_id, previous.debut, previous.fin, previous.id))
+      return reply.code(201).send(await create(previous.tenancy_id, previous.start, previous.end, previous.id))
     } catch (error) {
       return handle(reply, error)
     }
@@ -225,12 +225,12 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
 
   app.post('/regularisations/:id/envoi', async (request, reply) => {
     try {
-      const date = requiredDate(body(request).date_envoi, 'Date d\'envoi')
+      const date = requiredDate(body(request).sent_on, 'Date d\'envoi')
       const r = await load(idParam(request))
       // The versions in images joined now are those the tenant receives (ADR 0024)
-      const envoyees = r?.instantane ? await annexesVerifiees(db, r.instantane.factures.map((f) => f.facture_id)) : null
+      const envoyees = r?.snapshot ? await annexesVerifiees(db, r.snapshot.invoices.map((f) => f.invoice_id)) : null
       const { rowCount } = await db.query(
-        'UPDATE regularisation SET date_envoi = $2, annexes_envoyees = $3 WHERE id = $1 AND date_envoi IS NULL',
+        'UPDATE charge_adjustment SET sent_on = $2, sent_tenant_copies = $3 WHERE id = $1 AND sent_on IS NULL',
         [idParam(request), date, envoyees && JSON.stringify(envoyees)],
       )
       return rowCount ? load(idParam(request)) : reply.code(409).send({ message: 'Seul un brouillon peut être marqué envoyé' })
@@ -247,16 +247,16 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
     if (!r) {
       return reply.code(404).send({ message: 'Régularisation introuvable' })
     }
-    const { rowCount: paiements } = await db.query('SELECT 1 FROM paiement WHERE regularisation_id = $1 LIMIT 1', [id])
-    const refus = !r.date_envoi ? 'Pas encore envoyée'
-      : r.remplacee_par ? 'Déjà rectifiée : l\'envoi ne peut plus être annulé'
+    const { rowCount: payments } = await db.query('SELECT 1 FROM payment WHERE charge_adjustment_id = $1 LIMIT 1', [id])
+    const refus = !r.sent_on ? 'Pas encore envoyée'
+      : r.replaced_by ? 'Déjà rectifiée : l\'envoi ne peut plus être annulé'
         : r.decision ? 'Une décision est prise (abandon, irrécouvrable) : l\'annuler d\'abord'
-          : paiements ? 'Des versements y sont rattachés : les supprimer d\'abord (écran Paiements)'
+          : payments ? 'Des versements y sont rattachés : les supprimer d\'abord (écran Paiements)'
             : null
     if (refus) {
       return reply.code(409).send({ message: refus })
     }
-    await db.query('UPDATE regularisation SET date_envoi = NULL, annexes_envoyees = NULL WHERE id = $1', [id])
+    await db.query('UPDATE charge_adjustment SET sent_on = NULL, sent_tenant_copies = NULL WHERE id = $1', [id])
     return load(id)
   })
 
@@ -266,13 +266,13 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
     try {
       const raw = body(request).decision
       const decision = raw === null || raw === undefined || raw === '' ? null : String(raw)
-      if (decision !== null && !['abandonnee', 'irrecouvrable'].includes(decision)) {
+      if (decision !== null && !['written_off', 'unrecoverable'].includes(decision)) {
         throw new InputError('Décision possible : abandonnée, irrécouvrable, ou aucune')
       }
       const { rowCount } = await db.query(
-        `UPDATE regularisation r SET decision = $2::decision_regul
-         WHERE r.id = $1 AND r.date_envoi IS NOT NULL
-           AND NOT EXISTS (SELECT 1 FROM regularisation n WHERE n.remplace_id = r.id)`,
+        `UPDATE charge_adjustment r SET decision = $2::adjustment_decision
+         WHERE r.id = $1 AND r.sent_on IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM charge_adjustment n WHERE n.replaces_id = r.id)`,
         [idParam(request), decision],
       )
       if (!rowCount) {
@@ -286,8 +286,8 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
 
   app.delete('/regularisations/:id', async (request, reply) => {
     const { rowCount } = await db.query(
-      `DELETE FROM regularisation r WHERE r.id = $1 AND r.date_envoi IS NULL
-         AND NOT EXISTS (SELECT 1 FROM regularisation n WHERE n.remplace_id = r.id)`,
+      `DELETE FROM charge_adjustment r WHERE r.id = $1 AND r.sent_on IS NULL
+         AND NOT EXISTS (SELECT 1 FROM charge_adjustment n WHERE n.replaces_id = r.id)`,
       [idParam(request)],
     )
     return rowCount ? reply.code(204).send() : reply.code(409).send({ message: 'Seul un brouillon peut être supprimé' })
@@ -300,48 +300,48 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
     if (!r) {
       return reply.code(404).send({ message: 'Régularisation introuvable' })
     }
-    if (!r.instantane) {
+    if (!r.snapshot) {
       try {
-        const j = await buildJustificatif(db, { immeuble: r.immeuble_id, debut: r.debut, fin: r.fin }, r.sejour_id)
-        const recalcule = new Big(j.solde).round(2, Big.roundHalfUp)
-        const ecart = recalcule.minus(r.solde)
-        const envoi = r.date_envoi ? ` le ${frenchDate(r.date_envoi)}` : ''
+        const j = await buildJustificatif(db, { building: r.building_id, start: r.start, end: r.end }, r.tenancy_id)
+        const recalcule = new Big(j.balance).round(2, Big.roundHalfUp)
+        const ecart = recalcule.minus(r.balance)
+        const envoi = r.sent_on ? ` le ${frenchDate(r.sent_on)}` : ''
         const entete: Entete = ecart.abs().lt(SEUIL_RECTIFICATION)
           ? {
-            titre: 'Justificatif reconstitué',
-            remarque: `Régularisation envoyée${envoi} pour un solde de ${euros(r.solde)} ; recalculée par `
+            title: 'Justificatif reconstitué',
+            remarque: `Régularisation envoyée${envoi} pour un solde de ${euros(r.balance)} ; recalculée par `
               + `l'application : ${euros(recalcule.toString())}`
               + (ecart.eq(0) ? '.' : ` (écart d'arrondi de ${euros(ecart.toString())}).`),
           }
           : {
-            titre: 'Justificatif reconstitué',
+            title: 'Justificatif reconstitué',
             alerte: `Ce calcul diffère de ${euros(ecart.abs().toString())} du montant envoyé${envoi} `
-              + `(${euros(r.solde)}) : il ne correspond pas à ce que le locataire a reçu. Voir le rectificatif.`,
+              + `(${euros(r.balance)}) : il ne correspond pas à ce que le locataire a reçu. Voir le rectificatif.`,
           }
-        return pdf(reply, j, entete, `reconstitue-${r.lot}-${r.debut}-${r.fin}`.replace(/\s+/g, '-'))
+        return pdf(reply, j, entete, `reconstitue-${r.unit}-${r.start}-${r.end}`.replace(/\s+/g, '-'))
       } catch (error) {
         return handle(reply, error)
       }
     }
-    const previous = r.remplace_id ? await load(r.remplace_id) : null
+    const previous = r.replaces_id ? await load(r.replaces_id) : null
     const entete: Entete = previous
       ? {
-        titre: 'Décompte rectificatif',
-        remarque: `Ce décompte remplace celui${previous.date_envoi ? ` du ${frenchDate(previous.date_envoi)}` : ''}, `
+        title: 'Décompte rectificatif',
+        remarque: `Ce décompte remplace celui${previous.sent_on ? ` du ${frenchDate(previous.sent_on)}` : ''}, `
           + 'qui comportait une erreur.',
       }
-      : { titre: 'Régularisation des charges' }
-    return pdf(reply, r.instantane, entete, `justificatif-${r.lot}-${r.debut}-${r.fin}`.replace(/\s+/g, '-'),
-      r.annexes_envoyees)
+      : { title: 'Régularisation des charges' }
+    return pdf(reply, r.snapshot, entete, `justificatif-${r.unit}-${r.start}-${r.end}`.replace(/\s+/g, '-'),
+      r.sent_tenant_copies)
   })
 
   // Preview from the current statement, nothing stored
   app.get('/justificatif', async (request, reply) => {
     try {
       const ex = exercise(request)
-      const sejour = requiredId(query(request).sejour, 'Séjour')
-      const j = await buildJustificatif(db, ex, sejour)
-      return pdf(reply, j, { titre: 'Projet – non envoyé' }, `projet-${j.sejour.lot}-${ex.debut}-${ex.fin}`.replace(/\s+/g, '-'))
+      const tenancy = requiredId(query(request).tenancy, 'Séjour')
+      const j = await buildJustificatif(db, ex, tenancy)
+      return pdf(reply, j, { title: 'Projet – non envoyé' }, `projet-${j.tenancy.unit}-${ex.start}-${ex.end}`.replace(/\s+/g, '-'))
     } catch (error) {
       return handle(reply, error)
     }
@@ -360,17 +360,17 @@ const regularisationRoutes: FastifyPluginAsync<{ db: Pool, storageDir: string }>
       }
       const options: MailOptions = {
         etalement,
-        provision_mensuelle: optionalDecimal(b.provision_mensuelle, 'Provision mensuelle'),
-        provision_a_partir_du: b.provision_a_partir_du ? requiredDate(b.provision_a_partir_du, 'Date d\'effet') : null,
+        monthly_charge_advance: optionalDecimal(b.monthly_charge_advance, 'Provision mensuelle'),
+        charge_advance_from: b.charge_advance_from ? requiredDate(b.charge_advance_from, 'Date d\'effet') : null,
         signature: optionalText(b.signature) ?? '',
       }
       const toMail = (x: NonNullable<Awaited<ReturnType<typeof load>>>): RegulMail => ({
-        lot: x.lot, debut: x.debut, fin: x.fin,
-        present_du: x.instantane?.sejour.present_du ?? null, present_au: x.instantane?.sejour.present_au ?? null,
-        montant_du: x.montant_du, provisions: x.provisions, solde: x.solde, date_envoi: x.date_envoi,
-        montant_recu: x.montant_recu,
+        unit: x.unit, start: x.start, end: x.end,
+        present_from: x.snapshot?.tenancy.present_from ?? null, present_to: x.snapshot?.tenancy.present_to ?? null,
+        amount_due: x.amount_due, advances: x.advances, balance: x.balance, sent_on: x.sent_on,
+        amount_received: x.amount_received,
       })
-      const previous = r.remplace_id ? await load(r.remplace_id) : null
+      const previous = r.replaces_id ? await load(r.replaces_id) : null
       const mail = previous ? mailRectificatif(toMail(previous), toMail(r), options) : mailRegularisation(toMail(r), options)
       return { destinataire: r.email, ...mail }
     } catch (error) {

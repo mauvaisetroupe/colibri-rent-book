@@ -13,25 +13,25 @@ import { regularisationsManquantes, type Manquante } from '../regularisationsMan
 // settled within 1 euro (green), to be paid or refunded (red), given up by the owner (grey). First, the regularisations
 // missing for a finished exercise (regularisationsManquantes): a stay present without one, whichever way its balance goes.
 
-const props = defineProps<{ immeuble: number, debut: string, fin: string }>()
-const { immeubles } = useImmeuble()
+const props = defineProps<{ building: number, start: string, end: string }>()
+const { buildings } = useImmeuble()
 
-const regularisations = ref<Regularisation[]>([])
-const paiements = ref<Paiement[]>([])
+const charge_adjustments = ref<Regularisation[]>([])
+const payments = ref<Paiement[]>([])
 const manquantes = ref<Manquante[]>([])
 const erreur = ref<string | null>(null)
 
 const MOIS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.']
 
 const annees = computed(() => {
-  const premiere = Number(props.debut.slice(0, 4))
-  return Array.from({ length: Number(props.fin.slice(0, 4)) - premiere + 1 }, (_, i) => premiere + i)
+  const premiere = Number(props.start.slice(0, 4))
+  return Array.from({ length: Number(props.end.slice(0, 4)) - premiere + 1 }, (_, i) => premiere + i)
 })
 
 // Months of the exercise, 'AAAA-MM'
 const moisExercice = computed(() => {
   const liste: string[] = []
-  for (let m = props.debut.slice(0, 7); m <= props.fin.slice(0, 7);) {
+  for (let m = props.start.slice(0, 7); m <= props.end.slice(0, 7);) {
     liste.push(m)
     const suivant = Number(m.slice(0, 4)) * 12 + Number(m.slice(5, 7))
     m = `${Math.floor(suivant / 12)}-${String((suivant % 12) + 1).padStart(2, '0')}`
@@ -42,19 +42,19 @@ const moisExercice = computed(() => {
 async function charger() {
   try {
     const [r, lus, d] = await Promise.all([
-      api.regularisations(props.immeuble), Promise.all(annees.value.map((a) => api.paiements(props.immeuble, a))),
-      api.decompte({ immeuble: props.immeuble, debut: props.debut, fin: props.fin }),
+      api.charge_adjustments(props.building), Promise.all(annees.value.map((a) => api.payments(props.building, a))),
+      api.charge_statement({ building: props.building, start: props.start, end: props.end }),
     ])
-    regularisations.value = r
-    paiements.value = lus.flat()
+    charge_adjustments.value = r
+    payments.value = lus.flat()
     manquantes.value = regularisationsManquantes(d, r, new Date().toISOString().slice(0, 10),
-      immeubles.value.find((i) => i.id === props.immeuble)?.debut_gestion ?? null)
+      buildings.value.find((i) => i.id === props.building)?.managed_from ?? null)
     erreur.value = null
   } catch (e) {
     erreur.value = (e as Error).message
   }
 }
-watch(() => [props.immeuble, props.debut, props.fin], charger, { immediate: true })
+watch(() => [props.building, props.start, props.end], charger, { immediate: true })
 
 // Settled within 1 euro, as the regularisation's own state (ADR 0010)
 const TOLERANCE = new Big('1')
@@ -62,37 +62,37 @@ const TOLERANCE = new Big('1')
 // The regularisation and those it replaces: their payments count toward it
 function chaine(r: Regularisation) {
   const ids = [r.id]
-  for (let p = r.remplace_id; p !== null;) {
+  for (let p = r.replaces_id; p !== null;) {
     ids.push(p)
-    p = regularisations.value.find((x) => x.id === p)?.remplace_id ?? null
+    p = charge_adjustments.value.find((x) => x.id === p)?.replaces_id ?? null
   }
   return ids
 }
 
 const tableau = computed(() =>
-  regularisations.value
-    .filter((r) => r.etat !== 'brouillon' && !r.remplacee_par && r.date_envoi !== null && r.date_envoi <= props.fin)
+  charge_adjustments.value
+    .filter((r) => r.state !== 'draft' && !r.replaced_by && r.sent_on !== null && r.sent_on <= props.end)
     .map((r) => {
       const ids = chaine(r)
-      const siens = paiements.value.filter((p) => p.regularisation_id !== null && ids.includes(p.regularisation_id))
+      const siens = payments.value.filter((p) => p.charge_adjustment_id !== null && ids.includes(p.charge_adjustment_id))
       const cases = moisExercice.value.map((m) => {
-        const duMois = siens.filter((p) => p.date_paiement.startsWith(m))
-        return { mois: m, recu: duMois.length ? duMois.reduce((t, p) => t.plus(p.regularisation), new Big(0)).toString() : null }
+        const duMois = siens.filter((p) => p.payment_date.startsWith(m))
+        return { month: m, recu: duMois.length ? duMois.reduce((t, p) => t.plus(p.charge_adjustment), new Big(0)).toString() : null }
       })
-      const reste = new Big(r.solde).minus(r.montant_recu)
-      return { r, cases, reste: reste.toString(), dansExercice: cases.some((c) => c.recu !== null) }
+      const remaining = new Big(r.balance).minus(r.amount_received)
+      return { r, cases, remaining: remaining.toString(), dansExercice: cases.some((c) => c.recu !== null) }
     })
     // Still to be paid (or refunded), or paid toward during the exercise
-    .filter((x) => x.r.etat === 'en_attente' || x.dansExercice)
-    .sort((a, b) => a.r.lot.localeCompare(b.r.lot) || a.r.debut.localeCompare(b.r.debut)),
+    .filter((x) => x.r.state === 'pending' || x.dansExercice)
+    .sort((a, b) => a.r.unit.localeCompare(b.r.unit) || a.r.start.localeCompare(b.r.start)),
 )
 
-const ouvert = (x: { r: Regularisation, reste: string }) => !x.r.decision && new Big(x.reste).abs().gt(TOLERANCE)
+const ouvert = (x: { r: Regularisation, remaining: string }) => !x.r.decision && new Big(x.remaining).abs().gt(TOLERANCE)
 const enAttente = computed(() => tableau.value.filter(ouvert))
-const resteDu = computed(() => enAttente.value.filter((x) => new Big(x.reste).gt(0))
-  .reduce((t, x) => t.plus(x.reste), new Big(0)).toString())
-const aRembourser = computed(() => enAttente.value.filter((x) => new Big(x.reste).lt(0))
-  .reduce((t, x) => t.minus(x.reste), new Big(0)).toString())
+const resteDu = computed(() => enAttente.value.filter((x) => new Big(x.remaining).gt(0))
+  .reduce((t, x) => t.plus(x.remaining), new Big(0)).toString())
+const aRembourser = computed(() => enAttente.value.filter((x) => new Big(x.remaining).lt(0))
+  .reduce((t, x) => t.minus(x.remaining), new Big(0)).toString())
 </script>
 
 <template>
@@ -118,13 +118,13 @@ const aRembourser = computed(() => enAttente.value.filter((x) => new Big(x.reste
         d'aujourd'hui : à réclamer s'il est positif, à rembourser s'il est négatif.
       </p>
       <ul class="constats">
-        <li v-for="m in manquantes" :key="m.sejour.sejour_id" class="avertissement">
-          <strong>{{ m.sejour.locataire }}</strong> ({{ m.sejour.lot }}, présent du {{ dateFr(m.sejour.present_du) }} au
-          {{ dateFr(m.sejour.present_au) }}) :
-          <template v-if="new Big(m.sejour.solde).gt(0)">{{ euros(m.sejour.solde) }} à réclamer</template>
-          <template v-else-if="new Big(m.sejour.solde).lt(0)">{{ euros(new Big(m.sejour.solde).neg().toString()) }} à rembourser</template>
+        <li v-for="m in manquantes" :key="m.tenancy.tenancy_id" class="avertissement">
+          <strong>{{ m.tenancy.tenant }}</strong> ({{ m.tenancy.unit }}, présent du {{ dateFr(m.tenancy.present_from) }} au
+          {{ dateFr(m.tenancy.present_to) }}) :
+          <template v-if="new Big(m.tenancy.balance).gt(0)">{{ euros(m.tenancy.balance) }} à réclamer</template>
+          <template v-else-if="new Big(m.tenancy.balance).lt(0)">{{ euros(new Big(m.tenancy.balance).neg().toString()) }} à rembourser</template>
           <template v-else>solde nul, décompte à envoyer</template>
-          · <RouterLink :to="{ name: 'nouvelle-regularisation', query: { debut: m.debut, fin: m.fin } }">Créer la régularisation</RouterLink>
+          · <RouterLink :to="{ name: 'nouvelle-regularisation', query: { start: m.start, end: m.end } }">Créer la régularisation</RouterLink>
         </li>
       </ul>
     </template>
@@ -141,24 +141,24 @@ const aRembourser = computed(() => enAttente.value.filter((x) => new Big(x.reste
         </thead>
         <tbody>
           <tr v-for="x in tableau" :key="x.r.id" class="sans-clic">
-            <td>{{ x.r.lot }}</td>
-            <td>{{ x.r.locataire }}</td>
+            <td>{{ x.r.unit }}</td>
+            <td>{{ x.r.tenant }}</td>
             <td>
-              <RouterLink :to="{ name: 'regularisation', params: { id: x.r.id } }">{{ exerciceCourt(x.r.debut, x.r.fin) }}</RouterLink>
-              <div class="discret">envoyée le {{ dateFr(x.r.date_envoi) }}</div>
+              <RouterLink :to="{ name: 'charge_adjustment', params: { id: x.r.id } }">{{ exerciceCourt(x.r.start, x.r.end) }}</RouterLink>
+              <div class="discret">envoyée le {{ dateFr(x.r.sent_on) }}</div>
             </td>
             <td
-              v-for="c in x.cases" :key="c.mois" class="nombre case-mois" :class="c.recu ? 'paye' : ''"
-              :title="c.recu ? `${MOIS[Number(c.mois.slice(5, 7)) - 1]} ${c.mois.slice(0, 4)} : ${euros(c.recu)} versés` : ''"
+              v-for="c in x.cases" :key="c.month" class="nombre case-mois" :class="c.recu ? 'paid' : ''"
+              :title="c.recu ? `${MOIS[Number(c.month.slice(5, 7)) - 1]} ${c.month.slice(0, 4)} : ${euros(c.recu)} versés` : ''"
             >
               <template v-if="c.recu">{{ euros(c.recu) }}</template>
             </td>
-            <td class="nombre">{{ euros(x.r.solde) }}</td>
-            <td class="nombre">{{ euros(x.r.montant_recu) }}</td>
+            <td class="nombre">{{ euros(x.r.balance) }}</td>
+            <td class="nombre">{{ euros(x.r.amount_received) }}</td>
             <td class="nombre">
-              <span v-if="x.r.decision" class="discret">{{ x.r.decision === 'abandonnee' ? 'abandonnée' : 'irrécouvrable' }} ({{ euros(x.reste) }})</span>
-              <strong v-else-if="new Big(x.reste).gt(TOLERANCE)" class="ko">{{ euros(x.reste) }}</strong>
-              <strong v-else-if="new Big(x.reste).lt(TOLERANCE.neg())" class="ko">à rembourser {{ euros(new Big(x.reste).neg().toString()) }}</strong>
+              <span v-if="x.r.decision" class="discret">{{ x.r.decision === 'written_off' ? 'abandonnée' : 'irrécouvrable' }} ({{ euros(x.remaining) }})</span>
+              <strong v-else-if="new Big(x.remaining).gt(TOLERANCE)" class="ko">{{ euros(x.remaining) }}</strong>
+              <strong v-else-if="new Big(x.remaining).lt(TOLERANCE.neg())" class="ko">à rembourser {{ euros(new Big(x.remaining).neg().toString()) }}</strong>
               <strong v-else class="ok">✓ soldée</strong>
             </td>
           </tr>

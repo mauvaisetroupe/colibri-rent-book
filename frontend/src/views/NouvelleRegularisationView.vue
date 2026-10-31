@@ -12,26 +12,26 @@ import { useImmeuble } from '../immeuble'
 // amounts. A regularisation already sent outside the application is entered by hand, to prepare its corrective one.
 
 const { immeubleId, pret } = useImmeuble()
-const { debut, fin } = useExercice()
-const decompte = ref<Decompte | null>(null)
-const regularisations = ref<Regularisation[]>([])
-const message = ref<{ texte: string, type: 'info' | 'erreur' } | null>(null)
+const { start, end } = useExercice()
+const charge_statement = ref<Decompte | null>(null)
+const charge_adjustments = ref<Regularisation[]>([])
+const message = ref<{ text: string, type: 'info' | 'erreur' } | null>(null)
 const occupe = ref(false)
-const saisie = ref<null | { sejour_id: number | null, solde: string, provisions: string, date_envoi: string, montant_recu: string, note: string }>(null)
+const saisie = ref<null | { tenancy_id: number | null, balance: string, advances: string, sent_on: string, amount_received: string, note: string }>(null)
 
-const exercice = computed(() =>
-  (immeubleId.value === null ? null : { immeuble: immeubleId.value, debut: debut.value, fin: fin.value }))
+const period = computed(() =>
+  (immeubleId.value === null ? null : { building: immeubleId.value, start: start.value, end: end.value }))
 
 async function charger() {
-  if (!exercice.value) {
+  if (!period.value) {
     return
   }
   try {
-    ;[decompte.value, regularisations.value] = await Promise.all([
-      api.decompte(exercice.value), api.regularisations(exercice.value.immeuble),
+    ;[charge_statement.value, charge_adjustments.value] = await Promise.all([
+      api.charge_statement(period.value), api.charge_adjustments(period.value.building),
     ])
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
   }
 }
 
@@ -39,49 +39,49 @@ onMounted(async () => {
   await pret
   await charger()
 })
-watch(exercice, charger)
+watch(period, charger)
 
 // Current regularisation of the stay over exactly this period, if any
-const existante = (sejourId: number) => regularisations.value.find((r) =>
-  r.sejour_id === sejourId && r.debut === debut.value && r.fin === fin.value && !r.remplacee_par)
+const existante = (sejourId: number) => charge_adjustments.value.find((r) =>
+  r.tenancy_id === sejourId && r.start === start.value && r.end === end.value && !r.replaced_by)
 
-const sejours = computed(() => (decompte.value?.sejours ?? []).filter((s) => s.jours > 0))
-const aCreer = computed(() => sejours.value.filter((s) => !existante(s.sejour_id)))
+const tenancies = computed(() => (charge_statement.value?.tenancies ?? []).filter((s) => s.days > 0))
+const aCreer = computed(() => tenancies.value.filter((s) => !existante(s.tenancy_id)))
 
 async function action(f: () => Promise<unknown>, succes: string) {
   occupe.value = true
   try {
     await f()
-    message.value = { texte: succes, type: 'info' }
+    message.value = { text: succes, type: 'info' }
     await charger()
     return true
   } catch (e) {
-    message.value = { texte: (e as Error).message, type: 'erreur' }
+    message.value = { text: (e as Error).message, type: 'erreur' }
     return false
   } finally {
     occupe.value = false
   }
 }
 
-const creer = (sejour: number, locataire: string) =>
-  action(() => api.creerRegularisation(sejour, debut.value, fin.value), `Régularisation de ${locataire} créée (montants figés)`)
+const creer = (tenancy: number, tenant: string) =>
+  action(() => api.creerRegularisation(tenancy, start.value, end.value), `Régularisation de ${tenant} créée (montants figés)`)
 
 const creerTout = () => action(async () => {
   for (const s of aCreer.value) {
-    await api.creerRegularisation(s.sejour_id, debut.value, fin.value)
+    await api.creerRegularisation(s.tenancy_id, start.value, end.value)
   }
 }, 'Régularisations créées (montants figés)')
 
 function nouvelleSaisie() {
-  saisie.value = { sejour_id: null, solde: '', provisions: '', date_envoi: '', montant_recu: '', note: '' }
+  saisie.value = { tenancy_id: null, balance: '', advances: '', sent_on: '', amount_received: '', note: '' }
 }
 
 async function enregistrerSaisie() {
   const s = saisie.value!
   const ok = await action(() => api.saisirRegularisation({
-    sejour_id: s.sejour_id!, debut: debut.value, fin: fin.value,
-    solde: nombreApi(s.solde) ?? '', provisions: nombreApi(s.provisions), date_envoi: s.date_envoi,
-    montant_recu: nombreApi(s.montant_recu), note: s.note || null,
+    tenancy_id: s.tenancy_id!, start: start.value, end: end.value,
+    balance: nombreApi(s.balance) ?? '', advances: nombreApi(s.advances), sent_on: s.sent_on,
+    amount_received: nombreApi(s.amount_received), note: s.note || null,
   }), 'Régularisation déjà envoyée enregistrée')
   if (ok) {
     saisie.value = null
@@ -90,7 +90,7 @@ async function enregistrerSaisie() {
 </script>
 
 <template>
-  <p><RouterLink :to="{ name: 'regularisations' }">← Régularisations</RouterLink></p>
+  <p><RouterLink :to="{ name: 'charge_adjustments' }">← Régularisations</RouterLink></p>
   <section class="entete-page">
     <h1>Nouvelle régularisation</h1>
     <ChoixExercice />
@@ -99,14 +99,14 @@ async function enregistrerSaisie() {
     Choisir la période à régulariser, vérifier le décompte de chaque locataire (et les avertissements), puis
     « Créer » : les montants sont figés, le justificatif et les mails ne changeront plus.
   </p>
-  <p v-if="message" class="message" :class="message.type">{{ message.texte }}</p>
+  <p v-if="message" class="message" :class="message.type">{{ message.text }}</p>
 
-  <template v-if="exercice && decompte">
-    <ul v-if="decompte.avertissements.length" class="constats">
-      <li v-for="(a, i) in decompte.avertissements" :key="i" class="avertissement">{{ a }}</li>
+  <template v-if="period && charge_statement">
+    <ul v-if="charge_statement.avertissements.length" class="constats">
+      <li v-for="(a, i) in charge_statement.avertissements" :key="i" class="avertissement">{{ a }}</li>
     </ul>
 
-    <table v-if="sejours.length" class="liste">
+    <table v-if="tenancies.length" class="liste">
       <thead>
         <tr>
           <th>Lot</th><th>Locataire</th><th>Présence</th><th class="nombre">Charges</th><th class="nombre">Provisions</th>
@@ -114,22 +114,22 @@ async function enregistrerSaisie() {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="s in sejours" :key="s.sejour_id" class="sans-clic">
-          <td>{{ s.lot }}</td>
-          <td>{{ s.locataire }}</td>
-          <td>{{ dateFr(s.present_du) }} → {{ dateFr(s.present_au) }}</td>
+        <tr v-for="s in tenancies" :key="s.tenancy_id" class="sans-clic">
+          <td>{{ s.unit }}</td>
+          <td>{{ s.tenant }}</td>
+          <td>{{ dateFr(s.present_from) }} → {{ dateFr(s.present_to) }}</td>
           <td class="nombre">{{ euros(s.total) }}</td>
-          <td class="nombre">{{ euros(s.provisions) }}</td>
-          <td class="nombre"><strong>{{ euros(s.solde) }}</strong></td>
+          <td class="nombre">{{ euros(s.advances) }}</td>
+          <td class="nombre"><strong>{{ euros(s.balance) }}</strong></td>
           <td class="boutons">
-            <template v-if="existante(s.sejour_id)">
-              <RouterLink :to="{ name: 'regularisation', params: { id: existante(s.sejour_id)!.id } }">
+            <template v-if="existante(s.tenancy_id)">
+              <RouterLink :to="{ name: 'charge_adjustment', params: { id: existante(s.tenancy_id)!.id } }">
                 déjà créée : ouvrir
               </RouterLink>
             </template>
             <template v-else>
-              <a class="bouton" :href="api.apercuUrl(exercice, s.sejour_id)" target="_blank">Aperçu PDF</a>
-              <button type="button" :disabled="occupe" @click="creer(s.sejour_id, s.locataire)">Créer</button>
+              <a class="bouton" :href="api.apercuUrl(period, s.tenancy_id)" target="_blank">Aperçu PDF</a>
+              <button type="button" :disabled="occupe" @click="creer(s.tenancy_id, s.tenant)">Créer</button>
             </template>
           </td>
         </tr>
@@ -142,16 +142,16 @@ async function enregistrerSaisie() {
 
     <h2>Régularisation déjà envoyée</h2>
     <form v-if="saisie" class="formulaire" @submit.prevent="enregistrerSaisie">
-      <strong>Envoyée hors de l'application, pour la période du {{ dateFr(debut) }} au {{ dateFr(fin) }}</strong>
+      <strong>Envoyée hors de l'application, pour la période du {{ dateFr(start) }} au {{ dateFr(end) }}</strong>
       <label>Séjour
-        <select v-model="saisie.sejour_id" required>
-          <option v-for="s in decompte.sejours" :key="s.sejour_id" :value="s.sejour_id">{{ s.lot }} – {{ s.locataire }}</option>
+        <select v-model="saisie.tenancy_id" required>
+          <option v-for="s in charge_statement.tenancies" :key="s.tenancy_id" :value="s.tenancy_id">{{ s.unit }} – {{ s.tenant }}</option>
         </select>
       </label>
-      <label>Montant demandé <input v-model="saisie.solde" class="nombre" size="9" required></label>
-      <label>Provisions déduites <input v-model="saisie.provisions" class="nombre" size="9"></label>
-      <label>Envoyée le <input v-model="saisie.date_envoi" type="date" required></label>
-      <label>Déjà reçu <input v-model="saisie.montant_recu" class="nombre" size="9"></label>
+      <label>Montant demandé <input v-model="saisie.balance" class="nombre" size="9" required></label>
+      <label>Provisions déduites <input v-model="saisie.advances" class="nombre" size="9"></label>
+      <label>Envoyée le <input v-model="saisie.sent_on" type="date" required></label>
+      <label>Déjà reçu <input v-model="saisie.amount_received" class="nombre" size="9"></label>
       <label>Note <input v-model="saisie.note" size="26"></label>
       <button type="submit" class="principal" :disabled="occupe">Enregistrer</button>
       <button type="button" @click="saisie = null">Annuler</button>

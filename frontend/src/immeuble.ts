@@ -6,7 +6,7 @@ import { api, PAGES_PUBLIQUES, type Immeuble } from './api'
 
 const CLE = 'colibri.immeuble'
 
-const immeubles = ref<Immeuble[]>([])
+const buildings = ref<Immeuble[]>([])
 const immeubleId = ref<number | null>(null)
 let chargement: Promise<void> | null = null
 
@@ -30,15 +30,15 @@ watch(immeubleId, (id) => {
 })
 
 export async function rechargerImmeubles() {
-  immeubles.value = await api.immeubles()
-  if (!immeubles.value.some((i) => i.id === immeubleId.value)) {
+  buildings.value = await api.buildings()
+  if (!buildings.value.some((i) => i.id === immeubleId.value)) {
     const souvenir = memorise()
-    immeubleId.value = immeubles.value.find((i) => i.id === souvenir)?.id ?? immeubles.value[0]?.id ?? null
+    immeubleId.value = buildings.value.find((i) => i.id === souvenir)?.id ?? buildings.value[0]?.id ?? null
   }
 }
 
 export function useImmeuble() {
   // Not on the login pages (no session yet: the page loads again once connected)
   chargement ??= PAGES_PUBLIQUES.includes(window.location.pathname) ? Promise.resolve() : rechargerImmeubles()
-  return { immeubles, immeubleId, pret: chargement }
+  return { buildings, immeubleId, pret: chargement }
 }

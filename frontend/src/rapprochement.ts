@@ -10,62 +10,62 @@ import { attendu } from './echeances'
 // toward a regularisation still to be paid.
 
 /** Upper case, without accents: « Hélène » and « HELENE » are the same. */
-export const normaliser = (texte: string) => texte.normalize('NFD').replace(/\p{M}/gu, '').toUpperCase()
+export const normaliser = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').toUpperCase()
 
 const MOTS_VIDES = new Set(['EX', 'MME', 'MLE', 'MR', 'M', 'MLLE', 'MADAME', 'MONSIEUR', 'ET', 'DE', 'DU', 'LE', 'LA'])
 
 /** The words of a name worth looking for: « Alice MARTIN (ex DURAND) » → ALICE, MARTIN, DURAND. */
-export function motsDuNom(nom: string) {
-  return normaliser(nom).split(/[^A-Z]+/).filter((m) => m.length >= 3 && !MOTS_VIDES.has(m))
+export function motsDuNom(name: string) {
+  return normaliser(name).split(/[^A-Z]+/).filter((m) => m.length >= 3 && !MOTS_VIDES.has(m))
 }
 
 /** First day of the month of an ISO date, as 'AAAA-MM'. */
 const moisDe = (date: string) => date.slice(0, 7)
 
 /** The stay whose tenant is named in the movement and present around its date (a month before, three after). */
-export function sejourDuMouvement(m: Pick<Mouvement, 'libelle' | 'detail' | 'date_operation'>, sejours: Sejour[]): Sejour | null {
-  const texte = ` ${normaliser(`${m.libelle} ${m.detail ?? ''}`).replace(/[^A-Z]+/g, ' ')} `
-  const date = new Date(m.date_operation)
+export function sejourDuMouvement(m: Pick<Mouvement, 'label' | 'detail' | 'transaction_date'>, tenancies: Sejour[]): Sejour | null {
+  const text = ` ${normaliser(`${m.label} ${m.detail ?? ''}`).replace(/[^A-Z]+/g, ' ')} `
+  const date = new Date(m.transaction_date)
   const proche = (s: Sejour) => {
-    const avant = new Date(s.entree)
+    const avant = new Date(s.move_in)
     avant.setMonth(avant.getMonth() - 1)
-    const apres = s.sortie ? new Date(s.sortie) : null
+    const apres = s.move_out ? new Date(s.move_out) : null
     apres?.setMonth(apres.getMonth() + 3)
     return avant <= date && (!apres || date <= apres)
   }
-  let meilleur: { sejour: Sejour, score: number } | null = null
-  for (const s of sejours.filter(proche)) {
+  let meilleur: { tenancy: Sejour, score: number } | null = null
+  for (const s of tenancies.filter(proche)) {
     // A word of the name, or its beginning when the bank cut the label (« LOYER ET RAPPEL DE CHARGES ZIEG »)
-    const tronques = texte.trim().split(' ').filter((t) => t.length >= 4)
-    const score = motsDuNom(s.locataire)
-      .filter((mot) => texte.includes(` ${mot} `) || tronques.some((t) => mot.startsWith(t))).length
+    const tronques = text.trim().split(' ').filter((t) => t.length >= 4)
+    const score = motsDuNom(s.tenant)
+      .filter((mot) => text.includes(` ${mot} `) || tronques.some((t) => mot.startsWith(t))).length
     if (score > 0 && (!meilleur || score > meilleur.score)) {
-      meilleur = { sejour: s, score }
+      meilleur = { tenancy: s, score }
     }
   }
-  return meilleur?.sejour ?? null
+  return meilleur?.tenancy ?? null
 }
 
 /** The month paid: written in the movement (« LOYER 02/25 », « LOYER 02/2025 »), else the month of the operation. */
-export function moisDuMouvement(m: Pick<Mouvement, 'libelle' | 'detail' | 'date_operation'>): string {
-  const ecrit = `${m.libelle} ${m.detail ?? ''}`.match(/LOYER\D{0,12}(\d{1,2})[/.-](\d{2}(?:\d{2})?)\b/i)
+export function moisDuMouvement(m: Pick<Mouvement, 'label' | 'detail' | 'transaction_date'>): string {
+  const ecrit = `${m.label} ${m.detail ?? ''}`.match(/LOYER\D{0,12}(\d{1,2})[/.-](\d{2}(?:\d{2})?)\b/i)
   if (ecrit) {
-    const mois = Number(ecrit[1])
-    const annee = ecrit[2]!.length === 2 ? `20${ecrit[2]}` : ecrit[2]!
-    if (mois >= 1 && mois <= 12) {
-      return `${annee}-${String(mois).padStart(2, '0')}`
+    const month = Number(ecrit[1])
+    const year = ecrit[2]!.length === 2 ? `20${ecrit[2]}` : ecrit[2]!
+    if (month >= 1 && month <= 12) {
+      return `${year}-${String(month).padStart(2, '0')}`
     }
   }
-  return moisDe(m.date_operation)
+  return moisDe(m.transaction_date)
 }
 
 export type Proposition = {
-  sejour: Sejour | null
-  mois: string
-  loyer: string
-  provision: string
-  regularisation_id: number | null
-  regularisation: string
+  tenancy: Sejour | null
+  month: string
+  rent: string
+  charge_advance: string
+  charge_adjustment_id: number | null
+  charge_adjustment: string
   // Why the split is not the amount called: shown, not blocking
   ecart: string | null
 }
@@ -78,83 +78,83 @@ export type Proposition = {
  * difference is shown, never put in the rent.
  */
 export function proposer(
-  m: Mouvement, sejours: Sejour[], echeances: Echeance[], regularisations: Regularisation[], paiements: Paiement[] = [],
+  m: Mouvement, tenancies: Sejour[], rent_schedules: Echeance[], charge_adjustments: Regularisation[], payments: Paiement[] = [],
 ): Proposition {
-  const sejour = sejourDuMouvement(m, sejours)
-  const mois = moisDuMouvement(m)
-  const montant = new Big(m.montant).abs().minus(m.couvert)
-  const vide: Proposition = { sejour, mois, loyer: montant.toString(), provision: '0', regularisation_id: null, regularisation: '0', ecart: null }
-  if (!sejour) {
+  const tenancy = sejourDuMouvement(m, tenancies)
+  const month = moisDuMouvement(m)
+  const amount = new Big(m.amount).abs().minus(m.covered)
+  const vide: Proposition = { tenancy, month, rent: amount.toString(), charge_advance: '0', charge_adjustment_id: null, charge_adjustment: '0', ecart: null }
+  if (!tenancy) {
     return { ...vide, ecart: 'locataire non reconnu dans le libellé' }
   }
-  const regul = regularisations.find((r) => r.sejour_id === sejour.id && r.etat === 'en_attente'
-    && new Big(r.solde).minus(r.montant_recu).eq(montant))
+  const regul = charge_adjustments.find((r) => r.tenancy_id === tenancy.id && r.state === 'pending'
+    && new Big(r.balance).minus(r.amount_received).eq(amount))
   if (regul) {
-    return { ...vide, loyer: '0', regularisation_id: regul.id, regularisation: montant.toString() }
+    return { ...vide, rent: '0', charge_adjustment_id: regul.id, charge_adjustment: amount.toString() }
   }
-  const appel = attendu(echeances, sejour, mois)
+  const appel = attendu(rent_schedules, tenancy, month)
   if (!appel) {
-    return { ...vide, ecart: `pas de loyer appelé connu pour ${mois}` }
+    return { ...vide, ecart: `pas de loyer appelé connu pour ${month}` }
   }
   // What is still due for the month: called, minus the payments of the month already recorded
-  const duMois = paiements.filter((p) => p.sejour_id === sejour.id && p.mois?.slice(0, 7) === mois)
-  const dejaLoyer = duMois.reduce((t, p) => t.plus(p.loyer), new Big(0))
-  const dejaProvision = duMois.reduce((t, p) => t.plus(p.provision), new Big(0))
+  const duMois = payments.filter((p) => p.tenancy_id === tenancy.id && p.month?.slice(0, 7) === month)
+  const dejaLoyer = duMois.reduce((t, p) => t.plus(p.rent), new Big(0))
+  const dejaProvision = duMois.reduce((t, p) => t.plus(p.charge_advance), new Big(0))
   const positif = (x: Big) => (x.lt(0) ? new Big(0) : x)
-  const loyerDu = positif(new Big(appel.loyer).minus(dejaLoyer))
-  const provisionDue = positif(new Big(appel.provision).minus(dejaProvision))
-  const appele = { loyer: loyerDu.toString(), provision: provisionDue.toString(), total: loyerDu.plus(provisionDue).toString() }
+  const loyerDu = positif(new Big(appel.rent).minus(dejaLoyer))
+  const provisionDue = positif(new Big(appel.charge_advance).minus(dejaProvision))
+  const appele = { rent: loyerDu.toString(), charge_advance: provisionDue.toString(), total: loyerDu.plus(provisionDue).toString() }
   if (duMois.length && new Big(appele.total).eq(0)) {
-    return { ...vide, ecart: `${mois.split('-').reverse().join('/')} déjà payé en entier` }
+    return { ...vide, ecart: `${month.split('-').reverse().join('/')} déjà payé en entier` }
   }
-  if (new Big(appele.total).eq(montant)) {
-    return { ...vide, loyer: appele.loyer, provision: appele.provision }
+  if (new Big(appele.total).eq(amount)) {
+    return { ...vide, rent: appele.rent, charge_advance: appele.charge_advance }
   }
-  const ecart = `${duMois.length ? 'reste dû' : 'appelé'} ${new Big(appele.total).toFixed(2)} €, reçu ${montant.toFixed(2)} €`
-  if (montant.lt(appele.total)) {
+  const ecart = `${duMois.length ? 'reste dû' : 'appelé'} ${new Big(appele.total).toFixed(2)} €, reçu ${amount.toFixed(2)} €`
+  if (amount.lt(appele.total)) {
     // Paid in part: the rent first, then the provision
-    const loyer = montant.lt(loyerDu) ? montant : loyerDu
-    return { ...vide, loyer: loyer.toString(), provision: montant.minus(loyer).toString(), ecart }
+    const rent = amount.lt(loyerDu) ? amount : loyerDu
+    return { ...vide, rent: rent.toString(), charge_advance: amount.minus(rent).toString(), ecart }
   }
-  const surplus = montant.minus(appele.total)
+  const surplus = amount.minus(appele.total)
   // The regularisation paid in instalments of this amount, else the oldest one still to pay
-  const ouvertes = regularisations.filter((r) => r.sejour_id === sejour.id && r.etat === 'en_attente'
-    && new Big(r.solde).minus(r.montant_recu).gt(0)).sort((a, b) => a.debut.localeCompare(b.debut))
-  const ouverte = ouvertes.find((r) => paiements.some((p) => p.regularisation_id === r.id && new Big(p.regularisation).eq(surplus)))
+  const ouvertes = charge_adjustments.filter((r) => r.tenancy_id === tenancy.id && r.state === 'pending'
+    && new Big(r.balance).minus(r.amount_received).gt(0)).sort((a, b) => a.start.localeCompare(b.start))
+  const ouverte = ouvertes.find((r) => payments.some((p) => p.charge_adjustment_id === r.id && new Big(p.charge_adjustment).eq(surplus)))
     ?? ouvertes[0]
   return {
-    ...vide, loyer: appele.loyer, provision: appele.provision,
-    ...(ouverte ? { regularisation_id: ouverte.id, regularisation: surplus.toString() } : {}),
+    ...vide, rent: appele.rent, charge_advance: appele.charge_advance,
+    ...(ouverte ? { charge_adjustment_id: ouverte.id, charge_adjustment: surplus.toString() } : {}),
     ecart: ouverte ? `${ecart} : le surplus de ${surplus.toFixed(2)} € va à la régularisation en attente` : ecart,
   }
 }
 
 // Categories read in the label of a movement (the most frequent ones of a rental company)
 const MOTS: [RegExp, CategorieMouvement][] = [
-  [/\bPRET\b|ECH PRET|ECHEANCE/, 'emprunt'],
-  [/ASSURANCE|AURORE|IARD|\bMAAF|\bAXA\b|ALLIANZ|MACIF|MATMUT|SINISTRE/, 'assurance'],
-  [/\bENGIE\b|\bEDF\b|ELECTRICITE DE FRANCE|TOTALENERGIES|\bGAZ\b|ELECTRICITE/, 'energie'],
-  [/\bEAU\b|SEAFF|VEOLIA|SUEZ|SAUR\b/, 'eau'],
-  [/DGFIP|IMPOT|TAXE FONCIERE|\bTRESOR\b/, 'impots'],
-  [/^FACT(URE)? SGT|FRAIS|COTISATION|COMMISSION|\bAGIOS\b|INTERETS/, 'frais_bancaires'],
-  [/\bSYNDIC\b|COPROPRIETE/, 'copropriete'],
-  [/APPORT|ASSOCIE/, 'associes'],
-  [/VIREMENT INTERNE|VIR(EMENT)? COMPTE/, 'virement_interne'],
+  [/\bPRET\b|ECH PRET|ECHEANCE/, 'loan'],
+  [/ASSURANCE|AURORE|IARD|\bMAAF|\bAXA\b|ALLIANZ|MACIF|MATMUT|SINISTRE/, 'insurance'],
+  [/\bENGIE\b|\bEDF\b|ELECTRICITE DE FRANCE|TOTALENERGIES|\bGAZ\b|ELECTRICITE/, 'energy'],
+  [/\bEAU\b|SEAFF|VEOLIA|SUEZ|SAUR\b/, 'water'],
+  [/DGFIP|IMPOT|TAXE FONCIERE|\bTRESOR\b/, 'taxes'],
+  [/^FACT(URE)? SGT|FRAIS|COTISATION|COMMISSION|\bAGIOS\b|INTERETS/, 'bank_fees'],
+  [/\bSYNDIC\b|COPROPRIETE/, 'co_ownership'],
+  [/APPORT|ASSOCIE/, 'partners'],
+  [/VIREMENT INTERNE|VIR(EMENT)? COMPTE/, 'internal_transfer'],
 ]
 
 /**
  * The probable category: a tenant named in it (a credit is a payment, a debit a deposit refunded when it says so),
  * else words of its label; null when nothing is recognised.
  */
-export function categoriePropose(m: Pick<Mouvement, 'libelle' | 'detail' | 'montant' | 'date_operation'>, sejours: Sejour[] = []): CategorieMouvement | null {
-  const texte = normaliser(`${m.libelle} ${m.detail ?? ''}`)
-  const mot = MOTS.find(([re]) => re.test(texte))?.[1] ?? null
+export function categoriePropose(m: Pick<Mouvement, 'label' | 'detail' | 'amount' | 'transaction_date'>, tenancies: Sejour[] = []): CategorieMouvement | null {
+  const text = normaliser(`${m.label} ${m.detail ?? ''}`)
+  const mot = MOTS.find(([re]) => re.test(text))?.[1] ?? null
   // A partner named like a tenant: the word wins, except for a transfer between accounts
-  if (mot && mot !== 'virement_interne') {
+  if (mot && mot !== 'internal_transfer') {
     return mot
   }
-  if (sejourDuMouvement(m, sejours)) {
-    return new Big(m.montant).gt(0) ? 'locataire' : /CAUTION|DEPOT|GARANTIE/.test(texte) ? 'depot_garantie' : 'locataire'
+  if (sejourDuMouvement(m, tenancies)) {
+    return new Big(m.amount).gt(0) ? 'tenant' : /CAUTION|DEPOT|GARANTIE/.test(text) ? 'security_deposit' : 'tenant'
   }
   return mot
 }
