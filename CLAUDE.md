@@ -19,8 +19,10 @@ première : `colibri`, privé), qui fixe la version de l'image et lance les test
 - Image : `Dockerfile`, publiée par la CI sur GHCR à chaque push sur `main` (étiquette = commit court, et `latest`)
 - `backend/` et `frontend/` en paquets npm indépendants ; `schema.sql` complet + `migrations/NNN_*.sql` appliquées à
   la main ; ADR dans `docs/adr/` ; Conventional Commits ; pas de Prettier (pas de point-virgule, guillemets simples)
-- Langue : code, commentaires et commits en anglais ; noms SQL du domaine, interface et documentation en français ;
-  le code des extracteurs (classe de base, aides) est en anglais, les valeurs stockées en base restent en français
+- Langue : code, commentaires et commits en anglais ; interface et documentation en français. Les noms en français
+  dans le code et la base (fichiers, composants, types, fonctions, variables, classes CSS, tables, colonnes) sont une
+  dette technique : tout nom nouveau est en anglais, un fichier réécrit passe ses noms en anglais ; pas de renommage
+  de masse sans le demander
 - Git : l'utilisateur fait lui-même les commandes git ; proposer les `git add` / `git commit`, ne jamais les lancer
 
 ## Ce qui existe

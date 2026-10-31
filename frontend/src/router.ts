@@ -3,7 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AccueilView from './views/AccueilView.vue'
 import ControlesView from './views/ControlesView.vue'
 import DecompteView from './views/DecompteView.vue'
-import FacturesView from './views/FacturesView.vue'
+import InvoicesView from './views/InvoicesView.vue'
 import FactureView from './views/FactureView.vue'
 import FiscalView from './views/FiscalView.vue'
 import ImmeubleView from './views/ImmeubleView.vue'
@@ -22,7 +22,7 @@ export default createRouter({
     { path: '/connexion', name: 'connexion', component: () => import('./views/ConnexionView.vue'), meta: { publique: true } },
     { path: '/enregistrer', name: 'enregistrer', component: () => import('./views/EnregistrementView.vue'), meta: { publique: true } },
     { path: '/compte', name: 'compte', component: () => import('./views/CompteView.vue') },
-    { path: '/factures', name: 'factures', component: FacturesView },
+    { path: '/factures', name: 'factures', component: InvoicesView },
     { path: '/factures/:id', name: 'facture', component: FactureView, props: (route) => ({ id: Number(route.params.id) }) },
     { path: '/controles', name: 'controles', component: ControlesView },
     // Former name of the checks screen

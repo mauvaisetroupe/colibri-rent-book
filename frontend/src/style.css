@@ -1104,3 +1104,13 @@ section.reglements li a,
 section.reglements li button {
   margin-left: 0.5rem;
 }
+
+/* Lists in OpenVue tables with a filter under each column (lists.ts): the filter as wide as its column */
+.p-datatable .column-filter {
+  width: 100%;
+  min-width: 4rem;
+}
+
+.p-datatable.clickable tbody tr {
+  cursor: pointer;
+}
