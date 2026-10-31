@@ -11,6 +11,7 @@ import { RouterLink, useRouter } from 'vue-router'
 
 import { api, ApiError, type ExtracteurEnregistre, type ReleveResume } from '../api'
 import { dateFr, euros } from '../format'
+import { stateKey } from '../lists'
 
 // Bank statements (ADR 0018): the PDFs are read here, in the browser, by the extractor of their bank, checked (the
 // balances add up to the cent) and stored with their movements; each statement opens on its page (PDF and movements
@@ -140,6 +141,7 @@ function supprimer(r: ReleveResume) {
 
   <DataTable
     :value="releves" data-key="id" size="small" striped-rows paginator :rows="25" sort-field="date_releve" :sort-order="-1"
+    state-storage="session" :state-key="stateKey('statements')"
     class="releves" @row-click="router.push({ name: 'releve', params: { id: $event.data.id } })"
   >
     <template #empty>Aucun relevé importé.</template>

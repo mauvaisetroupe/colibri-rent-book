@@ -25,6 +25,7 @@ import {
 import FormulairePaiement, { type Brouillon, enregistrerBrouillon } from '../components/FormulairePaiement.vue'
 import FormulaireTravaux, { type BrouillonTravaux, travauxVersApi } from '../components/FormulaireTravaux.vue'
 import { dateFr, euros, nombreFr } from '../format'
+import { stateKey } from '../lists'
 import { categoriePropose, proposer } from '../rapprochement'
 
 // Categorisation of the bank movements (ADR 0018; the statements are imported in RelevesView): each movement gets a
@@ -688,7 +689,7 @@ const ligneSurlignee = (m: Mouvement) => (m.id === surligne.value ? 'surligne' :
     <DataTable
       v-model:expanded-rows="deplies" :value="affiches" data-key="id" size="small" paginator :rows="50"
       :rows-per-page-options="[25, 50, 100, 500]" :row-class="ligneSurlignee"
-      class="mouvements"
+      state-storage="session" :state-key="stateKey('bank')" class="mouvements"
     >
       <template #empty>Aucun mouvement.</template>
       <!-- The arrow, on the categorised movements that have a detail only -->
