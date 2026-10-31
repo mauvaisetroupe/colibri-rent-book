@@ -1,5 +1,6 @@
 # colibri-rent-book: the API, which also serves the built frontend. Built and published by the CI
-# (ghcr.io/mauvaisetroupe/colibri-rent-book, one tag per commit); locally: docker build -t colibri-rent-book .
+# (ghcr.io/mauvaisetroupe/colibri-rent-book: X.Y.Z for a tag vX.Y.Z, and one tag per commit), with the migration image
+# of the same version (backend/migrations/Dockerfile, ADR 0026); locally: docker build -t colibri-rent-book .
 # Versions are pinned here: Node and Debian. The invoices are read in the browser, by pdf.js (ADR 0013), and the
 # supporting PDFs are made by pdfmake and pdf-lib with their own font (ADR 0014): no poppler, no Chromium. Rebuilt
 # every month for security updates.
@@ -25,7 +26,7 @@ RUN npm run build && npm prune --omit=dev
 
 # ---------------------------------------------------------------- runtime
 FROM ${NODE_IMAGE} AS runtime
-# Commit built (CI: build-arg VERSION), shown in the interface and given by /api/health
+# Version built (CI: build-arg VERSION, X.Y.Z or the commit), shown in the interface and given by /api/health
 ARG VERSION=dev
 ENV NODE_ENV=production \
     APP_VERSION=${VERSION} \
@@ -39,10 +40,8 @@ WORKDIR /app/backend
 COPY --from=backend /build/backend/node_modules ./node_modules
 COPY --from=backend /build/backend/dist ./dist
 COPY backend/package.json ./
-COPY backend/schema.sql ./
-COPY backend/migrations ./migrations
-# What a version brings to the database: migrations, applied by hand, and the extractors shipped (replayable)
-COPY backend/seed ./seed
+# Read at start: the highest migration is the schema version required (the migration image applies them, ADR 0026)
+COPY backend/migrations/*.sql ./migrations/
 
 COPY --from=frontend /build/frontend/dist /app/frontend
 

@@ -1,48 +1,43 @@
 # Migrations
 
-- `../schema.sql` décrit le schéma **complet et à jour** : il sert à créer une base neuve (tests, nouvel environnement).
-- Les fichiers `NNN_*.sql` de ce dossier font évoluer une base **existante**, dans l'ordre de leur numéro, chacun dans
-  une transaction.
+Le schéma de la base est créé et mis à jour par **Flyway**, dans l'image de migration construite par le
+[`Dockerfile`](Dockerfile) de ce dossier ([ADR 0026](../../docs/adr/0026-migrations-flyway-et-versions.md)). Elle
+s'exécute avant l'API, applique ce qui manque, puis s'arrête ; l'API vérifie à son démarrage que la base a atteint la
+dernière version de ce dossier.
 
-Toute modification du schéma ajoute une migration **et** met à jour `schema.sql`.
+| Fichier | Rôle |
+|---|---|
+| `V<NNN>__<description>.sql` | Migration versionnée, appliquée une fois, dans l'ordre des numéros |
 
-## Appliquer une migration
+`V001__schema.sql` est le schéma complet, tel qu'il était après les anciennes migrations 001 à 025, appliquées à la main
+avant Flyway (elles sont dans l'historique git). Une base de cette époque se reprend par une ligne de base à la
+version 1 ([`docs/exploitation.md`](../../docs/exploitation.md)).
 
-Toujours après une sauvegarde de la base. Dans un conteneur PostgreSQL :
+## Écrire une migration
+
+1. Un nouveau fichier `V<numéro suivant>__<description>.sql` (par exemple `V002__lease_index.sql`), **sans** `BEGIN;`
+   ni `COMMIT;` : Flyway exécute chaque migration dans une transaction.
+2. **Ne jamais modifier** un fichier déjà appliqué quelque part, `V001` compris : Flyway compare leurs sommes de
+   contrôle et refuse de migrer si l'une a changé.
+3. Compatible avec la version précédente de l'API quand c'est possible (colonne ajoutée plutôt que renommée), pour
+   qu'un retour à l'image précédente reste possible.
+4. Si elle est lourde ou empêche le retour en arrière : `!` dans le commit (`feat!: …`), qui le dit ; les notes de la
+   version le mettent en tête. Les migrations nouvelles y sont listées d'elles-mêmes.
+5. Les tests l'appliquent d'eux-mêmes (`test/database.ts`) ; `npm run db:local` l'applique à la base de développement.
+
+## Une base de développement d'avant Flyway
+
+Une base créée par l'ancien `schema.sql` n'a pas d'historique : Flyway la refuse (« Found non-empty schema(s) … but no
+schema history table »). La recréer (`npm run db:local:reset`, les comptes sont gardés), ou noter une fois qu'elle est
+à la version 1 :
 
 ```bash
-docker compose exec -T db psql -U colibri -d colibri -v ON_ERROR_STOP=1 < backend/migrations/010_fournisseur_confidentiel.sql
+docker compose -f docker-compose.dev.yml run --rm --build \
+  -e FLYWAY_BASELINE_ON_MIGRATE=true -e FLYWAY_BASELINE_VERSION=1 dev-migrations
 ```
-
-Les données livrées avec le logiciel (`seed/extracteurs.sql` : extracteurs EDF et ENGIE) se rechargent de la même façon
-après une mise à jour qui les change ; le fichier est rejouable.
 
 ## Historique
 
 | Migration | ADR | Contenu |
 |---|---|---|
-| `001_schema.sql` | 0002 | Schéma initial (immeubles, lots, séjours, factures, provisions, régularisations, compteurs) |
-| `002_repartition.sql` | 0002 | Moteur de répartition : `repartition`, `decompte`, `synthese` |
-| `003_repartition_validated_only.sql` | 0003 | `repartition` ne prend que les factures validées |
-| `004_regularisation_instantane.sql` | 0007 | Régularisation figée (`instantane`), date de création |
-| `005_paiements.sql` | 0008 | Paiements reçus, provisions calculées (`v_provision`), dépôt de garantie, `montant_recu` calculé |
-| `006_echeance.sql` | 0009 | Loyer et provision appelés par séjour, avec leur historique (`echeance`) |
-| `007_regularisation_decision.sql` | 0010 | État des régularisations calculé, `statut` remplacé par `decision` |
-| `008_affectation_ligne.sql` | 0013 | `recuperable` d'une ligne de facture remplacé par `affectation` (récupérable, propriétaire, hors immeuble) |
-| `009_extracteur.sql` | 0013 | Extracteurs de factures versionnés et figés, `facture.extracteur_id`, total d'un brouillon facultatif |
-| `010_fournisseur_confidentiel.sql` | 0014 | `fournisseur.confidentiel` : factures jamais jointes au justificatif |
-| `011_travaux.sql` | 0015 | Factures de travaux du propriétaire (nature, date de paiement, PDF), pour la synthèse fiscale |
-| `012_assemblees.sql` | 0016 | Société, associés et parts, assemblées générales (présences, résolutions), registre figé à la clôture |
-| `013_facture_remplacee.sql` | 0017 | Facture validée remplacée (statut `remplacee`, par qui, quand, motif), brouillon de correction, numéro unique parmi les validées |
-| `014_releves_bancaires.sql` | 0018 | Relevés bancaires et mouvements, extracteurs de relevés (`extracteur.type`), lien paiement / travaux → mouvement, PDF rangés par type (`factures/`, `releves/`, `travaux/`, `assemblees/`) |
-| `015_categorie_mouvement.sql` | 0018 | Catégorie d'un mouvement bancaire (paiement de locataire, travaux, emprunt, assurance…) et note, à la place du motif « ignoré » |
-| `016_reglements_depots_associes.sql` | 0019 | Règlements des travaux (payés en plusieurs fois, année fiscale de chaque paiement), versements de dépôt de garantie, catégories « associés » et « dépôt de garantie » |
-| `017_authentification.sql` | 0020 | Comptes, passkeys (WebAuthn), sessions, liens d'enregistrement à usage unique, jetons d'API (empreintes seulement) |
-| `018_categorie_agence.sql` | 0019 | Catégorie « agence » : loyers reversés par une agence de gestion, sans détail |
-| `019_retenue_depot.sql` | 0021 | Mode de paiement `depot` (retenue sur le dépôt, jamais rattachée à un mouvement), `sejour.depot_retenu_charges` supprimée (valeur saisie reportée dans la note du séjour) |
-| `020_reglement_facture.sql` | 0022 | Règlements des factures des charges (gaz, électricité, eau, taxe foncière) par des mouvements bancaires |
-| `021_reglement_facture_remboursement.sql` | 0022 | Un crédit qui rembourse une facture des charges est un règlement négatif |
-| `022_immeuble_debut_gestion.sql` | 0023 | Date de début de la gestion d'un immeuble dans l'application |
-| `023_facture_annexe.sql` | 0024 | Factures jointes en images, caviardées (`facture_annexe`, `facture.annexe_id`), annexes jointes à l'envoi, termes masqués |
-| `024_zones_scans.sql` | 0025 | Zones masquées sur les scans, tracées à la main : modèle du fournisseur, ajustées par facture ; pages scannées d'une annexe |
-| `025_english_names.sql` | — | Noms anglais de toute la base ([glossaire](../../docs/glossary.md)) : tables, colonnes, types et valeurs, contraintes, index, vues, fonctions, déclencheurs ; JSON stockés (réglages des extracteurs, versions locataire, instantanés des régularisations) ; tables jamais utilisées supprimées (compteurs, relevés de compteur, événements) |
+| `V001__schema.sql` | 0026 | Schéma complet après les anciennes migrations 001 à 025 (ADR 0002 à 0025) |

@@ -37,7 +37,7 @@ de la première exploitation le vérifient sur ses données) tout en supprimant 
 
 ## 4. Modèle de données
 
-Voir `backend/schema.sql` (et `backend/migrations/`). Points clés :
+Voir `backend/migrations/V001__schema.sql` (et les migrations suivantes). Points clés :
 
 - toutes les périodes sont des `daterange` semi-ouverts `[début, fin+1)` ; un séjour en cours a une borne haute infinie ;
 - contrainte d'exclusion : deux séjours ne peuvent pas se chevaucher sur un même lot ;
@@ -47,7 +47,7 @@ Voir `backend/schema.sql` (et `backend/migrations/`). Points clés :
 
 ## 5. Moteur de répartition
 
-Implémenté en SQL dans `backend/schema.sql` (migrations 002 et 003) ; seules les factures validées sont réparties (ADR 0003) :
+Implémenté en SQL dans `backend/migrations/V001__schema.sql` (anciennes migrations 002 et 003) ; seules les factures validées sont réparties (ADR 0003) :
 
 - `repartition(immeuble, debut, fin)` : détail ligne × séjour, plus une ligne « propriétaire » (sejour_id NULL) par ligne de facture ;
 - `decompte(immeuble, debut, fin)` : une ligne par séjour, colonnes gaz conso / gaz autres / élec conso / élec autres / eau / ordures ménagères / total / provisions / solde ;
@@ -89,7 +89,7 @@ Format d'une ligne (identique pour les extracteurs et le collage ; `kwh`, `monta
 pour une facture lue par un extracteur) :
 `{categorie, libelle, debut, fin, kwh, montant_ht, taux_tva, montant_ttc, affectation, note}`, dates ISO **bornes incluses**.
 
-Extracteurs livrés (`frontend/src/extraction/modeles/` : EDF, ENGIE, et un modèle pour un nouveau fournisseur) ; le moteur est testé sur une facture fictive (`cd frontend && npm test`), les extracteurs sur les factures réelles par l'exploitation.
+Aucun extracteur livré (ADR 0026) : ils sont en base, écrits dans l'éditeur à partir d'un modèle (`frontend/src/extraction/modeles/`) ; le moteur est testé sur une facture fictive (`cd frontend && npm test`), les extracteurs sur les factures réelles par l'exploitation.
 Particularités connues :
 
 - **EDF** : lignes en une seule ligne de texte, abonnement facturé d'avance, accise (ex-CSPE) en deux lignes quand le taux change, CTA avec des périodes qui se chevauchent d'un jour d'une facture à l'autre (conservées telles qu'imprimées). TTC ligne = HT × (1 + TVA) arrondi : écart de 0,01 € possible avec le total.

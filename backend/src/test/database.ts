@@ -1,7 +1,9 @@
-import { readFile } from 'node:fs/promises'
-import { isAbsolute, resolve } from 'node:path'
+import { readdir, readFile } from 'node:fs/promises'
+import { isAbsolute, join, resolve } from 'node:path'
 
 import pg from 'pg'
+
+import { MIGRATIONS_DIR } from '../schemaVersion.js'
 
 /**
  * Database used by integration tests.
@@ -23,17 +25,20 @@ export function createTestPool() {
   return new pg.Pool({ connectionString: url })
 }
 
-const backendDir = new URL('../../', import.meta.url)
-
 /**
- * Recreates the database from schema.sql, then loads TEST_SEED_FILES (SQL files separated by « : », the data of the
- * operations that run the tests, e.g. its buildings, invoices and stays) and the extractors shipped as models.
+ * Recreates the database from the versioned migrations (V<n>__*.sql, in the order of their number, as Flyway does,
+ * without its history table), then loads TEST_SEED_FILES (SQL files separated by « : », the data of the operations
+ * that run the tests, e.g. its buildings, invoices, stays and extractors).
  */
 export async function resetDatabase(pool: pg.Pool) {
   await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public')
-  await pool.query(await readFile(new URL('schema.sql', backendDir), 'utf8'))
+  const migrations = (await readdir(MIGRATIONS_DIR))
+    .filter((name) => /^V\d+__.+\.sql$/.test(name))
+    .sort((a, b) => Number(a.slice(1, a.indexOf('__'))) - Number(b.slice(1, b.indexOf('__'))))
+  for (const name of migrations) {
+    await pool.query(await readFile(join(MIGRATIONS_DIR, name), 'utf8'))
+  }
   for (const file of (process.env.TEST_SEED_FILES ?? '').split(':').filter(Boolean)) {
     await pool.query(await readFile(isAbsolute(file) ? file : resolve(file), 'utf8'))
   }
-  await pool.query(await readFile(new URL('seed/extracteurs.sql', backendDir), 'utf8'))
 }

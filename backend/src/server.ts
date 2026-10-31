@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { buildApp } from './app.js'
 import { pool } from './db.js'
 import { rangerStockage } from './pdfStorage.js'
+import { checkSchemaVersion, expectedSchemaVersion } from './schemaVersion.js'
 
 // Default: backend/storage/pdf (gitignored), from src/ in development and dist/ in production
 const storageDir = process.env.STORAGE_DIR ?? fileURLToPath(new URL('../storage/pdf', import.meta.url))
@@ -21,6 +22,23 @@ if (!origin && process.env.NODE_ENV === 'production') {
 const app = await buildApp({ db: pool, storageDir, frontendDir, auth: origin ? { origin } : undefined }, { logger: true })
 if (!origin) {
   app.log.warn('COLIBRI_ORIGIN absent : pas d\'authentification (développement seulement)')
+}
+
+// The schema this API was built for, applied by the migration image (ADR 0026). In production, a refusal to start; in
+// development, the database is often made with psql (tests, scripts of an operation): a warning
+try {
+  const { current, warning } = await checkSchemaVersion(pool, await expectedSchemaVersion())
+  app.log.info(`Schéma de la base en version ${current}`)
+  if (warning) {
+    app.log.warn(warning)
+  }
+} catch (error) {
+  if (process.env.NODE_ENV === 'production') {
+    app.log.fatal(error)
+    await pool.end()
+    process.exit(1)
+  }
+  app.log.warn(`${(error as Error).message} (refusé en production)`)
 }
 
 // PDFs of a storage written before the folders by kind (migration 014): moved into their folder, once

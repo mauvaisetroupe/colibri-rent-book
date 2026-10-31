@@ -2,12 +2,13 @@
 #
 # Disposable database for the automated tests:
 #   npm run db:up          start it (empty, in memory)
-#   npm run test:local     run the tests against it (they load schema.sql, and TEST_SEED_FILES when given)
+#   npm run test:local     run the tests against it (they load the migrations, and TEST_SEED_FILES when given)
 #   npm run db:down        stop everything
 #
 # Development database:
-#   npm run db:local       start it with Adminer (created from schema.sql and the shipped extractors on first start;
-#                          the data of an operation are loaded by its own scripts)
+#   npm run db:local       start it with Adminer, then the migration image (migrations/Dockerfile, Flyway), as in
+#                          production (ADR 0026); the data and extractors of an operation are loaded by its own
+#                          scripts, or typed in the application
 #   npm run dev            run the API against it (backend/.env.local)
 #   npm run db:local:reset recreate it from scratch (deletes its data)
 
@@ -42,14 +43,23 @@ services:
       - '127.0.0.1:55443:5432'
     volumes:
       - dev-db-data:/var/lib/postgresql
-      # Run in name order on the first start only (empty volume)
-      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./seed/extracteurs.sql:/docker-entrypoint-initdb.d/02-seed-extracteurs.sql:ro
     healthcheck:
       test: ['CMD', 'pg_isready', '-U', 'colibri', '-d', 'colibri']
       interval: 2s
       timeout: 5s
       retries: 15
+
+  # The migration image, built from this folder; run by « docker compose run » (npm run db:local), which waits for it
+  dev-migrations:
+    build: ./migrations
+    profiles: [migrations]
+    environment:
+      FLYWAY_URL: jdbc:postgresql://dev-db:5432/colibri
+      FLYWAY_USER: colibri
+      FLYWAY_PASSWORD: dev
+    depends_on:
+      dev-db:
+        condition: service_healthy
 
   # Web interface for the databases: http://localhost:8090
   adminer:

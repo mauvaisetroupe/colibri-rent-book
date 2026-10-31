@@ -1,5 +1,6 @@
--- Full current schema of Colibri (PostgreSQL >= 14). Creates a fresh database.
--- Built from migrations 001 to 005: any new migration must also be reported here (see migrations/README.md).
+-- Colibri: full schema, as it was after the former migrations 001 to 025 (applied by hand before Flyway, ADR 0026).
+-- First Flyway migration: creates an empty database; a database of that time is taken over by a baseline at version 1
+-- (docs/exploitation.md). Frozen: never change it, write a new migration (see README.md).
 
 -- =====================================================================
 -- Gestion des charges locatives – schéma PostgreSQL (≥ 14)
