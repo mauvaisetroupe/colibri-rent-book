@@ -656,7 +656,7 @@ a.bouton {
   background: var(--accent);
 }
 
-.frise-segment.couvert {
+.frise-segment.covered {
   background: var(--ok);
 }
 
