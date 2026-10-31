@@ -32,5 +32,6 @@ seed cités ici sont dans ce dépôt-là, qui lance aussi les tests sur ces donn
 | 0023 | [Début de la gestion d'un immeuble](0023-debut-de-la-gestion.md) | Accepté |
 | 0024 | [Factures en annexe caviardées et jointes en images](0024-factures-en-annexe-caviardees-en-images.md) | Proposé |
 | 0025 | [Zones tracées à la main sur les factures scannées](0025-zones-tracees-sur-les-scans.md) | Proposé |
+| 0026 | [Migrations par Flyway dans une image à part, et des versions](0026-migrations-flyway-et-versions.md) | Accepté |
 
-La prochaine décision du logiciel prend le numéro 0026.
+La prochaine décision du logiciel prend le numéro 0027.

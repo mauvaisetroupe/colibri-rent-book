@@ -9,9 +9,10 @@ décomptes, régularisations figées avec leur justificatif PDF (factures en ann
 | `backend/` | API Fastify, schéma PostgreSQL et migrations, moteur de répartition en SQL, justificatifs PDF |
 | `frontend/` | Interface Vue 3, extraction des factures (pdf.js, extracteurs, éditeur Monaco) |
 | `docs/SPEC.md`, `docs/adr/` | Règles métier et décisions d'architecture |
-| `Dockerfile` | Image publiée par la CI : `ghcr.io/mauvaisetroupe/colibri-rent-book:<commit>` |
+| `Dockerfile`, `backend/migrations/Dockerfile` | Images publiées par la CI : `ghcr.io/mauvaisetroupe/colibri-rent-book:<version>` et sa migration Flyway `…-migrations:<version>` |
+| `docs/exploitation.md`, `compose.example.yml` | Pour l'exploitant : configuration, données à conserver, mises à jour ; composition d'exemple (notes de chaque version : GitHub Releases) |
 
 Le dépôt ne contient aucune donnée réelle : chaque exploitation (immeubles, factures, sauvegardes, composition de
-production) a son propre dépôt, qui choisit la version de l'image et lance les tests sur ses données.
+production) est tenue par son exploitant, qui choisit la version des images.
 
 Commandes : voir `CLAUDE.md`.

@@ -1,0 +1,66 @@
+# EXAMPLE to try colibri-rent-book: database, migrations, API (docs/exploitation.md). Not a production composition:
+# backups (database and PDFs), HTTPS proxy, log limits and secrets are the operator's.
+#
+# In an empty folder, with this file and a .env file:
+#
+#   COLIBRI_VERSION=1.0.0
+#   DB_PASSWORD=<password>
+#
+#   docker compose -f compose.example.yml up -d
+#   docker compose -f compose.example.yml exec api node dist/cli/lien.js <email> <name>   # first passkey
+#   open http://localhost:3000
+
+name: colibri-example
+
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: colibri
+      POSTGRES_USER: colibri
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?}
+    volumes:
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'colibri', '-d', 'colibri']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Applies the migrations and the extractors shipped, then stops. Same version as the API.
+  migrations:
+    image: ghcr.io/mauvaisetroupe/colibri-rent-book-migrations:${COLIBRI_VERSION:?}
+    environment:
+      FLYWAY_URL: jdbc:postgresql://db:5432/colibri
+      FLYWAY_USER: colibri
+      FLYWAY_PASSWORD: ${DB_PASSWORD:?}
+      # Once, to take over a database migrated by hand before the images (docs/exploitation.md), then remove them:
+      # FLYWAY_BASELINE_ON_MIGRATE: 'true'
+      # FLYWAY_BASELINE_VERSION: '1'
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    image: ghcr.io/mauvaisetroupe/colibri-rent-book:${COLIBRI_VERSION:?}
+    init: true
+    environment:
+      DATABASE_HOST: db
+      DATABASE_NAME: colibri
+      DATABASE_USER: colibri
+      DATABASE_PASSWORD: ${DB_PASSWORD:?}
+      # The address the browser opens: the passkeys are bound to it
+      COLIBRI_ORIGIN: http://localhost:3000
+    volumes:
+      - pdf:/data/pdf
+    ports:
+      - 127.0.0.1:3000:3000
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  pdf:

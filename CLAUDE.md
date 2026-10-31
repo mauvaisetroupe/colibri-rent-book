@@ -16,9 +16,15 @@ première : `colibri`, privé), qui fixe la version de l'image et lance les test
 - Justificatifs et procès-verbaux PDF : pdfmake (police Roboto embarquée, réglée dans `pdfmake.ts`), factures jointes
   en annexe par pdf-lib, sauf celles d'un fournisseur confidentiel (ADR 0014) ; pas de navigateur côté serveur. Une
   facture n'est jointe qu'en copie en images, caviardée et vérifiée, faite dans le navigateur (ADR 0024)
-- Image : `Dockerfile`, publiée par la CI sur GHCR à chaque push sur `main` (étiquette = commit court, et `latest`)
-- `backend/` et `frontend/` en paquets npm indépendants ; `schema.sql` complet + `migrations/NNN_*.sql` appliquées à
-  la main ; ADR dans `docs/adr/` ; Conventional Commits ; pas de Prettier (pas de point-virgule, guillemets simples)
+- Images (ADR 0026) : l'API (`Dockerfile`) et sa migration Flyway (`backend/migrations/Dockerfile`), publiées par la
+  CI sur GHCR : commit court à chaque push sur `main`, `X.Y.Z` pour un tag `vX.Y.Z` (notes de la GitHub
+  Release écrites depuis git, `.github/release-notes.sh`) ; pas de `latest`. Un changement qui demande une action à
+  l'exploitant (variable, PostgreSQL, migration sans retour en arrière) : `!` dans le commit (`feat!: …`), qui dit quoi
+  faire. Documentation de l'exploitant : `docs/exploitation.md`
+- `backend/` et `frontend/` en paquets npm indépendants ; schéma par migrations Flyway `backend/migrations/V<NNN>__*.sql`
+  (`V001__schema.sql` = le schéma complet d'avant Flyway ; jamais modifier une migration publiée), l'API refuse en
+  production une base pas à jour (`schemaVersion.ts`) ; ADR dans `docs/adr/` ; Conventional Commits ; pas de Prettier
+  (pas de point-virgule, guillemets simples)
 - Langue : code, commentaires et commits en anglais ; interface et documentation en français. Les noms en français
   dans le code et la base (fichiers, composants, types, fonctions, variables, classes CSS, tables, colonnes) sont une
   dette technique : tout nom nouveau est en anglais, un fichier réécrit passe ses noms en anglais ; pas de renommage
@@ -36,8 +42,10 @@ première : `colibri`, privé), qui fixe la version de l'image et lance les test
   dates incluses), `invoices/checks.ts` (contrôles du § 6, sans dépendance à Node), `pdfStorage.ts` (PDF par empreinte, un dossier
   par type : `factures/`, `annexes/`, `releves/`, `travaux/`, `assemblees/` ; rangement au démarrage).
   Le moteur de répartition est en SQL (`repartition`, `decompte`, `synthese`) : ne pas le réimplémenter en TypeScript.
-- `backend/seed/extracteurs.sql` : extracteurs livrés (EDF, ENGIE ; relevés du Crédit Mutuel, ADR 0018), généré par `npm run extracteurs:sql` dans
-  `frontend/` depuis `frontend/src/extraction/modeles/` ; rejouable (une source déjà en base n'est pas ajoutée).
+- Aucun extracteur livré (ADR 0026) : ils sont en base, saisis dans l'éditeur ; `frontend/src/extraction/modeles/` ne
+  garde que les modèles de départ de l'éditeur. Ceux de la SCI (EDF, ENGIE, Crédit Mutuel, taxe foncière) et leurs tests
+  sont dans son exploitation ; `npm run extracteurs:sql` en fait un SQL rejouable (une source déjà en base n'est pas
+  ajoutée).
 - `frontend/src/` : `api.ts` (client et types), `format.ts` (seule conversion affichage ↔ API), un écran par fichier
   dans `views/`, `rapprochement.ts` (propositions de l'écran Banque), `extraction/` (`extractor.ts` = classe de base
   et aides des extracteurs de factures, `bank-extractor.ts` celle des relevés, `moteurReleve.ts` leur moteur ;
@@ -70,16 +78,17 @@ première : `colibri`, privé), qui fixe la version de l'image et lance les test
 
 ```bash
 cd backend && cp .env.local.example .env.local      # une fois
-cd backend && npm run db:local && npm run dev       # base Docker de DEV (port 55443, Adminer :8090), API sur :3000
-cd backend && npm run db:up && npm run test:local   # base de test jetable (port 55442) : schéma seul, sauf TEST_SEED_FILES
+cd backend && npm run db:local && npm run dev       # base Docker de DEV (port 55443, Adminer :8090), migrée par Flyway, API sur :3000
+cd backend && npm run db:up && npm run test:local   # base de test jetable (port 55442) : migrations seules, sauf TEST_SEED_FILES
 cd backend && npx tsc --noEmit                      # types
 cd frontend && npm run dev                          # Vite sur :5173, /api relayé vers 127.0.0.1:3000
 cd frontend && npm run build                        # vue-tsc + vite build
 cd frontend && npm test                             # moteur d'extraction sur une facture fictive
-cd frontend && npm run extracteurs:sql              # backend/seed/extracteurs.sql depuis les modèles
+cd frontend && npm run extracteurs:sql -- <sortie.sql> <source.ts>=<fournisseur>…   # SQL d'extracteurs d'une exploitation
 docker build -t colibri-rent-book .                 # l'image, comme la CI
+docker build -t colibri-rent-book-migrations backend/migrations   # l'image de migration
 ```
 
 Les tests n'utilisent que `TEST_DATABASE_URL` et refusent une base dont le nom ne finit pas par `_test` : ils
-suppriment et recréent tout le schéma. `TEST_SEED_FILES` (chemins séparés par « : ») charge les données d'une
+suppriment et recréent tout le schéma (les migrations `V*` dans l'ordre, sans Flyway). `TEST_SEED_FILES` (chemins séparés par « : ») charge les données d'une
 exploitation après le schéma.
