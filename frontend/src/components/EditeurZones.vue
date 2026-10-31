@@ -2,13 +2,15 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 
 import type { ZoneSaisie } from '../api'
+import type { Zone } from '../extraction/masquage'
 import type { ApercuPage } from '../extraction/navigateur'
 
 // Zones masked on the pages of an invoice, drawn with the mouse (ADR 0025): dragging on a page draws a zone, dragging a
 // zone moves it, its corner resizes it, × or the Delete key removes the selected one. On a scan they are the only ones;
-// on a page of text they are added to the masked terms and the extractor. Bounds in fractions of the page.
+// on a page of text they are added to the masked terms and the extractor, whose zones (`automatiques`) are shown hatched,
+// not editable: no need to draw them again. Bounds in fractions of the page.
 
-const props = defineProps<{ modelValue: ZoneSaisie[], contenu: Uint8Array | null, largeur?: number }>()
+const props = defineProps<{ modelValue: ZoneSaisie[], contenu: Uint8Array | null, largeur?: number, automatiques?: Zone[] }>()
 const emit = defineEmits<{ 'update:modelValue': [zones: ZoneSaisie[]] }>()
 
 const LARGEUR = props.largeur ?? 620
@@ -134,12 +136,18 @@ function touche(event: KeyboardEvent) {
 document.addEventListener('keydown', touche)
 
 const pourcent = (v: number) => `${(v * 100).toFixed(3)}%`
+const cadre = (z: { x0: number, y0: number, x1: number, y1: number }) =>
+  ({ left: pourcent(z.x0), top: pourcent(z.y0), width: pourcent(z.x1 - z.x0), height: pourcent(z.y1 - z.y0) })
 </script>
 
 <template>
   <div class="editeur-zones">
     <p v-if="chargement" class="discret">Dessin des pages…</p>
     <p v-if="erreur" class="ko">PDF illisible : {{ erreur }}</p>
+    <p v-if="automatiques?.length" class="discret legende">
+      <span class="echantillon auto"></span> déjà masqué par les termes ou l'extracteur (non modifiable) ·
+      <span class="echantillon"></span> zones tracées à la main
+    </p>
     <div v-for="(page, i) in pages" :key="page.url" class="page-zones">
       <p class="discret">
         Page {{ i + 1 }} :
@@ -152,10 +160,14 @@ const pourcent = (v: number) => `${(v * 100).toFixed(3)}%`
         @pointercancel="finir"
       >
         <img :src="page.url" alt="" draggable="false">
+        <div
+          v-for="(z, index) in (automatiques ?? []).filter((z) => z.page === i + 1)" :key="`auto-${index}`"
+          class="auto" :style="cadre(z)"
+        ></div>
         <template v-for="(z, index) in modelValue" :key="index">
           <div
             v-if="z.page === i + 1" class="zone" :class="{ choisie: choisie === index }"
-            :style="{ left: pourcent(z.x0), top: pourcent(z.y0), width: pourcent(z.x1 - z.x0), height: pourcent(z.y1 - z.y0) }"
+            :style="cadre(z)"
             @pointerdown="commencer($event, i + 1, 'deplacer', index)"
           >
             <button
@@ -189,6 +201,26 @@ const pourcent = (v: number) => `${(v * 100).toFixed(3)}%`
   width: 100%;
   height: 100%;
   pointer-events: none;
+}
+.auto {
+  position: absolute;
+  pointer-events: none;
+  background: repeating-linear-gradient(45deg, rgb(37 99 235 / 0.55) 0 4px, rgb(37 99 235 / 0.2) 4px 8px);
+  outline: 1px solid rgb(37 99 235);
+}
+.legende {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.echantillon {
+  display: inline-block;
+  width: 1.4rem;
+  height: 0.8rem;
+  background: rgb(0 0 0 / 0.65);
+}
+.echantillon.auto {
+  position: static;
 }
 .zone {
   position: absolute;

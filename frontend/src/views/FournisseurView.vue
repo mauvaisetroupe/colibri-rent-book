@@ -4,6 +4,7 @@ import { RouterLink, useRouter } from 'vue-router'
 
 import { api, ENERGIES, type ExtracteurEnregistre, type FactureAvecPdf, type Fournisseur, type ZoneSaisie } from '../api'
 import EditeurZones from '../components/EditeurZones.vue'
+import type { Zone } from '../extraction/masquage'
 import { dateFr } from '../format'
 
 // A supplier (ADR 0013, 0014): « confidentiel » (its invoices are never joined to a supporting document), and the
@@ -70,10 +71,21 @@ const zones = ref<ZoneSaisie[]>([])
 // The invoice the zones are drawn on, and its PDF
 const factureZones = ref<number | null>(null)
 const contenuZones = ref<Uint8Array | null>(null)
+// What the terms and its extractor already mask on that invoice
+const automatiques = ref<Zone[]>([])
 const zonesModifiees = computed(() => JSON.stringify(zones.value) !== JSON.stringify(fournisseur.value?.zones_masquees ?? []))
 
 watch(factureZones, async (id) => {
-  contenuZones.value = id === null ? null : new Uint8Array(await (await fetch(api.pdfUrl(id))).arrayBuffer())
+  automatiques.value = []
+  const contenu = id === null ? null : new Uint8Array(await (await fetch(api.pdfUrl(id))).arrayBuffer())
+  contenuZones.value = contenu
+  if (contenu && fournisseur.value) {
+    const { zonesAutomatiques } = await import('../extraction/navigateur')
+    const zones = await zonesAutomatiques(contenu.slice(), fournisseur.value.nom)
+    if (contenuZones.value === contenu) {
+      automatiques.value = zones
+    }
+  }
 })
 
 async function enregistrerZones() {
@@ -168,7 +180,7 @@ const editeur = (id: number) => ({ name: releve.value ? 'extracteur-releve' : 'e
           Annuler
         </button>
       </div>
-      <EditeurZones v-if="contenuZones" v-model="zones" :contenu="contenuZones" />
+      <EditeurZones v-if="contenuZones" v-model="zones" :contenu="contenuZones" :automatiques="automatiques" />
       <ul v-if="compte('a_verifier') || compte('a_faire')" class="a-verifier">
         <li v-for="f in aJoindre.filter((f) => f.annexe !== 'verifiee')" :key="f.id">
           <RouterLink :to="{ name: 'facture', params: { id: f.id } }">n° {{ f.numero }}</RouterLink>

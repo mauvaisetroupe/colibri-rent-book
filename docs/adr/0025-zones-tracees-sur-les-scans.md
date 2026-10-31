@@ -39,7 +39,8 @@ locataire sort blanche.
   Elles remplacent celles du fournisseur pour cette facture, et sont reprises quand sa version est refaite ; un
   nouveau PDF de la facture les efface (elles étaient tracées pour l'autre). On peut revenir à celles du fournisseur.
 - **L'éditeur de zones** (`EditeurZones.vue`) dessine les pages en couleur ; sur une page scannée, glisser trace une
-  zone, glisser une zone la déplace, son coin la redimensionne, × ou Suppr la retire ; de même sur une page de texte.
+  zone, glisser une zone la déplace, son coin la redimensionne, × ou Suppr la retire ; de même sur une page de texte. Ce
+  que masquent déjà les termes et l'extracteur y est hachuré en bleu, non modifiable : rien à tracer de nouveau.
 - **Chaque zone peinte dit son origine** dans `facture_annexe.zones` : `termes`, `extracteur`, `modele` (le
   fournisseur) ou `main` (la facture).
 - **`redactions()` ne rend plus que du texte** (`{ text }`, `{ pattern }`), pour les pages de texte ; les zones fixes

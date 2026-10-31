@@ -9,7 +9,8 @@ import {
   type RegularisationTouchee, type ZoneSaisie,
 } from '../api'
 import EditeurZones from '../components/EditeurZones.vue'
-import { preparerAnnexe } from '../extraction/navigateur'
+import type { Zone } from '../extraction/masquage'
+import { preparerAnnexe, zonesAutomatiques } from '../extraction/navigateur'
 import { dateFr, depuisGrille, euros, ligneVide, nombreApi, nombreFr, versGrille, type LigneGrille } from '../format'
 
 const props = defineProps<{ id: number }>()
@@ -336,7 +337,7 @@ async function signalerProbleme() {
 // Its version was made from a scan: masked by zones drawn by hand only; on a page of text, they are added to the terms
 const scannee = computed(() => copieAJour.value && !!annexe.value?.pages_scannees.length)
 // The zones being adjusted, in a window over the pages of the PDF
-const zonesFacture = ref<{ zones: ZoneSaisie[], contenu: Uint8Array } | null>(null)
+const zonesFacture = ref<{ zones: ZoneSaisie[], contenu: Uint8Array, automatiques: Zone[] } | null>(null)
 const fenetreZones = ref<HTMLDialogElement | null>(null)
 
 async function ajusterZones() {
@@ -346,8 +347,13 @@ async function ajusterZones() {
       fetch(api.pdfUrl(props.id)).then(async (r) => new Uint8Array(await r.arrayBuffer())),
       api.fournisseur(facture.value!.fournisseur_id),
     ])
-    zonesFacture.value = { contenu, zones: (facture.value!.zones_masquees ?? fournisseur.zones_masquees).map((z) => ({ ...z })) }
+    zonesFacture.value = { contenu, zones: (facture.value!.zones_masquees ?? fournisseur.zones_masquees).map((z) => ({ ...z })), automatiques: [] }
     fenetreZones.value?.showModal()
+    // What the terms and the extractor already mask, shown in the editor: not to be drawn again
+    const automatiques = await zonesAutomatiques(contenu.slice(), facture.value!.fournisseur)
+    if (zonesFacture.value?.contenu === contenu) {
+      zonesFacture.value.automatiques = automatiques
+    }
   } catch (e) {
     message.value = { texte: (e as Error).message, type: 'erreur' }
   }
@@ -768,7 +774,7 @@ onBeforeUnmount(() => {
         <button v-if="facture.zones_masquees" type="button" @click="enregistrerZones(null)">Revenir aux zones du fournisseur</button>
         <button type="button" @click="fermerZones">Annuler</button>
       </div>
-      <EditeurZones v-model="zonesFacture.zones" :contenu="zonesFacture.contenu" />
+      <EditeurZones v-model="zonesFacture.zones" :contenu="zonesFacture.contenu" :automatiques="zonesFacture.automatiques" />
     </template>
   </dialog>
 </template>

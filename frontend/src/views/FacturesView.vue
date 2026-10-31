@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
-import { api, ApiError, ENERGIES, STATUTS, type Energie, type ExtracteurEnregistre, type FactureResumee } from '../api'
+import { api, ApiError, ENERGIES, STATUTS, type Energie, type EtatAnnexe, type ExtracteurEnregistre, type FactureResumee } from '../api'
 import type { Candidat } from '../extraction/navigateur'
 import { dateFr, euros, nombreApi } from '../format'
 import { useImmeuble } from '../immeuble'
@@ -69,10 +69,23 @@ const remplacees = computed(() => factures.value.filter((f) => f.statut === 'rem
 const seulementAPayer = ref(false)
 const aPayer = (f: FactureResumee) => f.statut === 'validee' && Number(f.reste) > 0
 
+// Its tenant version (ADR 0024): to make or to check before it is joined to a supporting document
+const seulementMasquage = ref(false)
+const masquageAFaire = (f: FactureResumee) => f.statut !== 'remplacee' && (f.annexe === 'a_faire' || f.annexe === 'a_verifier')
+const nbMasquage = computed(() => factures.value.filter(masquageAFaire).length)
+const MASQUAGE: Record<EtatAnnexe, { texte: string, classe: string, titre: string }> = {
+  verifiee: { texte: '✓ validé', classe: 'ok', titre: 'Version locataire contrôlée : jointe aux justificatifs' },
+  a_verifier: { texte: 'à contrôler', classe: 'ko', titre: 'Version locataire à contrôler (onglet « Version locataire »)' },
+  a_faire: { texte: 'à créer', classe: 'ko', titre: 'Version locataire pas encore créée' },
+  confidentiel: { texte: 'confidentielle', classe: 'discret', titre: 'Fournisseur confidentiel : jamais jointe' },
+  sans_pdf: { texte: '—', classe: 'discret', titre: 'Pas de PDF : rien à joindre' },
+}
+
 const affichees = computed(() =>
   factures.value.filter((f) =>
     (!energie.value || f.energie === energie.value) && (!annee.value || f.date_facture?.startsWith(annee.value))
-    && (voirRemplacees.value || f.statut !== 'remplacee') && (!seulementAPayer.value || aPayer(f))),
+    && (voirRemplacees.value || f.statut !== 'remplacee') && (!seulementAPayer.value || aPayer(f))
+    && (!seulementMasquage.value || masquageAFaire(f))),
 )
 const nbAPayer = computed(() => factures.value.filter(aPayer).length)
 
@@ -316,6 +329,9 @@ const periode = (f: FactureResumee) => (f.debut && f.fin ? `${dateFr(f.debut)} �
     <label v-if="nbAPayer" class="discret" title="Validées, sans mouvement bancaire qui les règle en entier (rattacher dans Banque ou depuis la facture)">
       <input v-model="seulementAPayer" type="checkbox"> Seulement celles à payer ({{ nbAPayer }})
     </label>
+    <label v-if="nbMasquage" class="discret" title="Version locataire à créer ou à contrôler avant d'être jointe aux justificatifs">
+      <input v-model="seulementMasquage" type="checkbox"> Seulement celles dont le masquage est à contrôler ({{ nbMasquage }})
+    </label>
   </section>
 
   <table class="liste">
@@ -331,6 +347,7 @@ const periode = (f: FactureResumee) => (f.debut && f.fin ? `${dateFr(f.debut)} �
         <th>Total</th>
         <th>Statut</th>
         <th>Payée</th>
+        <th title="Version locataire jointe aux justificatifs (noms, adresses, comptes masqués)">Masquage</th>
         <th>PDF</th>
       </tr>
     </thead>
@@ -346,6 +363,7 @@ const periode = (f: FactureResumee) => (f.debut && f.fin ? `${dateFr(f.debut)} �
         <td :class="f.total_ok ? 'ok' : 'ko'">{{ f.total_ok ? '✓' : f.montant_ttc === null ? '✗ total à saisir' : '✗ écart' }}</td>
         <td><span class="pastille" :class="f.statut">{{ STATUTS[f.statut] }}</span></td>
         <td :class="paiement(f).classe" :title="paiement(f).titre">{{ paiement(f).texte }}</td>
+        <td :class="MASQUAGE[f.annexe].classe" :title="MASQUAGE[f.annexe].titre">{{ f.statut === 'remplacee' ? '' : MASQUAGE[f.annexe].texte }}</td>
         <td>
           <a v-if="f.pdf" :href="api.pdfUrl(f.id)" target="_blank" title="Ouvrir le PDF" @click.stop>PDF</a>
           <span v-else class="discret" title="Pas de PDF : le joindre depuis la facture">—</span>

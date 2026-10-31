@@ -157,27 +157,35 @@ async function scanneesDe(pdf: pdfjs.PDFDocumentProxy): Promise<number[]> {
 /** Zones drawn by hand for the scans of an invoice: its own (`main`), or else those of its supplier (`modele`). */
 export type ZonesDesScans = { zones: ZoneSaisie[], origine: 'modele' | 'main' }
 
+type ExtracteurLu = { classe: ClasseExtracteur, reglages: Reglages }
+
+/** The zones of an open PDF (see `masquage`), and its scanned pages. */
+async function zonesDu(pdf: pdfjs.PDFDocumentProxy, termes: string[], extracteur: ExtracteurLu | null, scans: ZonesDesScans) {
+  const pieces = await morceaux(pdf)
+  const pages: PageLue[] = []
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const { width, height } = (await pdf.getPage(n)).getViewport({ scale: 1 })
+    pages.push({ largeur: width, hauteur: height, morceaux: pieces[n - 1] ?? [] })
+  }
+  const scannees = await scanneesDe(pdf)
+  const zones = masquage(pages, extracteur?.reglages ?? REGLAGES_PAR_DEFAUT, termes, extracteur?.classe ?? null,
+    { pages: scannees, ...scans })
+  return { zones, scannees }
+}
+
 /**
  * The copy of a PDF joined to the supporting documents: on its pages of text, the masked terms and the redactions of
  * an extractor (with its grouping settings) found in its text, but not on its scanned pages; on every page, the zones
  * drawn by hand. Every page in images, the zones painted black.
  */
 export async function copieEnImages(
-  contenu: Uint8Array, termes: string[], extracteur: { classe: ClasseExtracteur, reglages: Reglages } | null,
+  contenu: Uint8Array, termes: string[], extracteur: ExtracteurLu | null,
   scans: ZonesDesScans = { zones: [], origine: 'modele' },
 ): Promise<{ pdf: Uint8Array, zones: Zone[], scannees: number[] }> {
   const chargement = ouvrir(contenu)
   try {
     const pdf = await chargement.promise
-    const pieces = await morceaux(pdf)
-    const pages: PageLue[] = []
-    for (let n = 1; n <= pdf.numPages; n++) {
-      const { width, height } = (await pdf.getPage(n)).getViewport({ scale: 1 })
-      pages.push({ largeur: width, hauteur: height, morceaux: pieces[n - 1] ?? [] })
-    }
-    const scannees = await scanneesDe(pdf)
-    const zones = masquage(pages, extracteur?.reglages ?? REGLAGES_PAR_DEFAUT, termes, extracteur?.classe ?? null,
-      { pages: scannees, ...scans })
+    const { zones, scannees } = await zonesDu(pdf, termes, extracteur, scans)
     return { pdf: await pdfEnImages(await pagesEnImages(pdf, zones)), zones, scannees }
   } finally {
     await chargement.destroy()
@@ -205,6 +213,22 @@ export async function preparerAnnexe(
   return api.envoyerAnnexe(facture.id, pdf, {
     zones, extracteur_id: enregistre?.id ?? null, termes, reglages: REGLAGES_ANNEXE, pages_scannees: scannees,
   })
+}
+
+/**
+ * What the masked terms and the last extractor of a supplier mask on a PDF, without the zones drawn by hand: shown in
+ * the editor of zones, where there is no need to draw them again.
+ */
+export async function zonesAutomatiques(contenu: Uint8Array, fournisseur: string): Promise<Zone[]> {
+  const [termes, extracteurs] = await Promise.all([api.termesMasques(), api.extracteurs()])
+  const enregistre = extracteurDuFournisseur(fournisseur, extracteurs)
+  const chargement = ouvrir(contenu)
+  try {
+    return (await zonesDu(await chargement.promise, termes,
+      enregistre ? { classe: extracteurDe(enregistre), reglages: enregistre.reglages } : null, { zones: [], origine: 'modele' })).zones
+  } finally {
+    await chargement.destroy()
+  }
 }
 
 /** A page drawn for the editor of zones: its image, its size in points, whether it is a scan (ADR 0025). */
