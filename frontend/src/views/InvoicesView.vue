@@ -35,7 +35,9 @@ type ManualInvoice = {
 }
 
 const router = useRouter()
-const { immeubleId: building, pret: ready } = useImmeuble()
+const { immeubles: buildings, immeubleId: building, pret: ready } = useImmeuble()
+// The building an invoice goes to: the one chosen in the menu, shown again where invoices are dropped or typed
+const buildingName = (id: number | null) => buildings.value.find((b) => b.id === id)?.nom ?? ''
 const invoices = ref<FactureResumee[]>([])
 const error = ref<string | null>(null)
 const results = ref<ImportResult[]>([])
@@ -127,11 +129,12 @@ async function importFiles(files: FileList | File[] | null) {
     error.value = (e as Error).message
     return
   }
-  // One at a time, in the order given: results appear as they come
+  // One at a time, in the order given: results appear as they come; all into the building chosen when dropped
+  const target = building.value
   for (const file of Array.from(files)) {
     const result: ImportResult = { file: file.name, status: 'reading', message: 'Lecture…' }
     results.value.unshift(result)
-    await readAndImport(result, file, extractors, undefined, terms)
+    await readAndImport(result, file, extractors, undefined, terms, target)
     results.value = [...results.value]
   }
   await load()
@@ -143,6 +146,7 @@ async function importFiles(files: FileList | File[] | null) {
  */
 async function readAndImport(
   result: ImportResult, file: File, extractors: ExtracteurEnregistre[], chosen?: Candidat, terms?: string[],
+  target: number = building.value!,
 ) {
   const fail = (message: string) => Object.assign(result, { status: 'error', message, toType: file, choice: undefined })
   // pdf.js is loaded with the first import only
@@ -172,7 +176,7 @@ async function readAndImport(
     return
   }
   try {
-    const { facture: invoice, controle: checks } = await api.importer(building.value!, file, draft)
+    const { facture: invoice, controle: checks } = await api.importer(target, file, draft)
     let copy = ''
     if (invoice.annexe === 'a_faire') {
       try {
@@ -188,7 +192,7 @@ async function readAndImport(
       status: 'imported',
       id: invoice.id,
       choice: undefined,
-      message: `${invoice.fournisseur} n° ${invoice.numero} : brouillon créé`
+      message: `${invoice.fournisseur} n° ${invoice.numero} : brouillon créé dans ${buildingName(target)}`
         + (checks.validable ? '' : ' (contrôles en erreur)') + copy,
     })
   } catch (e) {
@@ -272,6 +276,11 @@ async function create() {
     @dragleave="dragOver = false"
     @drop.prevent="drop"
   >
+    <label class="immeuble-import">Importer dans
+      <select v-model="building">
+        <option v-for="b in buildings" :key="b.id" :value="b.id">{{ b.nom }}</option>
+      </select>
+    </label>
     <p>Déposer des factures PDF ici, ou</p>
     <label class="bouton">
       Choisir des fichiers…
@@ -295,6 +304,11 @@ async function create() {
 
   <form v-if="manual" class="formulaire" @submit.prevent="create">
     <strong>Nouvelle facture {{ manual.file ? `(PDF joint : ${manual.file.name})` : 'sans PDF' }}</strong>
+    <label>Immeuble
+      <select v-model="building" required>
+        <option v-for="b in buildings" :key="b.id" :value="b.id">{{ b.nom }}</option>
+      </select>
+    </label>
     <label>Fournisseur <input v-model="manual.fournisseur" list="suppliers" size="16" required></label>
     <datalist id="suppliers">
       <option v-for="s in suppliers" :key="s" :value="s" />
@@ -406,3 +420,25 @@ async function create() {
     </Column>
   </DataTable>
 </template>
+
+<style scoped>
+/* The building the invoices go to: hard to miss, at the top of the drop zone */
+.immeuble-import {
+  display: flex;
+  width: fit-content;
+  margin: 0 auto 0.8rem;
+  padding: 0.5rem 0.9rem;
+  gap: 0.6rem;
+  align-items: center;
+  font-size: 1.15rem;
+  font-weight: 600;
+  background: var(--fond-avertissement);
+  border: 1px solid var(--bord);
+  border-radius: 6px;
+}
+
+.immeuble-import select {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+</style>
