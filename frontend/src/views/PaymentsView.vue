@@ -79,9 +79,9 @@ const rows = computed(() => [...payments.value]
   .map((p) => ({ ...p, amount: total(p), stay_status: stayStatus(p), bank_status: bankStatus(p) })))
 type Row = (typeof rows.value)[number]
 
-// The tenants still there by default; dates as the API gives them (2026-03-17)
+// No filter by default, the list in pages; dates as the API gives them (2026-03-17)
 const defaultFilters = (): Filters => ({
-  date_paiement: contains(), locataire: equals(), stay_status: equals('current'), mois: contains(), amount: contains(),
+  date_paiement: contains(), locataire: equals(), stay_status: equals(), mois: contains(), amount: contains(),
   bank_status: equals(), loyer: contains(), provision: contains(), regularisation: contains(), mode: equals(),
   note: contains(),
 })
@@ -89,7 +89,7 @@ const filters = ref<Filters>(defaultFilters())
 const table = ref<FilteredTable<Row>>(null)
 const shown = computed(() => table.value?.processedData ?? [])
 
-// Totals of the payments shown
+// Totals of the payments shown, every page
 const totals = computed(() => {
   const sum = (field: (p: Paiement) => string) => shown.value.reduce((t, p) => t.plus(field(p)), new Big(0)).toFixed(2)
   return { amount: sum(total), rent: sum((p) => p.loyer), provision: sum((p) => p.provision),
@@ -177,12 +177,13 @@ async function remove(id: number) {
 
   <section class="filtres">
     <span class="discret">{{ shown.length }} paiement(s) affiché(s) sur {{ rows.length }}</span>
-    <button type="button" class="lien" @click="filters = defaultFilters()">Filtres par défaut (locataires en cours)</button>
+    <button type="button" class="lien" @click="filters = defaultFilters()">Effacer les filtres</button>
   </section>
 
   <!-- Short columns at a fixed width; the tenant and the note take the rest -->
   <DataTable
     ref="table" v-model:filters="filters" :value="rows" data-key="id" filter-display="row" size="small"
+    paginator :rows="25" :rows-per-page-options="[25, 50, 100, 500]"
     state-storage="session" :state-key="stateKey('payments')" class="clickable" @row-click="edit($event.data)"
     @state-restore="filters = withDefaults(defaultFilters(), $event.filters)"
   >
