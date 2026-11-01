@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import Menu from 'openvue/menu'
 import Menubar from 'openvue/menubar'
 import type { MenuItem } from 'openvue/menuitem'
 import { computed, onMounted, ref } from 'vue'
@@ -12,7 +11,7 @@ const { buildings, immeubleId } = useImmeuble()
 const route = useRoute()
 
 // The menu follows the cycle of an exercise (OpenVue Menubar): one group per step, its screens in a sub-menu; the
-// screens set once (buildings, company, providers) sit in « Réglages », at the right of the bar
+// screens set once (buildings, company, providers) sit in « Réglages », the last group, with the version running
 type Entree = { label: string, icon: string, route?: string, items?: Entree[] }
 const GROUPES: { label: string, icon: string, items: Entree[] }[] = [
   {
@@ -52,7 +51,7 @@ const REGLAGES: Entree[] = [
 
 // The current screen: the most precise route of the menu the path starts with (/banque/releves is not /banque)
 const routes = (entrees: Entree[]): string[] => entrees.flatMap((e) => [...(e.route ? [e.route] : []), ...routes(e.items ?? [])])
-const TOUTES = ['/', ...routes(GROUPES.flatMap((g) => g.items)), '/immeuble', '/societe', '/fournisseurs']
+const TOUTES = ['/', ...routes([...GROUPES.flatMap((g) => g.items), ...REGLAGES])]
 const current = computed(() => TOUTES
   .filter((r) => (r === '/' ? route.path === '/' : route.path === r || route.path.startsWith(`${r}/`)))
   .sort((a, b) => b.length - a.length)[0] ?? null)
@@ -63,10 +62,6 @@ const contientActif = (e: Entree): boolean => (e.route ? actif(e.route) : false)
 const element = (e: Entree): MenuItem => ({
   ...e, class: { actif: contientActif(e) }, items: e.items?.map(element),
 })
-const menu = computed<MenuItem[]>(() => [
-  { label: 'Accueil', icon: 'oi oi-home', route: '/', class: { actif: actif('/') } },
-  ...GROUPES.map((g) => element({ label: g.label, icon: g.icon, items: g.items })),
-])
 
 /**
  * A sub-menu (Banque) opens when hovered: the click that follows must not close it again. Without hover (touch screen),
@@ -89,15 +84,20 @@ onMounted(async () => {
   version.value = (await api.sante().catch(() => null))?.version ?? null
 })
 
-const settings = ref<InstanceType<typeof Menu> | null>(null)
-const menuReglages = computed<MenuItem[]>(() => [
-  ...REGLAGES.map((r) => ({ ...r, class: { actif: actif(r.route!) } })),
-  { separator: true },
-  version.value && version.value !== 'dev'
-    ? { label: `version ${version.value}`, icon: 'oi oi-github', url: versionUrl(version.value), target: '_blank', class: 'version' }
-    : { label: 'version de développement', disabled: true, class: 'version' },
+const menu = computed<MenuItem[]>(() => [
+  { label: 'Accueil', icon: 'oi oi-home', route: '/', class: { actif: actif('/') } },
+  ...GROUPES.map((g) => element({ label: g.label, icon: g.icon, items: g.items })),
+  {
+    ...element({ label: 'Réglages', icon: 'oi oi-cog', items: REGLAGES }),
+    items: [
+      ...REGLAGES.map(element),
+      { separator: true },
+      version.value && version.value !== 'dev'
+        ? { label: `version ${version.value}`, icon: 'oi oi-github', url: versionUrl(version.value), target: '_blank', class: 'version' }
+        : { label: 'version de développement', disabled: true, class: 'version' },
+    ],
+  },
 ])
-const reglageActif = computed(() => REGLAGES.some((r) => actif(r.route!)))
 </script>
 
 <template>
@@ -123,6 +123,10 @@ const reglageActif = computed(() => REGLAGES.some((r) => actif(r.route!)))
             <span>{{ item.label }}</span>
           </a>
         </RouterLink>
+        <a v-else-if="item.url" v-bind="props.action" :href="item.url" :target="item.target">
+          <span :class="item.icon" />
+          <span>{{ item.label }}</span>
+        </a>
         <a v-else v-bind="props.action" @click="garderOuvert($event, root)">
           <span :class="item.icon" />
           <span>{{ item.label }}</span>
@@ -135,24 +139,6 @@ const reglageActif = computed(() => REGLAGES.some((r) => actif(r.route!)))
           <select v-if="buildings.length > 1" v-model="immeubleId" class="choix-immeuble" aria-label="Immeuble">
             <option v-for="i in buildings" :key="i.id" :value="i.id">{{ i.name }}</option>
           </select>
-          <button
-            type="button" class="reglages-bouton" :class="{ actif: reglageActif }" aria-haspopup="true"
-            @click="settings?.toggle($event)"
-          ><span class="oi oi-cog" /><span class="reglages-texte"> Réglages</span> <span class="oi oi-angle-down" /></button>
-          <Menu ref="reglages" :model="menuReglages" :popup="true">
-            <template #item="{ item, props }">
-              <RouterLink v-if="item.route" v-slot="{ href, navigate }" :to="item.route" custom>
-                <a :href="href" v-bind="props.action" @click="navigate">
-                  <span :class="item.icon" />
-                  <span>{{ item.label }}</span>
-                </a>
-              </RouterLink>
-              <a v-else v-bind="props.action" :href="item.url" :target="item.target">
-                <span :class="item.icon" />
-                <span>{{ item.label }}</span>
-              </a>
-            </template>
-          </Menu>
         </div>
       </template>
     </Menubar>

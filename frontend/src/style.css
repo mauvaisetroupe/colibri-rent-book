@@ -95,7 +95,7 @@ h1 {
   margin-left: 0.1rem;
 }
 
-/* Right of the bar: choice of building (when there are several), « Réglages » menu with the version running */
+/* Right of the bar: choice of building (when there are several) */
 .droite {
   display: flex;
   align-items: center;
@@ -106,35 +106,8 @@ h1 {
   max-width: 13rem;
 }
 
-.reglages-bouton {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  white-space: nowrap;
-}
-
-.reglages-bouton.actif {
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.reglages-bouton .oi-angle-down {
-  font-size: 0.7rem;
-}
-
-/* A narrow screen: the settings menu shows its icon only */
-@media (max-width: 1300px) {
-  .reglages-texte {
-    display: none;
-  }
-}
-
-.p-menu .actif > .p-menu-item-content {
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.p-menu .version {
+/* The version running, at the bottom of « Réglages » */
+.barre .menu .version {
   font-size: 0.8rem;
 }
 
